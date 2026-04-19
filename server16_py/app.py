@@ -132,8 +132,10 @@ class Server16App(tk.Tk):
         self.progress_value = None
         self.stadium_loading_modal = None
         self.stadium_loading_title = None
+        self.stadium_loading_info = None
         self.stadium_loading_name = None
         self.stadium_loading_detail = None
+        self.stadium_loading_progress_text = None
         self.stadium_loading_value = None
         self.stadium_loading_bar = None
         self._stadium_loading_hwnd = 0
@@ -147,10 +149,13 @@ class Server16App(tk.Tk):
         self._audio_details: dict[str, str] = {}
         self._team_logo_labels: dict[str, tk.Label] = {}
         self._team_logo_images: dict[str, ImageTk.PhotoImage | None] = {}
+        self._stadium_preview_frame = None
+        self._stadium_preview_body_anchor = None
         self._stadium_preview_label = None
         self._stadium_preview_image: ImageTk.PhotoImage | None = None
         self.stadium_loading_preview = None
         self._stadium_loading_image: ImageTk.PhotoImage | None = None
+        self._stadium_loading_preview_visible = True
         self._settings_editors: dict[str, SettingsAreaEditor] = {}
         self._camera_presets: list[CameraPreset] = []
         self._camera_presets_by_name: dict[str, CameraPreset] = {}
@@ -304,7 +309,23 @@ class Server16App(tk.Tk):
             foreground=[("selected", self.fg), ("active", self.fg)],
         )
         style.configure("TCombobox", fieldbackground=self.panel_alt, background=self.panel_alt, foreground=self.fg, arrowcolor=self.fg)
-        style.configure("Accent.Horizontal.TProgressbar", troughcolor=self.card_soft, background=self.accent, borderwidth=0, lightcolor=self.accent, darkcolor=self.accent)
+        style.configure(
+            "Accent.Horizontal.TProgressbar",
+            troughcolor=self.card_soft,
+            background=self.accent,
+            borderwidth=0,
+            lightcolor=self.accent,
+            darkcolor=self.accent,
+        )
+        style.configure(
+            "LoadingStadium.Horizontal.TProgressbar",
+            troughcolor=self.card_soft,
+            background=self.accent,
+            borderwidth=0,
+            lightcolor=self.accent,
+            darkcolor=self.accent,
+            thickness=14,
+        )
 
     def _install_exception_hook(self) -> None:
         def report(exc_type, exc_value, exc_tb):
@@ -481,7 +502,7 @@ class Server16App(tk.Tk):
         modal.overrideredirect(True)
         modal.attributes("-topmost", True)
         modal.configure(bg=self.card)
-        modal_frame = tk.Frame(modal, bg=self.card, highlightthickness=1, highlightbackground="#2a3c59", padx=14, pady=12)
+        modal_frame = tk.Frame(modal, bg=self.card, highlightthickness=1, highlightbackground="#2a3c59", padx=12, pady=10)
         modal_frame.pack(fill="both", expand=True)
         self.stadium_loading_modal = modal
         self.stadium_loading_title = tk.Label(
@@ -504,37 +525,50 @@ class Server16App(tk.Tk):
             highlightthickness=1,
             highlightbackground="#243654",
         )
-        self.stadium_loading_preview.pack(fill="x", pady=(8, 8), ipady=24)
+        self.stadium_loading_preview.pack(fill="x", pady=(6, 8), ipady=8)
+        info_frame = tk.Frame(modal_frame, bg=self.card)
+        info_frame.pack(fill="x")
+        self.stadium_loading_info = info_frame
         self.stadium_loading_name = tk.Label(
-            modal_frame,
+            info_frame,
             text="-",
             bg=self.card,
             fg=self.fg,
             font=("Bahnschrift", 11, "bold"),
             anchor="w",
         )
-        self.stadium_loading_name.pack(fill="x", pady=(6, 4))
+        self.stadium_loading_name.pack(fill="x")
         self.stadium_loading_detail = tk.Label(
-            modal_frame,
+            info_frame,
             text="Preparing stadium assets",
             bg=self.card,
             fg=self.muted,
             font=("Bahnschrift", 9),
             anchor="w",
             justify="left",
+            wraplength=312,
         )
-        self.stadium_loading_detail.pack(fill="x", pady=(0, 8))
+        self.stadium_loading_detail.pack(fill="x", pady=(2, 6))
         self.stadium_loading_value = tk.DoubleVar(value=0)
         self.stadium_loading_bar = ttk.Progressbar(
-            modal_frame,
+            info_frame,
             maximum=100,
             variable=self.stadium_loading_value,
-            style="Accent.Horizontal.TProgressbar",
+            style="LoadingStadium.Horizontal.TProgressbar",
             mode="determinate",
             length=292,
         )
-        self.stadium_loading_bar.pack(fill="x", pady=(2, 0))
-        modal.geometry("340x274")
+        self.stadium_loading_bar.pack(fill="x", pady=(4, 3))
+        self.stadium_loading_progress_text = tk.Label(
+            info_frame,
+            text="0%",
+            bg=self.card,
+            fg=self.accent,
+            font=("Consolas", 10, "bold"),
+            anchor="w",
+        )
+        self.stadium_loading_progress_text.pack(fill="x")
+        modal.geometry("340x252")
 
     def _show_stadium_loading_modal(self, stadium_name: str, detail: str = "Preparing stadium assets", progress: float = 0.0) -> None:
         if self.stadium_loading_modal is None:
@@ -547,6 +581,8 @@ class Server16App(tk.Tk):
             self.stadium_loading_detail.configure(text=detail)
         if self.stadium_loading_value is not None:
             self.stadium_loading_value.set(max(0, min(100, progress)))
+        if self.stadium_loading_progress_text is not None:
+            self.stadium_loading_progress_text.configure(text=f"{int(max(0, min(100, progress)))}%")
         self._stadium_loading_restore_fullscreen = self._is_probable_fullscreen_window(self._fifa_hwnd)
         self._stadium_loading_visible = True
         self._position_stadium_loading_modal()
@@ -583,25 +619,29 @@ class Server16App(tk.Tk):
             self.stadium_loading_value.set(max(0, min(100, value)))
         if self.stadium_loading_detail is not None:
             self.stadium_loading_detail.configure(text=detail)
+        if self.stadium_loading_progress_text is not None:
+            self.stadium_loading_progress_text.configure(text=f"{int(max(0, min(100, value)))}%")
         if self._stadium_loading_visible:
             self._position_stadium_loading_modal()
             self.stadium_loading_modal.update_idletasks()
+            self.stadium_loading_modal.update()
 
     def _position_stadium_loading_modal(self) -> None:
         if self.stadium_loading_modal is None:
             return
         window = self._window()
         window.update_idletasks()
+        modal_height = 252 if self._stadium_loading_preview_visible else 148
         if self._overlay_visible and self._fifa_hwnd:
             rect = RECT()
             if self.user32.GetWindowRect(self._fifa_hwnd, ctypes.byref(rect)):
                 x = rect.left + 24
                 y = rect.top + 24
-                self.stadium_loading_modal.geometry(f"340x274+{x}+{y}")
+                self.stadium_loading_modal.geometry(f"340x{modal_height}+{x}+{y}")
                 return
         root_x = window.winfo_rootx()
         root_y = window.winfo_rooty()
-        self.stadium_loading_modal.geometry(f"340x274+{root_x + 24}+{root_y + 24}")
+        self.stadium_loading_modal.geometry(f"340x{modal_height}+{root_x + 24}+{root_y + 24}")
 
     def _card(self, parent: tk.Misc, title: str, subtitle: str = "") -> tk.Frame:
         card = tk.Frame(parent, bg=self.card, bd=0, highlightthickness=1, highlightbackground="#243654")
@@ -704,7 +744,7 @@ class Server16App(tk.Tk):
             if root in seen:
                 continue
             seen.add(root)
-            preview_dir = root / stadium_name / "render" / "thumbnail"
+            preview_dir = root / stadium_name / "render" / "thumbnail" / "stadium"
             if not preview_dir.exists():
                 continue
             for candidate in sorted(preview_dir.glob("stadium.*")):
@@ -723,15 +763,24 @@ class Server16App(tk.Tk):
             return None
 
     def _update_stadium_preview(self, stadium_name: str) -> None:
+        frame = self._stadium_preview_frame
         label = self._stadium_preview_label
         if label is None:
             return
         self._stadium_preview_image = None
         image_path = self._resolve_stadium_preview_path(stadium_name)
-        photo = self._load_preview_photo(image_path, (340, 190))
+        photo = self._load_preview_photo(image_path, (520, 340))
         if photo is None:
+            if frame is not None:
+                frame.pack_forget()
             label.configure(image="", text="STADIUM\nPREVIEW", compound="center")
             return
+        if frame is not None and not frame.winfo_manager():
+            pack_kwargs = {"fill": "x", "padx": 10, "pady": (4, 8)}
+            if self._stadium_preview_body_anchor is not None:
+                frame.pack(before=self._stadium_preview_body_anchor, **pack_kwargs)
+            else:
+                frame.pack(**pack_kwargs)
         self._stadium_preview_image = photo
         label.configure(image=photo, text="", compound="center")
 
@@ -741,23 +790,43 @@ class Server16App(tk.Tk):
             return
         self._stadium_loading_image = None
         image_path = self._resolve_stadium_preview_path(stadium_name)
-        photo = self._load_preview_photo(image_path, (300, 138))
+        photo = self._load_preview_photo(image_path, (250, 110))
         if photo is None:
-            label.configure(image="", text="STADIUM\nPREVIEW", compound="center")
+            if self._stadium_loading_preview_visible:
+                label.pack_forget()
+                self._stadium_loading_preview_visible = False
+                self._position_stadium_loading_modal()
+            label.configure(image="", text="", compound="center")
             return
+        if not self._stadium_loading_preview_visible:
+            pack_target = self.stadium_loading_info if self.stadium_loading_info is not None else self.stadium_loading_name
+            label.pack(fill="x", pady=(6, 8), ipady=8, before=pack_target)
+            self._stadium_loading_preview_visible = True
+            self._position_stadium_loading_modal()
         self._stadium_loading_image = photo
         label.configure(image=photo, text="", compound="center")
 
     def prepare_floating_window(self) -> tk.Misc:
         window = self._window()
-        if self._overlay_visible:
-            self._hide_overlay()
+        window.deiconify()
+        window.lift()
+        try:
+            window.focus_force()
+        except Exception:
+            pass
+        return window
+
+    def configure_secondary_window(self, window: tk.Toplevel) -> None:
         try:
             window.overrideredirect(False)
         except Exception:
             pass
         try:
-            window.attributes("-topmost", False)
+            window.transient(None)
+        except Exception:
+            pass
+        try:
+            window.attributes("-topmost", True)
         except Exception:
             pass
         window.deiconify()
@@ -766,8 +835,6 @@ class Server16App(tk.Tk):
             window.focus_force()
         except Exception:
             pass
-        self._launcher_mode = True
-        return window
 
     def _build_logo_placeholder_image(self, width: int = 116, height: int = 72) -> ImageTk.PhotoImage:
         image = Image.new("RGBA", (width, height), self.card_soft)
@@ -901,10 +968,12 @@ class Server16App(tk.Tk):
     def _build_stadium_card(self, parent: tk.Misc, row: int) -> None:
         card = self._card(parent, "STADIUM BAY", "Preview and loaded stadium details")
         card.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
-        card.configure(height=358)
+        card.configure(height=424)
         card.grid_propagate(False)
+        preview_frame = tk.Frame(card, bg=self.card)
+        preview_frame.pack(fill="x", padx=10, pady=(4, 8))
         preview = tk.Label(
-            card,
+            preview_frame,
             text="STADIUM\nPREVIEW",
             bg=self.card_soft,
             fg=self.muted,
@@ -914,10 +983,12 @@ class Server16App(tk.Tk):
             highlightthickness=1,
             highlightbackground="#243654",
         )
-        preview.pack(fill="x", padx=12, pady=(6, 10), ipady=40)
+        preview.pack(fill="x", ipady=80)
+        self._stadium_preview_frame = preview_frame
         self._stadium_preview_label = preview
         body = tk.Frame(card, bg=self.card)
         body.pack(fill="x", padx=12, pady=(0, 12))
+        self._stadium_preview_body_anchor = body
         body.grid_columnconfigure(0, weight=1)
         self._build_stat(body, 0, 0, "Current Stadium", "stadium", "-", value_wraplength=300, block_height=64)
         self._build_stat(body, 1, 0, "Stadium ID", "stadid", "-")
@@ -1429,7 +1500,6 @@ class Server16App(tk.Tk):
         return enabled
 
     def _open_settings_editor(self, editor_key: str, title: str, specs, initial_section: str | None = None) -> None:
-        self.prepare_floating_window()
         existing = self._settings_editors.get(editor_key)
         if existing is not None and existing.winfo_exists():
             existing.deiconify()

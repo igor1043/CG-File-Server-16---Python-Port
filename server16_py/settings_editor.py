@@ -18,7 +18,7 @@ class SectionSpec:
 
 class SettingsAreaEditor(tk.Toplevel):
     def __init__(self, app, title: str, specs: list[SectionSpec], initial_section: str | None = None) -> None:
-        owner = app._window() if hasattr(app, "_window") else app
+        owner = app if isinstance(app, tk.Tk) else getattr(app, "ui_root", None) or app
         super().__init__(owner)
         self.app = app
         self.specs = specs
@@ -26,13 +26,8 @@ class SettingsAreaEditor(tk.Toplevel):
         self.title(title)
         self.geometry("1120x700")
         self.minsize(1000, 640)
-        self.transient(owner)
-        self.deiconify()
-        self.lift()
-        try:
-            self.focus_force()
-        except Exception:
-            pass
+        if hasattr(app, "configure_secondary_window"):
+            app.configure_secondary_window(self)
         self.notebook = ttk.Notebook(self, style="Server16.TNotebook")
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         self.frames: dict[str, SettingsSectionFrame] = {}

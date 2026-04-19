@@ -65,7 +65,6 @@ class AssignmentRuntime:
     def assign_scoreboard(self) -> None:
         app = self.app
         self.refresh_context_for_assignment()
-        app.prepare_floating_window()
         dialog = ScoreboardDialog(app, app.exedir, default_scope=self.default_scope_for_scoreboard())
         app.wait_window(dialog)
         if not dialog.result:
@@ -94,7 +93,6 @@ class AssignmentRuntime:
     def assign_movie(self) -> None:
         app = self.app
         self.refresh_context_for_assignment()
-        app.prepare_floating_window()
         dialog = MovieDialog(app, app.exedir, default_scope=self.default_scope_for_movie())
         app.wait_window(dialog)
         if not dialog.result:
@@ -125,7 +123,6 @@ class AssignmentRuntime:
     def assign_stadium(self) -> None:
         app = self.app
         self.refresh_context_for_assignment()
-        app.prepare_floating_window()
         dialog = StadiumDialog(app, app.exedir, default_scope=self.default_scope_for_stadium())
         app.wait_window(dialog)
         if not dialog.result:
@@ -165,7 +162,6 @@ class AssignmentRuntime:
     def exclude_competition(self) -> None:
         app = self.app
         app.refresh_live_context(app.labels["page"].cget("text"))
-        app.prepare_floating_window()
         dialog = ExcludeDialog(app)
         app.wait_window(dialog)
         if not dialog.result:

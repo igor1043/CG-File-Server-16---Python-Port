@@ -91,6 +91,42 @@ When the tool opens:
 
 The application stores local settings in `runtime/settings.json`.
 
+## Stadium Preview Images
+
+The project supports optional preview images for stadiums.
+
+When present, these images are shown in:
+
+- the dashboard `Stadium Bay`
+- the `Assign Stadium` window under `Visual Details`
+- the `Loading Stadium` modal during stadium application
+
+To be detected correctly, the image must follow this folder layout:
+
+```text
+StadiumGBD/<stadium name>/render/thumbnail/stadium/stadium.png
+```
+
+or:
+
+```text
+StadiumGBD/<stadium name>/render/thumbnail/stadium/stadium.jpg
+StadiumGBD/<stadium name>/render/thumbnail/stadium/stadium.jpeg
+```
+
+Example:
+
+```text
+StadiumGBD/BRA - Maracana - Flamengo/render/thumbnail/stadium/stadium.jpg
+```
+
+Notes:
+
+- The `<stadium name>` folder must exactly match the stadium folder used by the assignment.
+- The file name must be `stadium` with one of the supported extensions: `.png`, `.jpg`, `.jpeg`, or `.jepg`.
+- If no preview image exists, the stadium still works normally; the preview area is simply hidden where applicable.
+- This structure is intended to make community stadium packs easy to organize and share.
+
 ## Building The EXE
 
 You can build the standalone executable with the included batch file:
