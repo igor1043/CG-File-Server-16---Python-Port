@@ -26,15 +26,13 @@ Place screenshots in `docs/images/` and update the links below.
 
 Main overlay:
 
-`docs/images/main-overlay.png`
+<img width="1007" height="667" alt="Screenshot_2" src="https://github.com/user-attachments/assets/9b533e22-21c2-46e2-adc0-a40a71e3ec3a" />
 
-Stadium assignment:
+<img width="1008" height="694" alt="Screenshot_1" src="https://github.com/user-attachments/assets/ed0296f2-a270-48c0-a0cf-91d90054891c" />
+`
 
-`docs/images/stadium-assign.png`
+<img width="1010" height="698" alt="Screenshot_3" src="https://github.com/user-attachments/assets/c3a08a83-bef0-4dd4-a445-336ea80be6ea" />
 
-Loading modal:
-
-`docs/images/loading-modal.png`
 
 These paths are reserved so contributors can add screenshots later without changing the documentation structure.
 
