@@ -1,0 +1,81 @@
+using System;
+using System.CodeDom.Compiler;
+using System.Configuration;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
+
+namespace Server16.Properties
+{
+	// Token: 0x02000017 RID: 23
+	[CompilerGenerated]
+	[GeneratedCode("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "12.0.0.0")]
+	internal sealed class Settings : ApplicationSettingsBase
+	{
+		// Token: 0x17000011 RID: 17
+		// (get) Token: 0x060000A7 RID: 167 RVA: 0x0000CA8C File Offset: 0x0000AC8C
+		public static Settings Default
+		{
+			get
+			{
+				return Settings.defaultInstance;
+			}
+		}
+
+		// Token: 0x17000012 RID: 18
+		// (get) Token: 0x060000A8 RID: 168 RVA: 0x0000CAA4 File Offset: 0x0000ACA4
+		// (set) Token: 0x060000A9 RID: 169 RVA: 0x000023B0 File Offset: 0x000005B0
+		[DebuggerNonUserCode]
+		[DefaultSettingValue("default")]
+		[UserScopedSetting]
+		public string FIFAEXE
+		{
+			get
+			{
+				return (string)this["FIFAEXE"];
+			}
+			set
+			{
+				this["FIFAEXE"] = value;
+			}
+		}
+
+		// Token: 0x17000013 RID: 19
+		// (get) Token: 0x060000AA RID: 170 RVA: 0x0000CAC8 File Offset: 0x0000ACC8
+		// (set) Token: 0x060000AB RID: 171 RVA: 0x000023C0 File Offset: 0x000005C0
+		[UserScopedSetting]
+		[DefaultSettingValue("False")]
+		[DebuggerNonUserCode]
+		public bool MOVCHECK
+		{
+			get
+			{
+				return (bool)this["MOVCHECK"];
+			}
+			set
+			{
+				this["MOVCHECK"] = value;
+			}
+		}
+
+		// Token: 0x17000014 RID: 20
+		// (get) Token: 0x060000AC RID: 172 RVA: 0x0000CAEC File Offset: 0x0000ACEC
+		// (set) Token: 0x060000AD RID: 173 RVA: 0x000023D5 File Offset: 0x000005D5
+		[DebuggerNonUserCode]
+		[DefaultSettingValue("False")]
+		[UserScopedSetting]
+		public bool Autorun
+		{
+			get
+			{
+				return (bool)this["Autorun"];
+			}
+			set
+			{
+				this["Autorun"] = value;
+			}
+		}
+
+		// Token: 0x040000F3 RID: 243
+		private static Settings defaultInstance = (Settings)SettingsBase.Synchronized(new Settings());
+	}
+}

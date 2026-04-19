@@ -1,0 +1,28 @@
+// C:\Users\igorv\OneDrive\Área de Trabalho\CG-Serverv1.2-Chants-Anthens\NAudio.dll
+// NAudio, Version=1.8.5.0, Culture=neutral, PublicKeyToken=null
+
+// Horário: 5BDDBC28 (03/11/2018 12:18:00)
+
+using System;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Permissions;
+
+[assembly: AssemblyVersion("1.8.5.0")]
+[assembly: CompilationRelaxations(8)]
+[assembly: RuntimeCompatibility(WrapNonExceptionThrows = true)]
+[assembly: Debuggable(DebuggableAttribute.DebuggingModes.IgnoreSymbolStoreSequencePoints)]
+[assembly: AssemblyTitle("NAudio")]
+[assembly: AssemblyDescription("NAudio .NET Audio Library")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("Mark Heath")]
+[assembly: AssemblyProduct("NAudio")]
+[assembly: AssemblyCopyright("© 2001-2018 Mark Heath")]
+[assembly: AssemblyTrademark("")]
+[assembly: InternalsVisibleTo("NAudioTests")]
+[assembly: ComVisible(false)]
+[assembly: Guid("e82fa7f0-f952-4d93-b7b0-392bbf53b2a4")]
+[assembly: AssemblyFileVersion("1.8.5.0")]
+[assembly: SecurityPermission(SecurityAction.RequestMinimum, SkipVerification = true)]

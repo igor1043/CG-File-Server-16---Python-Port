@@ -1,0 +1,203 @@
+using System;
+
+namespace Fifa_Server_Map
+{
+	// Token: 0x02000002 RID: 2
+	public class OFFSETS
+	{
+		// Token: 0x06000001 RID: 1 RVA: 0x0000222C File Offset: 0x0000042C
+		public static void getoffsets(string version)
+		{
+			if (version.Equals("1,0,0,0"))
+			{
+				OFFSETS.ORIPGBASE = 58757168L;
+				OFFSETS.ORIHTIDBASE = 56170408L;
+				OFFSETS.ORISTADIDBASE = 55673768L;
+				OFFSETS.ORITOURIDBASE = 56170408L;
+				OFFSETS.ORIFRIHTIDBASE = 57966104L;
+				OFFSETS.ORINETDEPTHBASE = 55697872L;
+				OFFSETS.STDNAMEBASE = 57964392L;
+				OFFSETS.GAMESTATSBASE = 56299464L;
+				OFFSETS.GAMESTARTEDBINARYBASE = 55490608L;
+			}
+		}
+
+		// Token: 0x06000003 RID: 3 RVA: 0x000022AC File Offset: 0x000004AC
+		static OFFSETS()
+		{
+			OFFSETS.NTCP = new long[]
+			{
+				644L
+			};
+			OFFSETS.NTTR = new long[]
+			{
+				624L
+			};
+			OFFSETS.HT = new long[]
+			{
+				504L,
+				3544L,
+				1712L,
+				80L,
+				276L,
+				280L
+			};
+			OFFSETS.HT2 = new long[]
+			{
+				656L,
+				920L,
+				200L,
+				1504L,
+				552L,
+				556L
+			};
+			OFFSETS.S = new long[]
+			{
+				1552L,
+				80L,
+				3448L,
+				3440L,
+				832L,
+				3068L
+			};
+			OFFSETS.T = new long[]
+			{
+				504L,
+				3544L,
+				1712L,
+				80L,
+				40L,
+				44L
+			};
+		}
+
+		// Token: 0x04000001 RID: 1
+		public static long[] PG1 = new long[]
+		{
+			232L,
+			192L,
+			136L,
+			472L,
+			0L
+		};
+
+		// Token: 0x04000002 RID: 2
+		public static long[] HT;
+
+		// Token: 0x04000003 RID: 3
+		public static long[] HT2;
+
+		// Token: 0x04000004 RID: 4
+		public static long[] S;
+
+		// Token: 0x04000005 RID: 5
+		public static long[] T;
+
+		// Token: 0x04000006 RID: 6
+		public static long LOADERPGBASE;
+
+		// Token: 0x04000007 RID: 7
+		public static long LOADERHTIDBASE;
+
+		// Token: 0x04000008 RID: 8
+		public static long LOADERSTADIDBASE;
+
+		// Token: 0x04000009 RID: 9
+		public static long LOADERTOURIDBASE;
+
+		// Token: 0x0400000A RID: 10
+		public static long ORIPGBASE;
+
+		// Token: 0x0400000B RID: 11
+		public static long ORIHTIDBASE;
+
+		// Token: 0x0400000C RID: 12
+		public static long ORISTADIDBASE;
+
+		// Token: 0x0400000D RID: 13
+		public static long ORITOURIDBASE;
+
+		// Token: 0x0400000E RID: 14
+		public static long ORIFRIHTIDBASE;
+
+		// Token: 0x0400000F RID: 15
+		public static long ORINETDEPTHBASE;
+
+		// Token: 0x04000010 RID: 16
+		public static long[] NTDP = new long[]
+		{
+			648L
+		};
+
+		// Token: 0x04000011 RID: 17
+		public static long ORINETFORMATBASE;
+
+		// Token: 0x04000012 RID: 18
+		public static long[] NTFM;
+
+		// Token: 0x04000013 RID: 19
+		public static long[] NTCP;
+
+		// Token: 0x04000014 RID: 20
+		public static long[] NTTR;
+
+		// Token: 0x04000015 RID: 21
+		public static long[] NTRI = new long[]
+		{
+			632L
+		};
+
+		// Token: 0x04000016 RID: 22
+		public static long[] STDNAMEOFFSET261 = new long[]
+		{
+			296L,
+			48L,
+			51436L
+		};
+
+		// Token: 0x04000017 RID: 23
+		public static long[] STDNAMEOFFSET176 = new long[]
+		{
+			408L,
+			48L,
+			41580L
+		};
+
+		// Token: 0x04000018 RID: 24
+		public static long STDNAMEBASE;
+
+		// Token: 0x04000019 RID: 25
+		public static long GAMESTATSBASE;
+
+		// Token: 0x0400001A RID: 26
+		public static long GAMESTARTEDBINARYBASE;
+
+		// Token: 0x0400001B RID: 27
+		public static long[] GAMESTARTEDBINARY = new long[]
+		{
+			560L,
+			1592L,
+			88L,
+			16L,
+			4056L
+		};
+
+		// Token: 0x0400001C RID: 28
+		public static long[] GAMEHOMEGOALSCORE = new long[]
+		{
+			5484L
+		};
+
+		// Token: 0x0400001D RID: 29
+		public static long[] GAMEAWAYGOALSCORE = new long[]
+		{
+			5488L
+		};
+
+		// Token: 0x0400001E RID: 30
+		public static long[] GAMERANTIME = new long[]
+		{
+			5500L
+		};
+	}
+}

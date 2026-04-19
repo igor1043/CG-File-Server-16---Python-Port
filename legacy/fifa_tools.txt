@@ -1,0 +1,521 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+
+namespace Fifa_Tools
+{
+	// Token: 0x02000005 RID: 5
+	public class FTools
+	{
+		// Token: 0x06000008 RID: 8 RVA: 0x00002C64 File Offset: 0x00000E64
+		public static void Copy(string sourceDir, string targetDir)
+		{
+			Directory.CreateDirectory(targetDir);
+			foreach (string text in Directory.GetFiles(sourceDir))
+			{
+				string extension = Path.GetExtension(text);
+				if (!extension.Equals(".png"))
+				{
+					File.Copy(text, Path.Combine(targetDir, Path.GetFileName(text)), true);
+				}
+			}
+			foreach (string text2 in Directory.GetDirectories(sourceDir))
+			{
+				FTools.Copy(text2, Path.Combine(targetDir, Path.GetFileName(text2)));
+			}
+		}
+
+		// Token: 0x06000009 RID: 9 RVA: 0x00002D08 File Offset: 0x00000F08
+		public static void Copytvlogo(string sourceDir, string targetDir, out string tvlogotype)
+		{
+			Directory.CreateDirectory(targetDir);
+			string[] files = Directory.GetFiles(sourceDir);
+			string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(files[0]);
+			if (fileNameWithoutExtension.Contains("overlay_9105"))
+			{
+				File.Copy(files[0], Path.Combine(targetDir, Path.GetFileName(files[0])), true);
+				tvlogotype = "default";
+			}
+			else
+			{
+				Random random = new Random();
+				int num = random.Next(0, files.Length);
+				tvlogotype = Path.GetFileName(files[num]).Split(new char[]
+				{
+					'_'
+				}).First<string>();
+				File.Copy(files[num], Path.Combine(targetDir, "overlay_9105.big"), true);
+			}
+		}
+
+		// Token: 0x0600000A RID: 10 RVA: 0x00002DB0 File Offset: 0x00000FB0
+		public static void RenameDir(string srcDir, string destDir)
+		{
+			try
+			{
+				DirectoryInfo directoryInfo = new DirectoryInfo(srcDir);
+				directoryInfo.MoveTo(destDir);
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600000B RID: 11 RVA: 0x00002DE8 File Offset: 0x00000FE8
+		public static void checkdirs(string dirDest)
+		{
+			if (!Directory.Exists(dirDest))
+			{
+				Directory.CreateDirectory(dirDest);
+			}
+		}
+
+		// Token: 0x0600000C RID: 12 RVA: 0x00002E0C File Offset: 0x0000100C
+		public static void Extractfolder(Stream stream, string directory, string extractPath)
+		{
+			FTools.checkdirs(extractPath);
+			using (ZipArchive zipArchive = new ZipArchive(stream))
+			{
+				IEnumerable<ZipArchiveEntry> enumerable = from currEntry in zipArchive.Entries
+				where Path.GetDirectoryName(currEntry.FullName) == directory
+				where !string.IsNullOrEmpty(currEntry.Name)
+				select currEntry;
+				foreach (ZipArchiveEntry zipArchiveEntry in enumerable)
+				{
+					zipArchiveEntry.ExtractToFile(Path.Combine(extractPath, zipArchiveEntry.Name));
+				}
+			}
+		}
+
+		// Token: 0x0600000D RID: 13 RVA: 0x00002F00 File Offset: 0x00001100
+		public static void CopyGlares(string glarelnx, string no1, string no2, string injID, string exedir)
+		{
+			StringBuilder stringBuilder = new StringBuilder();
+			string[] array = File.ReadAllLines(glarelnx);
+			foreach (string text in array)
+			{
+				if (text.Contains("name=\"glares"))
+				{
+					string[] array3 = text.Split(new char[]
+					{
+						'_'
+					});
+					string str = array3[1];
+					string str2 = text.Replace("glares_" + str, "glares_" + injID);
+					stringBuilder.Append(str2 + "\r\n");
+				}
+				else
+				{
+					stringBuilder.Append(text + "\r\n");
+				}
+			}
+			string path = string.Concat(new string[]
+			{
+				exedir,
+				"\\data\\sceneassets\\fx\\glares_",
+				injID,
+				"_",
+				no1,
+				"_",
+				no2,
+				".lnx"
+			});
+			File.WriteAllText(path, stringBuilder.ToString());
+		}
+
+		// Token: 0x0600000E RID: 14 RVA: 0x0000301C File Offset: 0x0000121C
+		public static string Checkver(string file)
+		{
+			FileVersionInfo versionInfo = FileVersionInfo.GetVersionInfo(file);
+			return versionInfo.FileVersion;
+		}
+
+		// Token: 0x0600000F RID: 15 RVA: 0x00003040 File Offset: 0x00001240
+		public static BindingList<string> DirSearch(string sDir)
+		{
+			FTools.workingFiles.Clear();
+			try
+			{
+				foreach (string item in Directory.GetFiles(sDir))
+				{
+					FTools.workingFiles.Add(item);
+				}
+				foreach (string sDir2 in Directory.GetDirectories(sDir))
+				{
+					FTools.DirSearch(sDir2);
+				}
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(ex.Message);
+			}
+			return FTools.workingFiles;
+		}
+
+		// Token: 0x06000010 RID: 16 RVA: 0x000030F0 File Offset: 0x000012F0
+		public static void ExtraSetup(string dirSource, string dirDest, string INIID, string texName, string texNum)
+		{
+			if (Directory.Exists(dirSource))
+			{
+				FTools.workingFiles.Clear();
+				FTools.workingFiles = FTools.DirSearch(dirSource);
+				foreach (string path in FTools.workingFiles)
+				{
+					string fileName = Path.GetFileName(path);
+					string[] array = fileName.Split(new char[]
+					{
+						'_'
+					});
+					string text = array[1];
+					if (INIID.Equals(text))
+					{
+						string oldValue = texName + "_" + text;
+						string newValue = texName + "_" + texNum;
+						File.Copy(Path.Combine(dirSource, fileName), Path.Combine(dirDest, fileName.Replace(oldValue, newValue)), true);
+					}
+				}
+			}
+		}
+
+		// Token: 0x06000011 RID: 17 RVA: 0x000031E8 File Offset: 0x000013E8
+		private void PreviewSetup(string dirDest, string STADID, string injID)
+		{
+			if (Directory.Exists(dirDest))
+			{
+				if (!STADID.Equals(injID))
+				{
+					FTools.DirSearch(dirDest);
+					foreach (string path in FTools.workingFiles)
+					{
+						string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(path);
+						string[] array = fileNameWithoutExtension.Split(new char[]
+						{
+							'_'
+						});
+						string fullPath = Path.GetFullPath(path);
+						string oldValue = "_" + array[1] + "_";
+						string newValue = "_" + STADID + "_";
+						File.Move(fullPath, fullPath.Replace(oldValue, newValue));
+					}
+				}
+			}
+		}
+
+		// Token: 0x06000012 RID: 18 RVA: 0x000032CC File Offset: 0x000014CC
+		public static string INCcount(int count1, string text)
+		{
+			if (int.TryParse(text, out count1))
+			{
+				int num;
+				count1 = (num = count1 + 1);
+				text = num.ToString();
+			}
+			if (text.Equals("2"))
+			{
+				text = "0";
+			}
+			return text;
+		}
+
+		// Token: 0x06000013 RID: 19 RVA: 0x0000331C File Offset: 0x0000151C
+		public static void SetINJID(string text, out string inj, out string pol)
+		{
+			if (text.Equals("0"))
+			{
+				inj = FTools.injid1;
+				pol = FTools.police1;
+			}
+			else
+			{
+				inj = FTools.injid2;
+				pol = FTools.police2;
+			}
+		}
+
+		// Token: 0x06000014 RID: 20 RVA: 0x00003360 File Offset: 0x00001560
+		public static byte[] StringToByteArray(string hex)
+		{
+			int length = hex.Length;
+			byte[] array = new byte[length / 2];
+			for (int i = 0; i < length; i += 2)
+			{
+				array[i / 2] = Convert.ToByte(hex.Substring(i, 2), 16);
+			}
+			return array;
+		}
+
+		// Token: 0x06000015 RID: 21 RVA: 0x000033AC File Offset: 0x000015AC
+		public static string ByteArrayToString(byte[] ba)
+		{
+			StringBuilder stringBuilder = new StringBuilder(ba.Length * 2);
+			foreach (byte b in ba)
+			{
+				stringBuilder.AppendFormat("{0:x2}", b);
+			}
+			return stringBuilder.ToString();
+		}
+
+		// Token: 0x06000016 RID: 22 RVA: 0x00003404 File Offset: 0x00001604
+		public static void writefile(string filename, byte[] Type1, string rootdir)
+		{
+			FTools.bre = false;
+			string text = filename.Split(new char[]
+			{
+				'\\'
+			}).Last<string>();
+			string[] array = text.Split(new char[]
+			{
+				'_'
+			});
+			string text2 = array[0];
+			string[] source = new string[]
+			{
+				"overlaycomponents",
+				"overlay",
+				"stadium",
+				"netcolor",
+				"pitchmowpattern",
+				"policeofficer",
+				"crowd",
+				"glares"
+			};
+			if (source.Contains(text2))
+			{
+				if (text2.Equals("overlaycomponents"))
+				{
+					FTools.dir = "ScoreBoard\\globalcomponents\\overlaycomponents_9";
+				}
+				if (text2.Equals("overlay"))
+				{
+					if (text.Equals("overlay_9105.big"))
+					{
+						FTools.dir = "TVLogo";
+					}
+					else
+					{
+						FTools.dir = "ScoreBoard\\overlays";
+					}
+				}
+				if (text2.Equals("stadium"))
+				{
+					FTools.dir = "Stadium\\stadium";
+				}
+				if (text2.Equals("netcolor"))
+				{
+					FTools.dir = "Nets";
+				}
+				if (text2.Equals("pitchmowpattern"))
+				{
+					FTools.dir = "PitchMowPattern";
+				}
+				if (text2.Equals("policeofficer"))
+				{
+					FTools.dir = "Police";
+				}
+				if (text2.Equals("crowd"))
+				{
+					FTools.dir = "Stadium\\crowdplacement";
+				}
+				if (text2.Equals("glares"))
+				{
+					FTools.dir = "Stadium\\fx";
+				}
+				string text3 = array[1];
+				string text4 = string.Concat(new string[]
+				{
+					rootdir,
+					"\\FSW\\",
+					FTools.dir,
+					"\\",
+					text
+				});
+				string dirDest = rootdir + "\\FSW\\" + FTools.dir;
+				if (File.Exists(filename))
+				{
+					DialogResult dialogResult = MessageBox.Show(text + " Exists, do you want to replace it?", "File Exists", MessageBoxButtons.YesNoCancel);
+					if (dialogResult == DialogResult.Cancel)
+					{
+						FTools.bre = true;
+					}
+					else if (dialogResult == DialogResult.Yes)
+					{
+						FTools.checkdirs(dirDest);
+						if (text2.Equals("policeofficer"))
+						{
+							if (text3 == "4" || text3 == "9")
+							{
+								File.WriteAllBytes(text4, Type1);
+								File.WriteAllBytes(filename, Type1);
+							}
+							else
+							{
+								File.WriteAllBytes(text4, Type1);
+							}
+						}
+						else if (text2.Equals("pitchmowpattern"))
+						{
+							if (text3.Equals("0"))
+							{
+								File.WriteAllBytes(text4, Type1);
+								File.WriteAllBytes(filename, Type1);
+							}
+							else
+							{
+								File.WriteAllBytes(text4, Type1);
+							}
+						}
+						else if (text2.Equals("netcolor"))
+						{
+							if (text3.Equals("0"))
+							{
+								File.WriteAllBytes(text4, Type1);
+								File.WriteAllBytes(filename, Type1);
+							}
+							else
+							{
+								File.WriteAllBytes(text4, Type1);
+							}
+						}
+						else
+						{
+							File.WriteAllBytes(text4, Type1);
+							File.WriteAllBytes(filename, Type1);
+						}
+					}
+					else if (dialogResult == DialogResult.No)
+					{
+						FTools.checkdirs(text4);
+						File.Copy(filename, text4, true);
+						if (text2.Equals("policeofficer"))
+						{
+							if (text3 == "4" || text3 == "9")
+							{
+								File.Copy(filename, text4, true);
+							}
+						}
+						else if (text2.Equals("pitchmowpattern"))
+						{
+							if (text3.Equals("0"))
+							{
+								File.Copy(filename, text4, true);
+							}
+						}
+						else if (text2.Equals("netcolor"))
+						{
+							if (text3.Equals("0"))
+							{
+								File.Copy(filename, text4, true);
+							}
+						}
+						else
+						{
+							File.Copy(filename, text4, true);
+						}
+					}
+				}
+				else
+				{
+					FTools.checkdirs(dirDest);
+					if (text2.Equals("policeofficer"))
+					{
+						if (text3 == "4" || text3 == "9")
+						{
+							File.WriteAllBytes(text4, Type1);
+							File.WriteAllBytes(filename, Type1);
+						}
+						else
+						{
+							File.WriteAllBytes(text4, Type1);
+						}
+					}
+					else if (text2.Equals("pitchmowpattern"))
+					{
+						if (text3.Equals("0"))
+						{
+							File.WriteAllBytes(text4, Type1);
+							File.WriteAllBytes(filename, Type1);
+						}
+						else
+						{
+							File.WriteAllBytes(text4, Type1);
+						}
+					}
+					else if (text2.Equals("netcolor"))
+					{
+						if (text3.Equals("0"))
+						{
+							File.WriteAllBytes(text4, Type1);
+							File.WriteAllBytes(filename, Type1);
+						}
+						else
+						{
+							File.WriteAllBytes(text4, Type1);
+						}
+					}
+					else
+					{
+						File.WriteAllBytes(text4, Type1);
+						File.WriteAllBytes(filename, Type1);
+					}
+				}
+			}
+		}
+
+		// Token: 0x06000017 RID: 23 RVA: 0x000039AC File Offset: 0x00001BAC
+		public static string nextfilename(string filename)
+		{
+			string extension = Path.GetExtension(filename);
+			int num = 1;
+			for (;;)
+			{
+				string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(filename);
+				if (!File.Exists(filename))
+				{
+					break;
+				}
+				filename = filename.Replace(fileNameWithoutExtension + extension, num.ToString() + extension);
+				num++;
+			}
+			return filename;
+		}
+
+		// Token: 0x06000018 RID: 24 RVA: 0x00003A04 File Offset: 0x00001C04
+		public static bool breakout()
+		{
+			return FTools.bre;
+		}
+
+		// Token: 0x06000019 RID: 25 RVA: 0x000021E8 File Offset: 0x000003E8
+		public static void fixbre()
+		{
+			FTools.bre = false;
+		}
+
+		// Token: 0x04000021 RID: 33
+		public static bool bre = false;
+
+		// Token: 0x04000022 RID: 34
+		public static string dir;
+
+		// Token: 0x04000023 RID: 35
+		public static string injid1 = "176";
+
+		// Token: 0x04000024 RID: 36
+		public static string police1 = "4";
+
+		// Token: 0x04000025 RID: 37
+		public static string injid2 = "261";
+
+		// Token: 0x04000026 RID: 38
+		public static string police2 = "9";
+
+		// Token: 0x04000027 RID: 39
+		public static BindingList<string> workingFiles = new BindingList<string>();
+	}
+}

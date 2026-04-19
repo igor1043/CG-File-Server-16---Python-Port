@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .file_tools import copy, copy_if_exists, copy_tvlogo, extra_setup
+
+if TYPE_CHECKING:
+    from .app import Server16App
+
+
+class AssetRuntime:
+    def __init__(self, app: "Server16App") -> None:
+        self.app = app
+
+    def _resolve_assignment_value(self, candidates: list[tuple[str, str]], fallback: tuple[str, str] | None = None) -> str:
+        app = self.app
+        for key, section in candidates:
+            if key and app.settings_ini.key_exists(key, section):
+                return app.settings_ini.read(key, section)
+        if fallback is not None:
+            key, section = fallback
+            if key and app.settings_ini.key_exists(key, section):
+                return app.settings_ini.read(key, section)
+        return ""
+
+    def update_audio_overview(self) -> None:
+        app = self.app
+        chants_enabled = app.module_enabled("Chants") if hasattr(app, "module_states") else False
+        app._set_display("audio_module", "Enabled" if chants_enabled else "Disabled")
+        app._set_display("audio_status", "Live match monitor" if chants_enabled else "Idle")
+        current_audio = app.labels.get("audio_current").cget("text") if app.labels.get("audio_current") else "-"
+        if current_audio in {"", "-", "No active track"}:
+            app._set_display("audio_current", "No active chant")
+        app._set_display("audio_clubsong", app.HID or "-")
+        app._set_display("audio_crowd_mode", "Paused" if app._chants_paused else "Monitoring" if chants_enabled else "Idle")
+        app._set_display("audio_crowd_volume", "-" if not chants_enabled else "Managed by chants")
+        app._set_display("audio_source", "Home crowd" if chants_enabled else "-")
+        app._set_display("audio_next", "Wait for in-game action" if chants_enabled else "-")
+        app._set_display("audio_chants_dir", str(app.exedir / "FSW" / "Chants") if hasattr(app, "exedir") else "-")
+        status_label = app.labels.get("status")
+        last_action = app.labels.get("audio_last_action").cget("text") if app.labels.get("audio_last_action") else "-"
+        if last_action in {"", "-"}:
+            app._set_display("audio_last_action", status_label.cget("text") if status_label is not None else "-")
+
+    def apply_scoreboard_runtime(self) -> None:
+        app = self.app
+        app._set_display("tvlogo", "default")
+        app._set_display("scoreboard", "default")
+        app.tvlogoscoreboardtype = "default"
+        if app.module_enabled("TvLogo"):
+            default_source = app.exedir / "FSW" / "TVLogo"
+            source = default_source
+            tvlogo = self._resolve_assignment_value(
+                [
+                    (app.TOURROUNDID, "TVLogo"),
+                    (app.TOURNAME, "TVLogo"),
+                    (app.HID, "HomeTeamTvLogo"),
+                ],
+                fallback=("0", "TVLogo"),
+            )
+            if tvlogo:
+                source = app.TVLogo / tvlogo
+            if not Path(source).exists():
+                app.log(f"TV logo source not found, falling back to default: {source}")
+                source = default_source
+            app.tvlogoscoreboardtype = copy_tvlogo(source, app.TVdata)
+            app._set_display("tvlogo", Path(source).name)
+            app.log(f"Applied TV logo source: {source}")
+        else:
+            app._set_display("tvlogo", "TV Logo Module Disable")
+        if app.module_enabled("ScoreBoard"):
+            copy(app.exedir / "FSW" / "ScoreBoard", app.Scoredata / "game")
+            scoreboard = self._resolve_assignment_value(
+                [
+                    (app.TOURROUNDID, "Scoreboard"),
+                    (app.TOURNAME, "Scoreboard"),
+                    (app.HID, "HomeTeamScoreBoard"),
+                ],
+                fallback=("0", "Scoreboard"),
+            )
+            if scoreboard:
+                variant = app.ScoreBoard / scoreboard / app.tvlogoscoreboardtype
+                scoreboard_dir = app.ScoreBoard / scoreboard
+                if app.tvlogoscoreboardtype != "default" and variant.exists():
+                    copy(variant, app.Scoredata)
+                elif scoreboard_dir.exists():
+                    copy(scoreboard_dir, app.Scoredata)
+                else:
+                    app.log(f"Scoreboard directory not found, keeping default scoreboard: {scoreboard_dir}")
+                    scoreboard = ""
+                if scoreboard:
+                    app._set_display("scoreboard", scoreboard)
+                    app.log(f"Applied scoreboard: {scoreboard}")
+            else:
+                app.log("No scoreboard assignment found; default scoreboard active")
+        else:
+            app._set_display("scoreboard", "ScoreBoard Module Disable")
+        self.update_audio_overview()
+
+    def apply_movie_runtime(self) -> None:
+        app = self.app
+        app._set_display("movie", "default")
+        if not app.module_enabled("Movies"):
+            app._set_display("movie", "Movie Module Disable")
+            self.update_audio_overview()
+            return
+        movie = self._resolve_assignment_value(
+            [
+                (app.TOURROUNDID, "movies"),
+                (app.TOURNAME, "movies"),
+                (app.derby, "DerbyMatch"),
+                (app.HID, "TeamMovies"),
+            ],
+            fallback=("0", "movies"),
+        )
+        if movie:
+            movie_dir = app.Movies / movie
+            if movie_dir.exists():
+                copy_if_exists(movie_dir / "bootflowoutro.vp8", app.Movdata)
+                copy_if_exists(movie_dir / "bumper.big", app.MOVBUMP)
+                app._set_display("movie", movie)
+                app._set_display("audio_current", movie)
+                app._set_display("audio_last_action", f"Movie {movie}")
+                app.log(f"Applied movie: {movie}")
+            else:
+                app.log(f"Movie directory not found, falling back to default movie: {movie_dir}")
+                movie = ""
+        elif app.stadmovie:
+            app._set_display("movie", "Stadium Movie")
+            app._set_display("audio_current", f"{app.curstad} Stadium Movie")
+            app._set_display("audio_last_action", "Stadium movie")
+            app.log("Applied stadium movie")
+        if not movie and not app.stadmovie:
+            copy_if_exists(app.exedir / "FSW" / "Nav" / "bootflowoutro.vp8", app.Movdata)
+            copy_if_exists(app.exedir / "FSW" / "Nav" / "bumper.big", app.MOVBUMP)
+            app._set_display("movie", "default")
+            app._set_display("audio_current", "Default navigation audio")
+            app._set_display("audio_last_action", "Default movie restored")
+            app.log("Default movie restored")
+        self.update_audio_overview()
+
+    def tv_bumper_page(self) -> None:
+        app = self.app
+        if not app.module_enabled("StadiumNet"):
+            return
+        extra_setup(app.Nsource, app.Ndest, "0", "netcolor", "0")
+        source_key = "stadiumnetid" if not app.curstad else "stadiumnetname"
+        source_section = app.STADID if not app.curstad else app.StadName
+        if app.settings_ini.key_exists(app.TOURROUNDID, "exclude") or not app.settings_ini.key_exists(source_section, source_key):
+            return
+        values = app.settings_ini.read(source_section, source_key).split(",")
+        for offset_group, value in zip([app.offsets.NTDP, app.offsets.NTCP, app.offsets.NTRI, app.offsets.NTTR], values):
+            app.memory.write_int(app.offsets.ORINETDEPTHBASE, offset_group, value)
+        app._set_display("audio_last_action", f"Net profile {source_section}")
+        app.log(f"Applied stadium net values from [{source_key}] {source_section}: {values}")

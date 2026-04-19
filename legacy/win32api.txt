@@ -1,0 +1,212 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Server16
+{
+	// Token: 0x02000010 RID: 16
+	public static class Win32Api
+	{
+		// Token: 0x06000094 RID: 148
+		[DllImport("kernel32.dll")]
+		public static extern IntPtr OpenProcess(uint dwAccess, bool inherit, int pid);
+
+		// Token: 0x06000095 RID: 149
+		[DllImport("kernel32.dll")]
+		public static extern bool CloseHandle(IntPtr handle);
+
+		// Token: 0x06000096 RID: 150
+		[DllImport("kernel32.dll", SetLastError = true)]
+		public static extern bool ReadProcessMemory(IntPtr hProcess, long lpBaseAddress, [In] [Out] byte[] lpBuffer, ulong dwSize, out int lpNumberOfBytesRead);
+
+		// Token: 0x06000097 RID: 151
+		[DllImport("kernel32.dll")]
+		public static extern bool ReadProcessMemory(int hProcess, int lpBaseAddress, byte[] lpBuffer, int dwSize, ref int lpNumberOfBytesRead);
+
+		// Token: 0x06000098 RID: 152
+		[DllImport("kernel32.dll")]
+		public static extern bool WriteProcessMemory(IntPtr hProcess, long lpBaseAddress, [In] [Out] byte[] lpBuffer, ulong dwSize, out IntPtr lpNumberOfBytesWritten);
+
+		// Token: 0x06000099 RID: 153
+		[DllImport("kernel32", SetLastError = true)]
+		public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+
+		// Token: 0x0600009A RID: 154
+		[DllImport("kernel32.dll", SetLastError = true)]
+		public static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+		// Token: 0x0600009B RID: 155
+		[DllImport("kernel32")]
+		public static extern long WritePrivateProfileString(string Section, string Key, string Value, string FilePath);
+
+		// Token: 0x0600009C RID: 156
+		[DllImport("kernel32")]
+		public static extern int GetPrivateProfileString(string Section, string Key, string Default, StringBuilder RetVal, int Size, string FilePath);
+
+		// Token: 0x0600009D RID: 157
+		[DllImport("kernel32.dll")]
+		public static extern void GetSystemInfo(out Win32Api.SYSTEM_INFO lpSystemInfo);
+
+		// Token: 0x0600009E RID: 158
+		[DllImport("kernel32.dll", SetLastError = true)]
+		public static extern int VirtualQueryEx(IntPtr hProcess, IntPtr lpAddress, out Win32Api.MEMORY_BASIC_INFORMATION lpBuffer, uint dwLength);
+
+		// Token: 0x0600009F RID: 159
+		[DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+		public static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, int dwSize, Win32Api.FreeType dwFreeType);
+
+		// Token: 0x060000A0 RID: 160
+		[DllImport("kernel32.dll", SetLastError = true)]
+		public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+		// Token: 0x060000A1 RID: 161
+		[DllImport("kernel32.dll")]
+		public static extern IntPtr CreateRemoteThread(IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, out IntPtr lpThreadId);
+
+		// Token: 0x060000A2 RID: 162
+		[DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+		public static extern IntPtr VirtualAllocEx(IntPtr hProcess, long lpAddress, ulong dwSize, Win32Api.AllocationType flAllocationType, Win32Api.MemoryProtection flProtect);
+
+		// Token: 0x040000C0 RID: 192
+		public const uint PROCESS_QUERY_INFORMATION = 1024U;
+
+		// Token: 0x040000C1 RID: 193
+		public const uint MEM_COMMIT = 4096U;
+
+		// Token: 0x040000C2 RID: 194
+		public const uint PROCESS_VM_READ = 16U;
+
+		// Token: 0x040000C3 RID: 195
+		public const uint PROCESS_VM_WRITE = 32U;
+
+		// Token: 0x040000C4 RID: 196
+		public const uint PROCESS_VM_OPERATION = 8U;
+
+		// Token: 0x040000C5 RID: 197
+		public const uint PAGE_READWRITE = 4U;
+
+		// Token: 0x02000011 RID: 17
+		[Flags]
+		public enum AllocationType
+		{
+			// Token: 0x040000C7 RID: 199
+			Commit = 4096,
+			// Token: 0x040000C8 RID: 200
+			Reserve = 8192,
+			// Token: 0x040000C9 RID: 201
+			Decommit = 16384,
+			// Token: 0x040000CA RID: 202
+			Release = 32768,
+			// Token: 0x040000CB RID: 203
+			Reset = 524288,
+			// Token: 0x040000CC RID: 204
+			Physical = 4194304,
+			// Token: 0x040000CD RID: 205
+			TopDown = 1048576,
+			// Token: 0x040000CE RID: 206
+			WriteWatch = 2097152,
+			// Token: 0x040000CF RID: 207
+			LargePages = 536870912
+		}
+
+		// Token: 0x02000012 RID: 18
+		[Flags]
+		public enum MemoryProtection
+		{
+			// Token: 0x040000D1 RID: 209
+			Execute = 16,
+			// Token: 0x040000D2 RID: 210
+			ExecuteRead = 32,
+			// Token: 0x040000D3 RID: 211
+			ExecuteReadWrite = 64,
+			// Token: 0x040000D4 RID: 212
+			ExecuteWriteCopy = 128,
+			// Token: 0x040000D5 RID: 213
+			NoAccess = 1,
+			// Token: 0x040000D6 RID: 214
+			ReadOnly = 2,
+			// Token: 0x040000D7 RID: 215
+			ReadWrite = 4,
+			// Token: 0x040000D8 RID: 216
+			WriteCopy = 8,
+			// Token: 0x040000D9 RID: 217
+			GuardModifierflag = 256,
+			// Token: 0x040000DA RID: 218
+			NoCacheModifierflag = 512,
+			// Token: 0x040000DB RID: 219
+			WriteCombineModifierflag = 1024
+		}
+
+		// Token: 0x02000013 RID: 19
+		[Flags]
+		public enum FreeType
+		{
+			// Token: 0x040000DD RID: 221
+			Decommit = 16384,
+			// Token: 0x040000DE RID: 222
+			Release = 32768
+		}
+
+		// Token: 0x02000014 RID: 20
+		public struct MEMORY_BASIC_INFORMATION
+		{
+			// Token: 0x040000DF RID: 223
+			public int BaseAddress;
+
+			// Token: 0x040000E0 RID: 224
+			public int AllocationBase;
+
+			// Token: 0x040000E1 RID: 225
+			public int AllocationProtect;
+
+			// Token: 0x040000E2 RID: 226
+			public int RegionSize;
+
+			// Token: 0x040000E3 RID: 227
+			public int State;
+
+			// Token: 0x040000E4 RID: 228
+			public int Protect;
+
+			// Token: 0x040000E5 RID: 229
+			public int lType;
+		}
+
+		// Token: 0x02000015 RID: 21
+		public struct SYSTEM_INFO
+		{
+			// Token: 0x040000E6 RID: 230
+			public ushort processorArchitecture;
+
+			// Token: 0x040000E7 RID: 231
+			private ushort reserved;
+
+			// Token: 0x040000E8 RID: 232
+			public uint pageSize;
+
+			// Token: 0x040000E9 RID: 233
+			public IntPtr minimumApplicationAddress;
+
+			// Token: 0x040000EA RID: 234
+			public IntPtr maximumApplicationAddress;
+
+			// Token: 0x040000EB RID: 235
+			public IntPtr activeProcessorMask;
+
+			// Token: 0x040000EC RID: 236
+			public uint numberOfProcessors;
+
+			// Token: 0x040000ED RID: 237
+			public uint processorType;
+
+			// Token: 0x040000EE RID: 238
+			public uint allocationGranularity;
+
+			// Token: 0x040000EF RID: 239
+			public ushort processorLevel;
+
+			// Token: 0x040000F0 RID: 240
+			public ushort processorRevision;
+		}
+	}
+}

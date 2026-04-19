@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+
+# Logs and runtime-generated files
+runtime/server16.log
+runtime/*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Local packaging leftovers
+*.toc
+*.pkg
+*.pyz
+*.manifest
+
+# PyInstaller temp data
+localpycs/

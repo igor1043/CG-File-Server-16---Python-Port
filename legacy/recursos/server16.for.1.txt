@@ -1,0 +1,5 @@
+// 0x0000AD14: Server16.Form1.resources‎ (57973 bytes, Embedded, Public)
+
+
+// 0x0000AE76: $this.Icon‎ = 29426 bytes, Tipo = System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+// 0x00012169: notifyIcon1.Icon‎ = 28191 bytes, Tipo = System.Drawing.Icon, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a

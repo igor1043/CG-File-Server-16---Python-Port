@@ -1,0 +1,3879 @@
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Media;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using Fifa_Server_Map;
+using Fifa_Tools;
+using NAudio.MediaFoundation;
+using NAudio.Wave;
+using Server16.Properties;
+
+namespace Server16
+{
+	// Token: 0x02000002 RID: 2
+	public class Form1 : Form
+	{
+		// Token: 0x17000001 RID: 1
+		// (get) Token: 0x06000001 RID: 1 RVA: 0x00002048 File Offset: 0x00000248
+		// (set) Token: 0x06000002 RID: 2 RVA: 0x00002408 File Offset: 0x00000608
+		public string Pagename
+		{
+			get
+			{
+				return this._pagename;
+			}
+			set
+			{
+				this._pagename = value;
+				if (!string.IsNullOrWhiteSpace(this._pagename.Split(new char[1])[0]) && !this._pagename.Contains("skillGames/SkillGa"))
+				{
+					this.lastpagename = this._pagename;
+				}
+				if (this._pagename == "game/screens/playNow/KickOffHub")
+				{
+					if (!this.pagechange)
+					{
+						this.pagechange = true;
+						this.skillgamechange = false;
+						this.bumperpagechange = false;
+						this.Pagenamechanged();
+						return;
+					}
+				}
+				else
+				{
+					if (this._pagename.Contains("training/SkillGame"))
+					{
+						this.skillgamechange = true;
+						return;
+					}
+					if (string.IsNullOrWhiteSpace(this._pagename.Split(new char[1])[0]) && !this.matchstarted && !this.skillgamechange)
+					{
+						this.ChantsRuntimeChecker();
+						return;
+					}
+					if (this._pagename.Contains("TV/bumper") || this._pagename.Contains("skillGames/SkillGa"))
+					{
+						if (!this.bumperpagechange && !this.skillgamechange)
+						{
+							this.pagechange = false;
+							this.bumperpagechange = true;
+							this.skillgamechange = true;
+							this.TVBumperPage();
+							return;
+						}
+					}
+					else
+					{
+						this.pagechange = false;
+						this.bumperpagechange = false;
+						this.skillgamechange = false;
+					}
+				}
+			}
+		}
+
+		// Token: 0x06000003 RID: 3 RVA: 0x00002050 File Offset: 0x00000250
+		public Form1()
+		{
+			this.InitializeComponent();
+		}
+
+		// Token: 0x06000004 RID: 4 RVA: 0x00002540 File Offset: 0x00000740
+		private void setuppaths()
+		{
+			this.fifaEXE = Settings.Default.FIFAEXE;
+			this.MP = Path.GetFileNameWithoutExtension(this.fifaEXE);
+			Form1.exedir = Path.GetDirectoryName(this.fifaEXE);
+			this.TVLogo = Form1.exedir + "\\TVLogoGBD";
+			this.TVdata = Form1.exedir + "\\data\\ui\\game\\overlays";
+			this.Scoredata = Form1.exedir + "\\data\\ui";
+			this.MOVBUMP = Form1.exedir + "\\data\\ui\\TV\\bumper.big";
+			this.ScoreBoard = Form1.exedir + "\\ScoreBoardGBD";
+			this.Movies = Form1.exedir + "\\MoviesGBD";
+			this.Movdata = Form1.exedir + "\\data\\movies\\bootflowoutro.vp8";
+			this.targetpath = Form1.exedir + "\\StadiumGBD";
+			this.Psource = Form1.exedir + "\\FSW\\Police";
+			this.Nsource = Form1.exedir + "\\FSW\\Nets";
+			this.PitchMowsource = Form1.exedir + "\\FSW\\PitchMowPattern";
+			this.Pdest = Form1.exedir + "\\data\\sceneassets\\slc";
+			this.Ndest = Form1.exedir + "\\data\\sceneassets\\goalnet";
+			this.PitchMowdest = Form1.exedir + "\\data\\sceneassets\\pitch";
+			this.PitchMowPattern = "pitchmowpattern";
+			this.PitchTexNum = "0";
+			this.PoliceOfficer = "policeofficer";
+			this.NetColor = "netcolor";
+			this.NetNum = "0";
+		}
+
+		// Token: 0x06000005 RID: 5 RVA: 0x000026DC File Offset: 0x000008DC
+		private void button1_Click(object sender, EventArgs e)
+		{
+			this.openFileDialog1.Title = "Selecte Fifa 16 Exe";
+			this.openFileDialog1.Filter = "exe files |*.exe";
+			if (this.openFileDialog1.ShowDialog() == DialogResult.OK)
+			{
+				string fileName = this.openFileDialog1.FileName;
+				this.label9.Text = "";
+				Settings.Default.FIFAEXE = fileName;
+				Settings.Default.Save();
+				this.setuppaths();
+			}
+		}
+
+		// Token: 0x06000006 RID: 6 RVA: 0x00002750 File Offset: 0x00000950
+		private void Form1_Load(object sender, EventArgs e)
+		{
+			base.WindowState = FormWindowState.Minimized;
+			this.notifyIcon1.Visible = true;
+			base.ShowInTaskbar = false;
+			this.notifyIcon1.ContextMenuStrip = this.contextMenuStrip1;
+			this.CCount = "0";
+			this.curstad = "";
+			this.pagechange = false;
+			this.chantsThreadStarted = false;
+			this.setuppaths();
+			if (this.fifaEXE == "default")
+			{
+				MessageBox.Show("Please select fifa16.EXE");
+				this.button1.PerformClick();
+			}
+			this.version = FTools.Checkver(this.fifaEXE);
+			OFFSETS.getoffsets(this.version);
+			this.PGNAMEBASE = OFFSETS.ORIPGBASE;
+			this.HTIDBASE = OFFSETS.ORIHTIDBASE;
+			this.TOURBASE = OFFSETS.ORITOURIDBASE;
+			this.STADIDBASE = OFFSETS.ORISTADIDBASE;
+			this.FRIENDLYHTIDBASE = OFFSETS.ORIFRIHTIDBASE;
+			try
+			{
+				string sourceDir = Form1.exedir + "\\FSW\\stadium";
+				string text = Form1.exedir + "\\data\\sceneassets";
+				FTools.checkdirs(text + "\\stadium");
+				FTools.checkdirs(text + "\\fx");
+				FTools.checkdirs(text + "\\crowdplacement");
+				FTools.checkdirs(this.Pdest);
+				FTools.checkdirs(this.Ndest);
+				FTools.checkdirs(this.PitchMowdest);
+				FTools.ExtraSetup(this.Psource, this.Pdest, "4", "4", this.PoliceNum);
+				FTools.ExtraSetup(this.Psource, this.Pdest, "9", "9", this.PoliceNum);
+				FTools.ExtraSetup(this.Nsource, this.Ndest, "0", this.NetColor, this.NetNum);
+				FTools.ExtraSetup(this.PitchMowsource, this.PitchMowdest, "0", this.PitchMowPattern, this.PitchTexNum);
+				FTools.Copy(sourceDir, text);
+			}
+			catch
+			{
+			}
+			try
+			{
+				FTools.checkdirs(this.TVdata);
+				string sourceDir2 = Form1.exedir + "\\FSW\\TVLogo";
+				string sourceDir3 = Form1.exedir + "\\FSW\\ScoreBoard";
+				FTools.Copy(sourceDir2, this.TVdata);
+				FTools.Copy(sourceDir3, this.Scoredata + "\\game");
+			}
+			catch
+			{
+			}
+			IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+			if (iniFile.KeyExists("Movies", "Modules"))
+			{
+				string a = iniFile.Read("Movies", "Modules");
+				if (a == "1")
+				{
+					try
+					{
+						string dirDest = Form1.exedir + "\\data\\ui\\nav";
+						string text2 = Form1.exedir + "\\data\\ui\\TV";
+						FTools.checkdirs(dirDest);
+						FTools.checkdirs(text2);
+						string destFileName = Form1.exedir + "\\data\\ui\\TV\\bumper.big";
+						string sourceFileName = Form1.exedir + "\\FSW\\Nav\\pausemenuflow.nav_new";
+						string destFileName2 = Form1.exedir + "\\data\\ui\\nav\\pausemenuflow.nav";
+						string sourceFileName2 = Form1.exedir + "\\FSW\\Nav\\bootflowoutro.vp8";
+						File.Copy(sourceFileName, destFileName2, true);
+						File.Copy(sourceFileName2, this.Movdata, true);
+						File.Copy(text2, destFileName, true);
+						goto IL_3AA;
+					}
+					catch
+					{
+						goto IL_3AA;
+					}
+				}
+				if (a == "0")
+				{
+					try
+					{
+						string dirDest2 = Form1.exedir + "\\data\\ui\\nav";
+						string text3 = Form1.exedir + "\\data\\ui\\TV";
+						FTools.checkdirs(dirDest2);
+						FTools.checkdirs(text3);
+						string destFileName3 = Form1.exedir + "\\data\\ui\\TV\\bumper.big";
+						string sourceFileName3 = Form1.exedir + "\\FSW\\Nav\\pausemenuflow.nav_Original";
+						string destFileName4 = Form1.exedir + "\\data\\ui\\nav\\pausemenuflow.nav";
+						string sourceFileName4 = Form1.exedir + "\\FSW\\Nav\\Fbootflowoutro.vp8";
+						File.Copy(sourceFileName3, destFileName4, true);
+						File.Copy(sourceFileName4, this.Movdata, true);
+						File.Copy(text3, destFileName3, true);
+					}
+					catch
+					{
+					}
+				}
+			}
+			IL_3AA:
+			Process[] processesByName = Process.GetProcessesByName(this.MP);
+			try
+			{
+				if (this.fifaEXE.Equals("default"))
+				{
+					this.label9.Text = "";
+				}
+				else
+				{
+					Path.GetFileNameWithoutExtension(this.fifaEXE);
+					if (processesByName.Length != 0)
+					{
+						this.label9.Text = this.MP + " is running";
+						this.label9.ForeColor = Color.Green;
+					}
+					else
+					{
+						this.label9.Text = this.MP + " is not running!!";
+						this.label9.ForeColor = Color.Red;
+					}
+					this.timer1.Enabled = true;
+				}
+			}
+			catch (IOException)
+			{
+			}
+			if (iniFile.Read("Stadium", "Modules") == "1")
+			{
+				this.stadiumToolStripMenuItem.Checked = true;
+			}
+			else if (iniFile.Read("Stadium", "Modules") == "0")
+			{
+				this.stadiumToolStripMenuItem.Checked = false;
+			}
+			if (iniFile.Read("Movies", "Modules") == "1")
+			{
+				this.movieToolStripMenuItem.Checked = true;
+			}
+			else if (iniFile.Read("Movies", "Modules") == "0")
+			{
+				this.movieToolStripMenuItem.Checked = false;
+			}
+			if (iniFile.Read("ScoreBoard", "Modules") == "1")
+			{
+				this.scoreBoardToolStripMenuItem.Checked = true;
+			}
+			else if (iniFile.Read("ScoreBoard", "Modules") == "0")
+			{
+				this.scoreBoardToolStripMenuItem.Checked = false;
+			}
+			if (iniFile.Read("TvLogo", "Modules") == "1")
+			{
+				this.tVLogoToolStripMenuItem.Checked = true;
+			}
+			else if (iniFile.Read("TvLogo", "Modules") == "0")
+			{
+				this.tVLogoToolStripMenuItem.Checked = false;
+			}
+			if (iniFile.Read("Autorun", "Modules") == "1")
+			{
+				this.autorunToolStripMenuItem.Checked = true;
+				this.button3.PerformClick();
+				return;
+			}
+			if (iniFile.Read("Autorun", "Modules") == "0")
+			{
+				this.autorunToolStripMenuItem.Checked = false;
+			}
+			if (iniFile.Read("StadiumNet", "Modules") == "1")
+			{
+				this.stadiumNetToolStripMenuItem.Checked = true;
+			}
+			if (iniFile.Read("StadiumNet", "Modules") == "0")
+			{
+				this.stadiumNetToolStripMenuItem.Checked = false;
+			}
+			if (iniFile.Read("Chants", "Modules") == "1")
+			{
+				this.chantsToolStripMenuItem.Checked = true;
+				return;
+			}
+			if (iniFile.Read("Chants", "Modules") == "0")
+			{
+				this.chantsToolStripMenuItem.Checked = false;
+			}
+		}
+
+		// Token: 0x06000007 RID: 7 RVA: 0x00002E38 File Offset: 0x00001038
+		private void timer1_Tick(object sender, EventArgs e)
+		{
+			this.fifaEXE = Settings.Default.FIFAEXE;
+			this.MP = Path.GetFileNameWithoutExtension(this.fifaEXE);
+			if (Process.GetProcessesByName(this.MP).Length != 0)
+			{
+				if (this.count == 1)
+				{
+					this.count = 0;
+					this.label9.Text = this.MP + " is running";
+					this.label9.ForeColor = Color.Green;
+					this.timer2.Enabled = true;
+					this.notifyIcon1.BalloonTipTitle = "Status";
+					this.notifyIcon1.BalloonTipText = this.MP + " is running";
+					this.notifyIcon1.ShowBalloonTip(1);
+					this.runcount++;
+					return;
+				}
+			}
+			else
+			{
+				if (this.count == 0)
+				{
+					this.label9.Text = this.MP + " is not running!!";
+					this.label9.ForeColor = Color.Red;
+					this.timer2.Enabled = false;
+					this.notifyIcon1.BalloonTipTitle = "Status";
+					this.notifyIcon1.BalloonTipText = this.MP + " is not running!!";
+					this.notifyIcon1.ShowBalloonTip(1);
+					this.count++;
+				}
+				if (this.runcount == 1)
+				{
+					base.Close();
+				}
+			}
+		}
+
+		// Token: 0x06000008 RID: 8 RVA: 0x00002F9C File Offset: 0x0000119C
+		private void timer2_Tick(object sender, EventArgs e)
+		{
+			try
+			{
+				Memory memory = new Memory();
+				memory.Attack(this.MP);
+				Process.GetProcessesByName(this.MP);
+				if (memory.IsOpen())
+				{
+					this.timer1.Enabled = false;
+					this.Pagename = memory.GetString(this.PGNAMEBASE, new long[]
+					{
+						OFFSETS.PG1[0],
+						OFFSETS.PG1[1],
+						OFFSETS.PG1[2],
+						OFFSETS.PG1[3],
+						OFFSETS.PG1[4]
+					});
+					this.label1.Text = this.Pagename;
+				}
+				else
+				{
+					this.timer1.Enabled = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000009 RID: 9 RVA: 0x0000305C File Offset: 0x0000125C
+		private void Pagenamechanged()
+		{
+			this.timer2.Enabled = false;
+			try
+			{
+				Memory memory = new Memory();
+				memory.Attack(this.MP);
+				if (memory.IsOpen())
+				{
+					IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+					this.derby = string.Empty;
+					this.HID = memory.GetInt(this.HTIDBASE, new long[]
+					{
+						OFFSETS.HT[0],
+						OFFSETS.HT[1],
+						OFFSETS.HT[2],
+						OFFSETS.HT[3],
+						OFFSETS.HT[4]
+					}).ToString();
+					this.label2.Text = this.HID;
+					this.AID = memory.GetInt(this.HTIDBASE, new long[]
+					{
+						OFFSETS.HT[0],
+						OFFSETS.HT[1],
+						OFFSETS.HT[2],
+						OFFSETS.HT[3],
+						OFFSETS.HT[5]
+					}).ToString();
+					this.label12.Text = this.AID;
+					if (this.HID == "0")
+					{
+						this.HID = memory.GetInt(this.FRIENDLYHTIDBASE, new long[]
+						{
+							OFFSETS.HT2[0],
+							OFFSETS.HT2[1],
+							OFFSETS.HT2[2],
+							OFFSETS.HT2[3],
+							OFFSETS.HT2[4]
+						}).ToString();
+						this.label2.Text = this.HID;
+						this.AID = memory.GetInt(this.FRIENDLYHTIDBASE, new long[]
+						{
+							OFFSETS.HT2[0],
+							OFFSETS.HT2[1],
+							OFFSETS.HT2[2],
+							OFFSETS.HT2[3],
+							OFFSETS.HT2[5]
+						}).ToString();
+						this.label12.Text = this.AID;
+					}
+					this.derby = this.HID + "vs" + this.AID;
+					this.STADID = memory.GetInt(this.STADIDBASE, new long[]
+					{
+						OFFSETS.S[0],
+						OFFSETS.S[1],
+						OFFSETS.S[2],
+						OFFSETS.S[4],
+						OFFSETS.S[5]
+					}).ToString();
+					this.label5.Text = this.STADID;
+					this.Stadiumtype = "first";
+					if (this.STADID == "0")
+					{
+						this.STADID = memory.GetInt(this.STADIDBASE, new long[]
+						{
+							OFFSETS.S[0],
+							OFFSETS.S[1],
+							OFFSETS.S[3],
+							OFFSETS.S[4],
+							OFFSETS.S[5]
+						}).ToString();
+						this.label5.Text = this.STADID;
+						this.Stadiumtype = "alter";
+					}
+					this.TOURNAME = memory.GetInt(this.TOURBASE, new long[]
+					{
+						OFFSETS.T[0],
+						OFFSETS.T[1],
+						OFFSETS.T[2],
+						OFFSETS.T[3],
+						OFFSETS.T[4]
+					}).ToString();
+					this.label3.Text = this.TOURNAME;
+					this.TOURROUNDID = memory.GetInt(this.TOURBASE, new long[]
+					{
+						OFFSETS.T[0],
+						OFFSETS.T[1],
+						OFFSETS.T[2],
+						OFFSETS.T[3],
+						OFFSETS.T[5]
+					}).ToString();
+					this.label4.Text = this.TOURROUNDID;
+					this.stadmovie = false;
+					if (iniFile.KeyExists("Stadium", "Modules"))
+					{
+						if (iniFile.Read("Stadium", "Modules") == "1")
+						{
+							if (!iniFile.KeyExists(this.TOURNAME, "exclude"))
+							{
+								if (!iniFile.KeyExists(this.TOURROUNDID, "exclude"))
+								{
+									if (iniFile.KeyExists(this.TOURROUNDID, "comp"))
+									{
+										if (iniFile.Read(this.TOURROUNDID, "comp").Split(new char[]
+										{
+											','
+										})[0].Equals(this.curstad))
+										{
+											this.CCount = FTools.INCcount(this.count1, this.CCount);
+										}
+										FTools.SetINJID(this.CCount, out this.injID, out this.PoliceNum);
+										this.StadiumSelect(this.TOURROUNDID, "comp", this.injID);
+										if (this.Stadiumtype == "first")
+										{
+											memory.WriteInt(this.STADIDBASE, new long[]
+											{
+												OFFSETS.S[0],
+												OFFSETS.S[1],
+												OFFSETS.S[2],
+												OFFSETS.S[4],
+												OFFSETS.S[5]
+											}, this.injID);
+										}
+										else if (this.Stadiumtype == "alter")
+										{
+											memory.WriteInt(this.STADIDBASE, new long[]
+											{
+												OFFSETS.S[0],
+												OFFSETS.S[1],
+												OFFSETS.S[3],
+												OFFSETS.S[4],
+												OFFSETS.S[5]
+											}, this.injID);
+										}
+										if (iniFile.KeyExists(this.StadName, "scoreboardstdname"))
+										{
+											if (this.injID == "176")
+											{
+												memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+												{
+													OFFSETS.STDNAMEOFFSET176[0],
+													OFFSETS.STDNAMEOFFSET176[1],
+													OFFSETS.STDNAMEOFFSET176[2]
+												}, "_" + iniFile.Read(this.StadName, "scoreboardstdname").Split(new char[]
+												{
+													','
+												})[0]);
+											}
+											else if (this.injID == "261")
+											{
+												memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+												{
+													OFFSETS.STDNAMEOFFSET261[0],
+													OFFSETS.STDNAMEOFFSET261[1],
+													OFFSETS.STDNAMEOFFSET261[2]
+												}, "_" + iniFile.Read(this.StadName, "scoreboardstdname").Split(new char[]
+												{
+													','
+												})[0]);
+											}
+										}
+										else if (this.injID == "176")
+										{
+											memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+											{
+												OFFSETS.STDNAMEOFFSET176[0],
+												OFFSETS.STDNAMEOFFSET176[1],
+												OFFSETS.STDNAMEOFFSET176[2]
+											}, "_" + this.StadName);
+										}
+										else if (this.injID == "261")
+										{
+											memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+											{
+												OFFSETS.STDNAMEOFFSET261[0],
+												OFFSETS.STDNAMEOFFSET261[1],
+												OFFSETS.STDNAMEOFFSET261[2]
+											}, "_" + this.StadName);
+										}
+										this.CCount = FTools.INCcount(this.count1, this.CCount);
+										this.label7.Text = this.StadName;
+										SystemSounds.Beep.Play();
+									}
+									else if (iniFile.KeyExists(this.TOURNAME, "comp"))
+									{
+										if (iniFile.Read(this.TOURNAME, "comp").Split(new char[]
+										{
+											','
+										})[0].Equals(this.curstad))
+										{
+											this.CCount = FTools.INCcount(this.count1, this.CCount);
+										}
+										FTools.SetINJID(this.CCount, out this.injID, out this.PoliceNum);
+										this.StadiumSelect(this.TOURNAME, "comp", this.injID);
+										if (this.Stadiumtype == "first")
+										{
+											memory.WriteInt(this.STADIDBASE, new long[]
+											{
+												OFFSETS.S[0],
+												OFFSETS.S[1],
+												OFFSETS.S[2],
+												OFFSETS.S[4],
+												OFFSETS.S[5]
+											}, this.injID);
+										}
+										else if (this.Stadiumtype == "alter")
+										{
+											memory.WriteInt(this.STADIDBASE, new long[]
+											{
+												OFFSETS.S[0],
+												OFFSETS.S[1],
+												OFFSETS.S[3],
+												OFFSETS.S[4],
+												OFFSETS.S[5]
+											}, this.injID);
+										}
+										if (iniFile.KeyExists(this.StadName, "scoreboardstdname"))
+										{
+											if (this.injID == "176")
+											{
+												memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+												{
+													OFFSETS.STDNAMEOFFSET176[0],
+													OFFSETS.STDNAMEOFFSET176[1],
+													OFFSETS.STDNAMEOFFSET176[2]
+												}, "_" + iniFile.Read(this.StadName, "scoreboardstdname").Split(new char[]
+												{
+													','
+												})[0]);
+											}
+											else if (this.injID == "261")
+											{
+												memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+												{
+													OFFSETS.STDNAMEOFFSET261[0],
+													OFFSETS.STDNAMEOFFSET261[1],
+													OFFSETS.STDNAMEOFFSET261[2]
+												}, "_" + iniFile.Read(this.StadName, "scoreboardstdname").Split(new char[]
+												{
+													','
+												})[0]);
+											}
+										}
+										else if (this.injID == "176")
+										{
+											memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+											{
+												OFFSETS.STDNAMEOFFSET176[0],
+												OFFSETS.STDNAMEOFFSET176[1],
+												OFFSETS.STDNAMEOFFSET176[2]
+											}, "_" + this.StadName);
+										}
+										else if (this.injID == "261")
+										{
+											memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+											{
+												OFFSETS.STDNAMEOFFSET261[0],
+												OFFSETS.STDNAMEOFFSET261[1],
+												OFFSETS.STDNAMEOFFSET261[2]
+											}, "_" + this.StadName);
+										}
+										this.CCount = FTools.INCcount(this.count1, this.CCount);
+										this.label7.Text = this.StadName;
+										SystemSounds.Beep.Play();
+									}
+									else if (iniFile.KeyExists(this.HID, "stadium"))
+									{
+										if (iniFile.Read(this.HID, "stadium").Split(new char[]
+										{
+											','
+										})[0].Equals(this.curstad))
+										{
+											this.CCount = FTools.INCcount(this.count1, this.CCount);
+										}
+										FTools.SetINJID(this.CCount, out this.injID, out this.PoliceNum);
+										this.StadiumSelect(this.HID, "stadium", this.injID);
+										if (this.Stadiumtype == "first")
+										{
+											memory.WriteInt(this.STADIDBASE, new long[]
+											{
+												OFFSETS.S[0],
+												OFFSETS.S[1],
+												OFFSETS.S[2],
+												OFFSETS.S[4],
+												OFFSETS.S[5]
+											}, this.injID);
+										}
+										else if (this.Stadiumtype == "alter")
+										{
+											memory.WriteInt(this.STADIDBASE, new long[]
+											{
+												OFFSETS.S[0],
+												OFFSETS.S[1],
+												OFFSETS.S[3],
+												OFFSETS.S[4],
+												OFFSETS.S[5]
+											}, this.injID);
+										}
+										if (iniFile.KeyExists(this.StadName, "scoreboardstdname"))
+										{
+											if (this.injID == "176")
+											{
+												memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+												{
+													OFFSETS.STDNAMEOFFSET176[0],
+													OFFSETS.STDNAMEOFFSET176[1],
+													OFFSETS.STDNAMEOFFSET176[2]
+												}, "_" + iniFile.Read(this.StadName, "scoreboardstdname").Split(new char[]
+												{
+													','
+												})[0]);
+											}
+											else if (this.injID == "261")
+											{
+												memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+												{
+													OFFSETS.STDNAMEOFFSET261[0],
+													OFFSETS.STDNAMEOFFSET261[1],
+													OFFSETS.STDNAMEOFFSET261[2]
+												}, "_" + iniFile.Read(this.StadName, "scoreboardstdname").Split(new char[]
+												{
+													','
+												})[0]);
+											}
+										}
+										else if (this.injID == "176")
+										{
+											memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+											{
+												OFFSETS.STDNAMEOFFSET176[0],
+												OFFSETS.STDNAMEOFFSET176[1],
+												OFFSETS.STDNAMEOFFSET176[2]
+											}, "_" + this.StadName);
+										}
+										else if (this.injID == "261")
+										{
+											memory.WriteStringWithOffsets(OFFSETS.STDNAMEBASE, new long[]
+											{
+												OFFSETS.STDNAMEOFFSET261[0],
+												OFFSETS.STDNAMEOFFSET261[1],
+												OFFSETS.STDNAMEOFFSET261[2]
+											}, "_" + this.StadName);
+										}
+										this.CCount = FTools.INCcount(this.count1, this.CCount);
+										this.label7.Text = this.StadName;
+										SystemSounds.Beep.Play();
+									}
+									else
+									{
+										string sourceDir = Form1.exedir + "\\FSW\\stadium";
+										string targetDir = Form1.exedir + "\\data\\sceneassets";
+										FTools.ExtraSetup(this.Psource, this.Pdest, "4", "4", this.PoliceNum);
+										FTools.ExtraSetup(this.Psource, this.Pdest, "9", "9", this.PoliceNum);
+										FTools.ExtraSetup(this.Nsource, this.Ndest, "0", this.NetColor, this.NetNum);
+										FTools.ExtraSetup(this.PitchMowsource, this.PitchMowdest, "0", this.PitchMowPattern, this.PitchTexNum);
+										FTools.Copy(sourceDir, targetDir);
+										if (this.STADID == this.injID)
+										{
+											if (this.STADID == "176")
+											{
+												this.injID = "261";
+											}
+											else if (this.STADID == "261")
+											{
+												this.injID = "176";
+											}
+											if (this.Stadiumtype == "first")
+											{
+												memory.WriteInt(this.STADIDBASE, new long[]
+												{
+													OFFSETS.S[0],
+													OFFSETS.S[1],
+													OFFSETS.S[2],
+													OFFSETS.S[4],
+													OFFSETS.S[5]
+												}, this.injID);
+											}
+											else if (this.Stadiumtype == "alter")
+											{
+												memory.WriteInt(this.STADIDBASE, new long[]
+												{
+													OFFSETS.S[0],
+													OFFSETS.S[1],
+													OFFSETS.S[3],
+													OFFSETS.S[4],
+													OFFSETS.S[5]
+												}, this.injID);
+											}
+										}
+										this.curstad = "";
+										this.label7.Text = "default";
+									}
+								}
+								else
+								{
+									this.label7.Text = "Specific round:" + this.TOURROUNDID + " Exluded";
+								}
+							}
+							else
+							{
+								this.label7.Text = "Full Comp:" + this.TOURNAME + " Exluded";
+							}
+							this.label6.Refresh();
+							this.label6.Text = this.CCount;
+						}
+						else
+						{
+							this.label7.Text = "Stadium Module Disable";
+						}
+					}
+					if (iniFile.KeyExists("TvLogo", "Modules"))
+					{
+						if (iniFile.Read("TvLogo", "Modules") == "1")
+						{
+							if (iniFile.KeyExists(this.TOURROUNDID, "TVLogo"))
+							{
+								string text = iniFile.Read(this.TOURROUNDID, "TVLogo");
+								FTools.Copytvlogo(this.TVLogo + "\\" + text, this.TVdata, out this.tvlogoscoreboardtype);
+								this.label8.Text = text;
+							}
+							else if (iniFile.KeyExists(this.TOURNAME, "TVLogo"))
+							{
+								string text2 = iniFile.Read(this.TOURNAME, "TVLogo");
+								FTools.Copytvlogo(this.TVLogo + "\\" + text2, this.TVdata, out this.tvlogoscoreboardtype);
+								this.label8.Text = text2;
+							}
+							else if (iniFile.KeyExists(this.HID, "HomeTeamTvLogo"))
+							{
+								string text3 = iniFile.Read(this.HID, "HomeTeamTvLogo");
+								FTools.Copytvlogo(this.TVLogo + "\\" + text3, this.TVdata, out this.tvlogoscoreboardtype);
+								this.label8.Text = text3;
+							}
+							else
+							{
+								FTools.Copytvlogo(Form1.exedir + "\\FSW\\TVlogo", this.TVdata, out this.tvlogoscoreboardtype);
+								this.label8.Text = "default";
+							}
+						}
+						else
+						{
+							this.label8.Text = "TV Logo Module Disable";
+						}
+					}
+					if (iniFile.KeyExists("ScoreBoard", "Modules"))
+					{
+						if (iniFile.Read("ScoreBoard", "Modules") == "1")
+						{
+							if (iniFile.KeyExists(this.TOURROUNDID, "Scoreboard"))
+							{
+								FTools.Copy(Form1.exedir + "\\FSW\\Scoreboard", this.Scoredata + "\\game");
+								string text4 = iniFile.Read(this.TOURROUNDID, "Scoreboard");
+								if (this.tvlogoscoreboardtype == "default")
+								{
+									FTools.Copy(this.ScoreBoard + "\\" + text4, this.Scoredata);
+									this.label10.Text = text4;
+								}
+								else if (Directory.Exists(string.Concat(new string[]
+								{
+									this.ScoreBoard,
+									"\\",
+									text4,
+									"\\",
+									this.tvlogoscoreboardtype
+								})))
+								{
+									FTools.Copy(string.Concat(new string[]
+									{
+										this.ScoreBoard,
+										"\\",
+										text4,
+										"\\",
+										this.tvlogoscoreboardtype
+									}), this.Scoredata);
+									this.label10.Text = text4;
+								}
+								else
+								{
+									FTools.Copy(this.ScoreBoard + "\\" + text4, this.Scoredata);
+									this.label10.Text = text4;
+								}
+							}
+							else if (iniFile.KeyExists(this.TOURNAME, "Scoreboard"))
+							{
+								FTools.Copy(Form1.exedir + "\\FSW\\Scoreboard", this.Scoredata + "\\game");
+								string text5 = iniFile.Read(this.TOURNAME, "Scoreboard");
+								if (this.tvlogoscoreboardtype == "default")
+								{
+									FTools.Copy(this.ScoreBoard + "\\" + text5, this.Scoredata);
+									this.label10.Text = text5;
+								}
+								else if (this.tvlogoscoreboardtype != "default")
+								{
+									if (Directory.Exists(string.Concat(new string[]
+									{
+										this.ScoreBoard,
+										"\\",
+										text5,
+										"\\",
+										this.tvlogoscoreboardtype
+									})))
+									{
+										FTools.Copy(string.Concat(new string[]
+										{
+											this.ScoreBoard,
+											"\\",
+											text5,
+											"\\",
+											this.tvlogoscoreboardtype
+										}), this.Scoredata);
+										this.label10.Text = text5;
+									}
+									else
+									{
+										FTools.Copy(this.ScoreBoard + "\\" + text5, this.Scoredata);
+										this.label10.Text = text5;
+									}
+								}
+							}
+							else if (iniFile.KeyExists(this.HID, "HomeTeamScoreBoard"))
+							{
+								FTools.Copy(Form1.exedir + "\\FSW\\Scoreboard", this.Scoredata + "\\game");
+								string text6 = iniFile.Read(this.HID, "HomeTeamScoreBoard");
+								if (this.tvlogoscoreboardtype == "default")
+								{
+									FTools.Copy(this.ScoreBoard + "\\" + text6, this.Scoredata);
+									this.label10.Text = text6;
+								}
+								else if (this.tvlogoscoreboardtype != "default")
+								{
+									if (Directory.Exists(string.Concat(new string[]
+									{
+										this.ScoreBoard,
+										"\\",
+										text6,
+										"\\",
+										this.tvlogoscoreboardtype
+									})))
+									{
+										FTools.Copy(string.Concat(new string[]
+										{
+											this.ScoreBoard,
+											"\\",
+											text6,
+											"\\",
+											this.tvlogoscoreboardtype
+										}), this.Scoredata);
+										this.label10.Text = text6;
+									}
+									else
+									{
+										FTools.Copy(this.ScoreBoard + "\\" + text6, this.Scoredata);
+										this.label10.Text = text6;
+									}
+								}
+							}
+							else
+							{
+								FTools.Copy(Form1.exedir + "\\FSW\\Scoreboard", this.Scoredata + "\\game");
+								this.label10.Text = "default";
+							}
+						}
+						else
+						{
+							this.label10.Text = "ScoreBoard Module Disable";
+						}
+					}
+					if (iniFile.KeyExists("Movies", "Modules"))
+					{
+						if (iniFile.Read("Movies", "Modules") == "1")
+						{
+							if (iniFile.KeyExists(this.TOURROUNDID, "movies"))
+							{
+								string text7 = iniFile.Read(this.TOURROUNDID, "movies");
+								string sourceFileName = this.Movies + "\\" + text7 + "\\bootflowoutro.vp8";
+								string sourceFileName2 = this.Movies + "\\" + text7 + "\\bumper.big";
+								File.Copy(sourceFileName, this.Movdata, true);
+								File.Copy(sourceFileName2, this.MOVBUMP, true);
+								this.label11.Text = text7;
+							}
+							else if (iniFile.KeyExists(this.TOURNAME, "movies"))
+							{
+								string text8 = iniFile.Read(this.TOURNAME, "movies");
+								string sourceFileName3 = this.Movies + "\\" + text8 + "\\bootflowoutro.vp8";
+								string sourceFileName4 = this.Movies + "\\" + text8 + "\\bumper.big";
+								File.Copy(sourceFileName3, this.Movdata, true);
+								File.Copy(sourceFileName4, this.MOVBUMP, true);
+								this.label11.Text = text8;
+							}
+							else if (iniFile.KeyExists(this.derby, "DerbyMatch"))
+							{
+								string text9 = iniFile.Read(this.derby, "DerbyMatch");
+								string sourceFileName5 = this.Movies + "\\" + text9 + "\\bootflowoutro.vp8";
+								string sourceFileName6 = this.Movies + "\\" + text9 + "\\bumper.big";
+								File.Copy(sourceFileName5, this.Movdata, true);
+								File.Copy(sourceFileName6, this.MOVBUMP, true);
+								this.label11.Text = text9;
+							}
+							else if (iniFile.KeyExists(this.HID, "TeamMovies"))
+							{
+								string text10 = iniFile.Read(this.HID, "TeamMovies");
+								string sourceFileName7 = this.Movies + "\\" + text10 + "\\bootflowoutro.vp8";
+								string sourceFileName8 = this.Movies + "\\" + text10 + "\\bumper.big";
+								File.Copy(sourceFileName7, this.Movdata, true);
+								File.Copy(sourceFileName8, this.MOVBUMP, true);
+								this.label11.Text = text10;
+							}
+							else if (this.stadmovie)
+							{
+								this.label11.Text = "Stadium Movie";
+							}
+							else
+							{
+								string sourceFileName9 = Form1.exedir + "\\FSW\\Nav\\bootflowoutro.vp8";
+								string sourceFileName10 = Form1.exedir + "\\FSW\\Nav\\bumper.big";
+								File.Copy(sourceFileName9, this.Movdata, true);
+								File.Copy(sourceFileName10, this.MOVBUMP, true);
+								this.label11.Text = "default";
+							}
+						}
+						else
+						{
+							this.label11.Text = "Movie Module Disable";
+						}
+					}
+				}
+			}
+			catch
+			{
+			}
+			this.timer2.Enabled = true;
+		}
+
+		// Token: 0x0600000A RID: 10 RVA: 0x0000205E File Offset: 0x0000025E
+		private void button3_Click(object sender, EventArgs e)
+		{
+			Process.Start(this.fifaEXE);
+		}
+
+		// Token: 0x0600000B RID: 11 RVA: 0x0000206C File Offset: 0x0000026C
+		private void notifyIcon1_MouseDoubleClick(object sender, MouseEventArgs e)
+		{
+			base.ShowInTaskbar = true;
+			this.notifyIcon1.Visible = false;
+			base.Show();
+			base.WindowState = FormWindowState.Normal;
+		}
+
+		// Token: 0x0600000C RID: 12 RVA: 0x000048FC File Offset: 0x00002AFC
+		private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+		{
+			try
+			{
+				string sourceDir = Form1.exedir + "\\FSW\\stadium";
+				string targetDir = Form1.exedir + "\\data\\sceneassets";
+				FTools.ExtraSetup(this.Psource, this.Pdest, "4", "4", this.PoliceNum);
+				FTools.ExtraSetup(this.Psource, this.Pdest, "9", "9", this.PoliceNum);
+				FTools.ExtraSetup(this.Nsource, this.Ndest, "0", this.NetColor, this.NetNum);
+				FTools.ExtraSetup(this.PitchMowsource, this.PitchMowdest, "0", this.PitchMowPattern, this.PitchTexNum);
+				FTools.Copy(sourceDir, targetDir);
+			}
+			catch
+			{
+			}
+			try
+			{
+				FTools.Copy(Form1.exedir + "\\FSW\\TVLogo", this.TVdata);
+				FTools.Copy(Form1.exedir + "\\FSW\\Scoreboard", this.Scoredata + "\\game");
+			}
+			catch
+			{
+			}
+			try
+			{
+				string sourceFileName = Form1.exedir + "\\FSW\\Nav\\pausemenuflow.nav_Original";
+				string destFileName = Form1.exedir + "\\data\\ui\\nav\\pausemenuflow.nav";
+				File.Copy(sourceFileName, destFileName, true);
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600000D RID: 13 RVA: 0x00004A54 File Offset: 0x00002C54
+		private void scoreboards(string comp, string type, string type2)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile.KeyExists(comp, "TVLogo"))
+				{
+					if (!(type == "default"))
+					{
+						iniFile.Write(comp, type, "TVLogo");
+						MessageBox.Show(string.Concat(new string[]
+						{
+							"Tournament ",
+							comp,
+							" has been assigned ",
+							type,
+							" TVLogos"
+						}));
+					}
+				}
+				else if (type == "default")
+				{
+					iniFile.DeleteKey(comp, "TVLogo");
+				}
+				else if (MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, " Tournament " + comp + " has a TVLogo assigned. do you wish to change this?", "Existing TVLogo Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile.Write(comp, type, "TVLogo");
+					MessageBox.Show(string.Concat(new string[]
+					{
+						"Tournament ",
+						comp,
+						" has been assigned ",
+						type,
+						" TVLogo"
+					}));
+				}
+			}
+			catch
+			{
+			}
+			try
+			{
+				IniFile iniFile2 = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile2.KeyExists(comp, "Scoreboard"))
+				{
+					if (!(type2 == "default"))
+					{
+						iniFile2.Write(comp, type2, "Scoreboard");
+						MessageBox.Show(string.Concat(new string[]
+						{
+							"Tournament ",
+							comp,
+							" has been assigned ",
+							type2,
+							" Scoreboard"
+						}));
+					}
+				}
+				else if (type2 == "default")
+				{
+					iniFile2.DeleteKey(comp, "Scoreboard");
+				}
+				else if (MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, " Tournament " + comp + " has a Scoreboard assigned. do you wish to change this?", "Existing ScoreBoard Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile2.Write(comp, type2, "Scoreboard");
+					MessageBox.Show(string.Concat(new string[]
+					{
+						"Tournament ",
+						comp,
+						" has been assigned ",
+						type2,
+						" Scoreboard"
+					}));
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600000E RID: 14 RVA: 0x00004CA0 File Offset: 0x00002EA0
+		private void teamscoreboards(string comp, string type, string type2)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile.KeyExists(comp, "HomeTeamTvLogo"))
+				{
+					if (!(type == "default"))
+					{
+						iniFile.Write(comp, type, "HomeTeamTvLogo");
+						MessageBox.Show(string.Concat(new string[]
+						{
+							"Home Team ",
+							comp,
+							" has been assigned ",
+							type,
+							" TVLogos"
+						}));
+					}
+				}
+				else if (type == "default")
+				{
+					iniFile.DeleteKey(comp, "HomeTeamTvLogo");
+				}
+				else if (MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, " Home Team " + comp + " has a TVLogo assigned. do you wish to change this?", "Existing TVLogo Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile.Write(comp, type, "HomeTeamTvLogo");
+					MessageBox.Show(string.Concat(new string[]
+					{
+						"Home Team ",
+						comp,
+						" has been assigned ",
+						type,
+						" TVLogo"
+					}));
+				}
+			}
+			catch
+			{
+			}
+			try
+			{
+				IniFile iniFile2 = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile2.KeyExists(comp, "HomeTeamScoreBoard"))
+				{
+					if (!(type2 == "default"))
+					{
+						iniFile2.Write(comp, type2, "HomeTeamScoreBoard");
+						MessageBox.Show(string.Concat(new string[]
+						{
+							"Home Team ",
+							comp,
+							" has been assigned ",
+							type2,
+							" Scoreboard"
+						}));
+					}
+				}
+				else if (type2 == "default")
+				{
+					iniFile2.DeleteKey(comp, "HomeTeamScoreBoard");
+				}
+				else if (MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, " Home Team " + comp + " has a Scoreboard assigned. do you wish to change this?", "Existing ScoreBoard Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile2.Write(comp, type2, "HomeTeamScoreBoard");
+					MessageBox.Show(string.Concat(new string[]
+					{
+						"Home Team ",
+						comp,
+						" has been assigned ",
+						type2,
+						" Scoreboard"
+					}));
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600000F RID: 15 RVA: 0x00004EEC File Offset: 0x000030EC
+		private void moviesassign(string comp, string type, string section)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile.KeyExists(comp, section))
+				{
+					if (!(type == "None"))
+					{
+						iniFile.Write(comp, type, section);
+						if (section == "movies")
+						{
+							MessageBox.Show(string.Concat(new string[]
+							{
+								"Tournament ",
+								comp,
+								" has been assigned ",
+								type,
+								" intro Movie"
+							}));
+						}
+						else if (section == "TeamMovies")
+						{
+							MessageBox.Show(string.Concat(new string[]
+							{
+								"Team id ",
+								comp,
+								" has been assigned ",
+								type,
+								" intro Movie"
+							}));
+						}
+						else if (section == "DerbyMatch")
+						{
+							MessageBox.Show(string.Concat(new string[]
+							{
+								"Derby match ",
+								comp,
+								" has been assigned ",
+								type,
+								" intro Movie"
+							}));
+						}
+					}
+				}
+				else if (type == "None")
+				{
+					if (section == "movies" && MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, string.Concat(new string[]
+					{
+						" Tournament ",
+						comp,
+						" has ",
+						type,
+						" Movie assigned. do you wish to reset this to default?"
+					}), "Existing intro Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.DeleteKey(comp, section);
+					}
+					if (section == "TeamMovies" && MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, string.Concat(new string[]
+					{
+						" Team id ",
+						comp,
+						" has ",
+						type,
+						" Movie assigned. do you wish to reset this to default?"
+					}), "Existing intro Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.DeleteKey(comp, section);
+					}
+					if (section == "DerbyMatch" && MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, string.Concat(new string[]
+					{
+						"Derby match   ",
+						comp,
+						" has ",
+						type,
+						" Movie assigned. do you wish to reset this to default?"
+					}), "Existing intro Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.DeleteKey(comp, section);
+					}
+				}
+				else if (section == "movies")
+				{
+					if (MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, string.Concat(new string[]
+					{
+						" Tournament ",
+						comp,
+						" has ",
+						type,
+						" Movie assigned. do you wish to change this?"
+					}), "Existing intro Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.Write(comp, type, section);
+						MessageBox.Show(string.Concat(new string[]
+						{
+							"Tournament ",
+							comp,
+							" has been assigned ",
+							type,
+							" intro Movie"
+						}));
+					}
+				}
+				else if (section == "TeamMovies")
+				{
+					if (MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, string.Concat(new string[]
+					{
+						" Team id  ",
+						comp,
+						" has ",
+						type,
+						" Movie assigned. do you wish to change this?"
+					}), "Existing intro Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.Write(comp, type, section);
+						MessageBox.Show(string.Concat(new string[]
+						{
+							"Team id  ",
+							comp,
+							" has been assigned ",
+							type,
+							" intro Movie"
+						}));
+					}
+				}
+				else if (section == "DerbyMatch" && MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, string.Concat(new string[]
+				{
+					"Derby match  ",
+					comp,
+					" has ",
+					type,
+					" Movie assigned. do you wish to change this?"
+				}), "Existing intro Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile.Write(comp, type, section);
+					MessageBox.Show(string.Concat(new string[]
+					{
+						"Derby match ",
+						comp,
+						" has been assigned ",
+						type,
+						" intro Movie"
+					}));
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000010 RID: 16 RVA: 0x0000532C File Offset: 0x0000352C
+		private void assignstadium(string comp, string type, string section)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile.KeyExists(comp, section))
+				{
+					if (!(type == "None"))
+					{
+						iniFile.Write(comp, type, section);
+						string[] array = type.Split(new char[]
+						{
+							','
+						});
+						MessageBox.Show(string.Concat(new string[]
+						{
+							array[0],
+							" with ",
+							array[1],
+							" Police code, ",
+							array[2],
+							" Pitch pattern and ",
+							array[3],
+							" net Pattern is now assigned to Team ",
+							comp
+						}));
+					}
+				}
+				else if (type == "None")
+				{
+					if (MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, " Home Team " + comp + " has a Stadium assigned. do you wish to reset this to no assigned stadium?", "Existing stadium Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.DeleteKey(comp, section);
+					}
+				}
+				else if (MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, " Home Team " + comp + " has a Stadium assigned. do you wish to change this?", "Existing stadium Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile.Write(comp, type, section);
+					string[] array2 = type.Split(new char[]
+					{
+						','
+					});
+					MessageBox.Show(string.Concat(new string[]
+					{
+						array2[0],
+						" with ",
+						array2[1],
+						" Police code, ",
+						array2[2],
+						" Pitch pattern and ",
+						array2[3],
+						" net Pattern is now assigned to Team ",
+						comp
+					}));
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000011 RID: 17 RVA: 0x000054E0 File Offset: 0x000036E0
+		private void assigncompstadium(string comp, string type, string section)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (!iniFile.KeyExists(comp, section))
+				{
+					if (!(type == "None"))
+					{
+						iniFile.Write(comp, type, section);
+						string[] array = type.Split(new char[]
+						{
+							','
+						});
+						MessageBox.Show(string.Concat(new string[]
+						{
+							array[0],
+							" with ",
+							array[1],
+							" Police code, ",
+							array[2],
+							" Pitch pattern and ",
+							array[3],
+							" net Pattern is now assigned to tournament ",
+							comp
+						}));
+					}
+				}
+				else if (type == "None")
+				{
+					if (MessageBox.Show(new Form
+					{
+						TopMost = true
+					}, " tournament " + comp + " has a Stadium assigned. do you wish to reset this to no assigned stadium?", "Existing stadium Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+					{
+						iniFile.DeleteKey(comp, section);
+					}
+				}
+				else if (MessageBox.Show(new Form
+				{
+					TopMost = true
+				}, " tournament " + comp + " has a Stadium assigned. do you wish to change this?", "Existing stadium Assigned to " + comp, MessageBoxButtons.YesNo) == DialogResult.Yes)
+				{
+					iniFile.Write(comp, type, section);
+					string[] array2 = type.Split(new char[]
+					{
+						','
+					});
+					MessageBox.Show(string.Concat(new string[]
+					{
+						array2[0],
+						" with ",
+						array2[1],
+						" Police code, ",
+						array2[2],
+						" Pitch pattern and ",
+						array2[3],
+						" net Pattern is now assigned to tournament ",
+						comp
+					}));
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000012 RID: 18 RVA: 0x0000208E File Offset: 0x0000028E
+		private void toolToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			this.button5.PerformClick();
+		}
+
+		// Token: 0x06000013 RID: 19 RVA: 0x0000209B File Offset: 0x0000029B
+		private void helloToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			this.button6.PerformClick();
+		}
+
+		// Token: 0x06000014 RID: 20 RVA: 0x000020A8 File Offset: 0x000002A8
+		private void exitToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			base.Close();
+		}
+
+		// Token: 0x06000015 RID: 21 RVA: 0x000020B0 File Offset: 0x000002B0
+		private void showFormToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			base.ShowInTaskbar = true;
+			base.Show();
+			base.WindowState = FormWindowState.Normal;
+		}
+
+		// Token: 0x06000016 RID: 22 RVA: 0x000020C6 File Offset: 0x000002C6
+		private void Form1_Resize(object sender, EventArgs e)
+		{
+			if (FormWindowState.Minimized == base.WindowState)
+			{
+				base.ShowInTaskbar = false;
+				return;
+			}
+			if (base.WindowState == FormWindowState.Normal)
+			{
+				base.ShowInTaskbar = true;
+			}
+		}
+
+		// Token: 0x06000017 RID: 23 RVA: 0x00005694 File Offset: 0x00003894
+		private void button5_Click(object sender, EventArgs e)
+		{
+			this.timer2.Enabled = false;
+			using (Form2 form = new Form2())
+			{
+				if (form.ShowDialog() == DialogResult.OK)
+				{
+					string selectedtvlogo = form.Selectedtvlogo;
+					string selectedscoreboard = form.Selectedscoreboard;
+					string selectedround = form.selectedround;
+					if (selectedround == "0")
+					{
+						this.scoreboards(this.TOURNAME, selectedtvlogo, selectedscoreboard);
+					}
+					else if (selectedround == "1")
+					{
+						this.scoreboards(this.TOURROUNDID, selectedtvlogo, selectedscoreboard);
+					}
+					else if (selectedround == "2")
+					{
+						this.teamscoreboards(this.HID, selectedtvlogo, selectedscoreboard);
+					}
+				}
+			}
+			this.timer2.Enabled = true;
+		}
+
+		// Token: 0x06000018 RID: 24 RVA: 0x00005750 File Offset: 0x00003950
+		private void button6_Click(object sender, EventArgs e)
+		{
+			this.timer2.Enabled = false;
+			using (Form3 form = new Form3())
+			{
+				if (form.ShowDialog() == DialogResult.OK)
+				{
+					string selectedmovie = form.Selectedmovie;
+					string selectedround = form.selectedround;
+					if (selectedround == "0")
+					{
+						this.moviesassign(this.TOURNAME, selectedmovie, "movies");
+					}
+					else if (selectedround == "1")
+					{
+						this.moviesassign(this.TOURROUNDID, selectedmovie, "movies");
+					}
+					else if (selectedround == "2")
+					{
+						this.moviesassign(this.derby, selectedmovie, "DerbyMatch");
+					}
+					else if (selectedround == "3")
+					{
+						this.moviesassign(this.HID, selectedmovie, "TeamMovies");
+					}
+				}
+			}
+			this.timer2.Enabled = true;
+		}
+
+		// Token: 0x06000019 RID: 25 RVA: 0x00005834 File Offset: 0x00003A34
+		private void StadiumSelect(string HID, string SECTION, string injid)
+		{
+			IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+			if (iniFile.KeyExists(HID, SECTION))
+			{
+				string[] array = iniFile.Read(HID, SECTION).Split(new char[]
+				{
+					','
+				});
+				string iniid = array[array.Length - 3];
+				string iniid2 = array[array.Length - 2];
+				string iniid3 = array[array.Length - 1];
+				int num = array.Length - 3;
+				if (num == 1)
+				{
+					this.StadName = array[0];
+					this.stad = this.targetpath + "\\" + this.StadName;
+					this.dest = Form1.exedir + "\\data\\sceneassets";
+					this.glare1 = this.stad + "\\1";
+					this.glare3 = this.stad + "\\3";
+				}
+				else if (num > 1)
+				{
+					int num2 = new Random().Next(0, num - 1);
+					this.StadName = array[num2];
+					this.stad = this.targetpath + "\\" + this.StadName;
+					this.dest = Form1.exedir + "\\data\\sceneassets";
+					this.glare1 = this.stad + "\\1";
+					this.glare3 = this.stad + "\\3";
+				}
+				try
+				{
+					File.Copy(this.stad + "\\model.rx3", this.dest + "\\stadium\\stadium_" + this.injID + ".rx3", true);
+					File.Copy(this.stad + "\\texture_day.rx3", this.dest + "\\stadium\\stadium_" + this.injID + "_1_textures.rx3", true);
+					File.Copy(this.stad + "\\texture_night.rx3", this.dest + "\\stadium\\stadium_" + this.injID + "_3_textures.rx3", true);
+					File.Copy(this.stad + "\\EntranceScene\\bcstadiumcams_" + this.injID + ".dat", Form1.exedir + "\\data\\bcdata\\camera\\bcstadiumcams_" + this.injID + ".dat", true);
+				}
+				catch
+				{
+				}
+				try
+				{
+					File.Copy(this.stad + "\\crowd_day.dat", this.dest + "\\crowdplacement\\crowd_" + this.injID + "_1.dat", true);
+					File.Copy(this.stad + "\\crowd_night.dat", this.dest + "\\crowdplacement\\crowd_" + this.injID + "_3.dat", true);
+				}
+				catch
+				{
+				}
+				try
+				{
+					string no = "1";
+					FTools.CopyGlares(this.glare1 + "\\glare1_0.lnx", no, "0", this.injID, Form1.exedir);
+					File.Copy(this.glare1 + "\\glare1_0.rx3", this.dest + "\\fx\\glares_" + this.injID + "_1_0.rx3", true);
+					FTools.CopyGlares(this.glare1 + "\\glare1_1.lnx", no, "1", this.injID, Form1.exedir);
+					File.Copy(this.glare1 + "\\glare1_1.rx3", this.dest + "\\fx\\glares_" + this.injID + "_1_1.rx3", true);
+					FTools.CopyGlares(this.glare1 + "\\glare1_2.lnx", no, "2", this.injID, Form1.exedir);
+					File.Copy(this.glare1 + "\\glare1_2.rx3", this.dest + "\\fx\\glares_" + this.injID + "_1_2.rx3", true);
+					FTools.CopyGlares(this.glare1 + "\\glare1_3.lnx", no, "3", this.injID, Form1.exedir);
+					File.Copy(this.glare1 + "\\glare1_3.rx3", this.dest + "\\fx\\glares_" + this.injID + "_1_3.rx3", true);
+				}
+				catch
+				{
+				}
+				try
+				{
+					string no2 = "3";
+					FTools.CopyGlares(this.glare3 + "\\glare3_0.lnx", no2, "0", this.injID, Form1.exedir);
+					File.Copy(this.glare3 + "\\glare3_0.rx3", this.dest + "\\fx\\glares_" + this.injID + "_3_0.rx3", true);
+					FTools.CopyGlares(this.glare3 + "\\glare3_1.lnx", no2, "1", this.injID, Form1.exedir);
+					File.Copy(this.glare3 + "\\glare3_1.rx3", this.dest + "\\fx\\glares_" + this.injID + "_3_1.rx3", true);
+					FTools.CopyGlares(this.glare3 + "\\glare3_2.lnx", no2, "2", this.injID, Form1.exedir);
+					File.Copy(this.glare3 + "\\glare3_2.rx3", this.dest + "\\fx\\glares_" + this.injID + "_3_2.rx3", true);
+					FTools.CopyGlares(this.glare3 + "\\glare3_3.lnx", no2, "3", this.injID, Form1.exedir);
+					File.Copy(this.glare3 + "\\glare3_3.rx3", this.dest + "\\fx\\glares_" + this.injID + "_3_3.rx3", true);
+				}
+				catch
+				{
+				}
+				this.curstad = this.StadName;
+				try
+				{
+					FTools.ExtraSetup(this.Psource, this.Pdest, iniid, this.PoliceOfficer, this.PoliceNum);
+					FTools.ExtraSetup(this.Nsource, this.Ndest, iniid3, this.NetColor, this.NetNum);
+					FTools.ExtraSetup(this.PitchMowsource, this.PitchMowdest, iniid2, this.PitchMowPattern, this.PitchTexNum);
+				}
+				catch
+				{
+				}
+				try
+				{
+					if (File.Exists(this.stad + "\\NoSeats.rx3"))
+					{
+						string sourceFileName = this.stad + "\\NoSeats.rx3";
+						string destFileName = Form1.exedir + "\\data\\sceneassets\\crowdchair\\specificchair_0_" + injid + ".rx3";
+						File.Copy(sourceFileName, destFileName, true);
+					}
+					else
+					{
+						string sourceFileName2 = Form1.exedir + "\\FSW\\Stadium\\crowdchair\\specificchair_0_176.rx3";
+						string sourceFileName3 = Form1.exedir + "\\FSW\\Stadium\\crowdchair\\specificchair_0_261.rx3";
+						string destFileName2 = Form1.exedir + "\\data\\sceneassets\\crowdchair\\specificchair_0_176.rx3";
+						string destFileName3 = Form1.exedir + "\\data\\sceneassets\\crowdchair\\specificchair_0_261.rx3";
+						File.Copy(sourceFileName2, destFileName2, true);
+						File.Copy(sourceFileName3, destFileName3, true);
+					}
+				}
+				catch
+				{
+				}
+				try
+				{
+					string text = this.stad + "\\StadiumMovie.vp8";
+					string text2 = this.stad + "\\StadiumBumper.big";
+					if (File.Exists(text) && File.Exists(text2))
+					{
+						File.Copy(text, this.Movdata, true);
+						File.Copy(text2, this.MOVBUMP, true);
+						this.stadmovie = true;
+					}
+					else
+					{
+						this.stadmovie = false;
+					}
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		// Token: 0x0600001A RID: 26 RVA: 0x00005FC0 File Offset: 0x000041C0
+		private void button2_Click(object sender, EventArgs e)
+		{
+			string type = string.Empty;
+			this.timer2.Enabled = false;
+			using (Form5 form = new Form5())
+			{
+				if (form.ShowDialog() == DialogResult.OK)
+				{
+					string selectedstadium = form.Selectedstadium;
+					string selectedround = form.selectedround;
+					string selectedpolice = form.selectedpolice;
+					string selectedpitch = form.selectedpitch;
+					string selectednet = form.selectednet;
+					if (selectedround == "0")
+					{
+						if (selectedstadium == "None")
+						{
+							type = selectedstadium;
+						}
+						else
+						{
+							type = string.Concat(new string[]
+							{
+								selectedstadium,
+								",",
+								selectedpolice,
+								",",
+								selectedpitch,
+								",",
+								selectednet
+							});
+						}
+						this.assignstadium(this.HID, type, "stadium");
+					}
+					else if (selectedround == "1")
+					{
+						if (selectedstadium == "None")
+						{
+							type = selectedstadium;
+						}
+						else
+						{
+							type = string.Concat(new string[]
+							{
+								selectedstadium,
+								",",
+								selectedpolice,
+								",",
+								selectedpitch,
+								",",
+								selectednet
+							});
+						}
+						this.assigncompstadium(this.TOURROUNDID, type, "comp");
+					}
+					else if (selectedround == "2")
+					{
+						string[] multistadium = form.multistadium;
+						if (selectedstadium == "None")
+						{
+							type = selectedstadium;
+						}
+						else
+						{
+							string text = string.Join(",", multistadium);
+							type = string.Concat(new string[]
+							{
+								text,
+								",",
+								selectedpolice,
+								",",
+								selectedpitch,
+								",",
+								selectednet
+							});
+						}
+						this.assignstadium(this.HID, type, "stadium");
+					}
+					else if (selectedround == "3")
+					{
+						string[] multistadium2 = form.multistadium;
+						if (selectedstadium == "None")
+						{
+							type = selectedstadium;
+						}
+						else
+						{
+							string text2 = string.Join(",", multistadium2);
+							type = string.Concat(new string[]
+							{
+								text2,
+								",",
+								selectedpolice,
+								",",
+								selectedpitch,
+								",",
+								selectednet
+							});
+						}
+						this.assigncompstadium(this.TOURROUNDID, type, "comp");
+					}
+					else if (selectedround == "4")
+					{
+						string[] multistadium3 = form.multistadium;
+						if (selectedstadium == "None")
+						{
+							type = selectedstadium;
+						}
+						else
+						{
+							string text3 = string.Join(",", multistadium3);
+							type = string.Concat(new string[]
+							{
+								text3,
+								",",
+								selectedpolice,
+								",",
+								selectedpitch,
+								",",
+								selectednet
+							});
+						}
+						this.assigncompstadium(this.TOURNAME, type, "comp");
+					}
+				}
+			}
+			this.timer2.Enabled = true;
+		}
+
+		// Token: 0x0600001B RID: 27 RVA: 0x000020E8 File Offset: 0x000002E8
+		private void assignStadiumToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			this.button2.PerformClick();
+		}
+
+		// Token: 0x0600001C RID: 28 RVA: 0x000062A8 File Offset: 0x000044A8
+		private void button7_Click(object sender, EventArgs e)
+		{
+			this.timer2.Enabled = false;
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				using (Form6 form = new Form6())
+				{
+					if (form.ShowDialog() == DialogResult.OK)
+					{
+						string selectedIDTYPE = form.SelectedIDTYPE;
+						if (selectedIDTYPE.Equals("COMP ID"))
+						{
+							this.COMPIDTYPE = this.TOURNAME;
+						}
+						if (selectedIDTYPE.Equals("COMP ROUND ID"))
+						{
+							this.COMPIDTYPE = this.TOURROUNDID;
+						}
+						if (!iniFile.KeyExists(this.COMPIDTYPE, "exclude"))
+						{
+							iniFile.Write(this.COMPIDTYPE, "excluded from stadium server", "exclude");
+						}
+						else if (MessageBox.Show(new Form
+						{
+							TopMost = true
+						}, this.COMPIDTYPE + " has already been excuded. do you wish to re enable?", "", MessageBoxButtons.YesNo) == DialogResult.Yes)
+						{
+							iniFile.DeleteKey(this.COMPIDTYPE, "exclude");
+							MessageBox.Show(this.COMPIDTYPE + " has now been re-enabled and will use the stadium asignments");
+						}
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				MessageBox.Show(ex.ToString());
+			}
+			this.timer2.Enabled = true;
+		}
+
+		// Token: 0x0600001D RID: 29 RVA: 0x000020F5 File Offset: 0x000002F5
+		private void exludeCompToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			this.button7.PerformClick();
+		}
+
+		// Token: 0x0600001E RID: 30 RVA: 0x00002102 File Offset: 0x00000302
+		private void Form1_MinimumSizeChanged(object sender, EventArgs e)
+		{
+			base.ShowInTaskbar = false;
+		}
+
+		// Token: 0x0600001F RID: 31 RVA: 0x0000210B File Offset: 0x0000030B
+		private void launchFifa16ToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			this.button3.PerformClick();
+		}
+
+		// Token: 0x06000020 RID: 32 RVA: 0x000063E0 File Offset: 0x000045E0
+		private void stadiumToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("Stadium", "Modules") == "1")
+				{
+					iniFile.Write("Stadium", "0", "Modules");
+					this.stadiumToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("Stadium", "Modules") == "0")
+				{
+					iniFile.Write("Stadium", "1", "Modules");
+					this.stadiumToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000021 RID: 33 RVA: 0x00006494 File Offset: 0x00004694
+		private void tVLogoToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("TvLogo", "Modules") == "1")
+				{
+					iniFile.Write("TvLogo", "0", "Modules");
+					this.tVLogoToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("TvLogo", "Modules") == "0")
+				{
+					iniFile.Write("TvLogo", "1", "Modules");
+					this.tVLogoToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000022 RID: 34 RVA: 0x00006548 File Offset: 0x00004748
+		private void scoreBoardToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("ScoreBoard", "Modules") == "1")
+				{
+					iniFile.Write("ScoreBoard", "0", "Modules");
+					this.scoreBoardToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("ScoreBoard", "Modules") == "0")
+				{
+					iniFile.Write("ScoreBoard", "1", "Modules");
+					this.scoreBoardToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000023 RID: 35 RVA: 0x000065FC File Offset: 0x000047FC
+		private void movieToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("Movies", "Modules") == "1")
+				{
+					iniFile.Write("Movies", "0", "Modules");
+					this.movieToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("Movies", "Modules") == "0")
+				{
+					iniFile.Write("Movies", "1", "Modules");
+					this.movieToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+			MessageBox.Show("Changes will take place after both the game and the server has been restarted!");
+		}
+
+		// Token: 0x06000024 RID: 36 RVA: 0x000066BC File Offset: 0x000048BC
+		private void autorunToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("Autorun", "Modules") == "1")
+				{
+					iniFile.Write("Autorun", "0", "Modules");
+					this.autorunToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("Autorun", "Modules") == "0")
+				{
+					iniFile.Write("Autorun", "1", "Modules");
+					this.autorunToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000025 RID: 37 RVA: 0x00002118 File Offset: 0x00000318
+		private void vIewHelpToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			Process.Start(Form1.exedir + "\\FSW\\Help\\Stadium_Server.html");
+		}
+
+		// Token: 0x06000026 RID: 38 RVA: 0x0000212F File Offset: 0x0000032F
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing && this.components != null)
+			{
+				this.components.Dispose();
+			}
+			base.Dispose(disposing);
+		}
+
+		// Token: 0x06000027 RID: 39 RVA: 0x00006770 File Offset: 0x00004970
+		private void InitializeComponent()
+		{
+			this.components = new Container();
+			ComponentResourceManager componentResourceManager = new ComponentResourceManager(typeof(Form1));
+			this.button3 = new Button();
+			this.button1 = new Button();
+			this.openFileDialog1 = new OpenFileDialog();
+			this.label9 = new Label();
+			this.timer1 = new System.Windows.Forms.Timer(this.components);
+			this.timer2 = new System.Windows.Forms.Timer(this.components);
+			this.notifyIcon1 = new NotifyIcon(this.components);
+			this.contextMenuStrip1 = new ContextMenuStrip(this.components);
+			this.assignStadiumToolStripMenuItem = new ToolStripMenuItem();
+			this.exludeCompToolStripMenuItem = new ToolStripMenuItem();
+			this.toolToolStripMenuItem = new ToolStripMenuItem();
+			this.helloToolStripMenuItem = new ToolStripMenuItem();
+			this.enableToolStripMenuItem = new ToolStripMenuItem();
+			this.stadiumToolStripMenuItem = new ToolStripMenuItem();
+			this.tVLogoToolStripMenuItem = new ToolStripMenuItem();
+			this.scoreBoardToolStripMenuItem = new ToolStripMenuItem();
+			this.movieToolStripMenuItem = new ToolStripMenuItem();
+			this.autorunToolStripMenuItem = new ToolStripMenuItem();
+			this.stadiumNetToolStripMenuItem = new ToolStripMenuItem();
+			this.chantsToolStripMenuItem = new ToolStripMenuItem();
+			this.showFormToolStripMenuItem = new ToolStripMenuItem();
+			this.launchFifa16ToolStripMenuItem = new ToolStripMenuItem();
+			this.vIewHelpToolStripMenuItem = new ToolStripMenuItem();
+			this.exitToolStripMenuItem = new ToolStripMenuItem();
+			this.button5 = new Button();
+			this.button6 = new Button();
+			this.label1 = new Label();
+			this.label2 = new Label();
+			this.label3 = new Label();
+			this.label4 = new Label();
+			this.label5 = new Label();
+			this.label6 = new Label();
+			this.button2 = new Button();
+			this.button7 = new Button();
+			this.label7 = new Label();
+			this.label8 = new Label();
+			this.label10 = new Label();
+			this.label11 = new Label();
+			this.label12 = new Label();
+			this.label13 = new Label();
+			this.label14 = new Label();
+			this.label15 = new Label();
+			this.label16 = new Label();
+			this.label17 = new Label();
+			this.label18 = new Label();
+			this.label19 = new Label();
+			this.label20 = new Label();
+			this.label21 = new Label();
+			this.label22 = new Label();
+			this.label23 = new Label();
+			this.label24 = new Label();
+			this.label25 = new Label();
+			this.contextMenuStrip1.SuspendLayout();
+			base.SuspendLayout();
+			this.button3.BackColor = Color.Transparent;
+			this.button3.BackgroundImageLayout = ImageLayout.None;
+			this.button3.Font = new Font("Microsoft Sans Serif", 8.25f, FontStyle.Regular, GraphicsUnit.Point, 0);
+			this.button3.ForeColor = Color.Black;
+			this.button3.Location = new Point(293, 12);
+			this.button3.Name = "button3";
+			this.button3.Size = new Size(87, 23);
+			this.button3.TabIndex = 25;
+			this.button3.Text = "Launch Fifa 16";
+			this.button3.UseVisualStyleBackColor = false;
+			this.button3.Click += this.button3_Click;
+			this.button1.BackColor = Color.Transparent;
+			this.button1.BackgroundImageLayout = ImageLayout.None;
+			this.button1.ForeColor = Color.Black;
+			this.button1.Location = new Point(12, 12);
+			this.button1.Name = "button1";
+			this.button1.Size = new Size(87, 23);
+			this.button1.TabIndex = 23;
+			this.button1.Text = "Select EXE";
+			this.button1.UseVisualStyleBackColor = false;
+			this.button1.Click += this.button1_Click;
+			this.openFileDialog1.FileName = "openFileDialog1";
+			this.label9.AutoSize = true;
+			this.label9.BackColor = Color.Transparent;
+			this.label9.Location = new Point(105, 17);
+			this.label9.Name = "label9";
+			this.label9.Size = new Size(0, 13);
+			this.label9.TabIndex = 27;
+			this.timer1.Interval = 500;
+			this.timer1.Tick += this.timer1_Tick;
+			this.timer2.Tick += this.timer2_Tick;
+			this.notifyIcon1.BalloonTipText = "Running Minimised";
+			this.notifyIcon1.BalloonTipTitle = "CG Server 16";
+			this.notifyIcon1.Icon = (Icon)componentResourceManager.GetObject("notifyIcon1.Icon");
+			this.notifyIcon1.Text = "CG Server 16";
+			this.notifyIcon1.Visible = true;
+			this.notifyIcon1.MouseDoubleClick += this.notifyIcon1_MouseDoubleClick;
+			this.contextMenuStrip1.Items.AddRange(new ToolStripItem[]
+			{
+				this.assignStadiumToolStripMenuItem,
+				this.exludeCompToolStripMenuItem,
+				this.toolToolStripMenuItem,
+				this.helloToolStripMenuItem,
+				this.enableToolStripMenuItem,
+				this.showFormToolStripMenuItem,
+				this.launchFifa16ToolStripMenuItem,
+				this.vIewHelpToolStripMenuItem,
+				this.exitToolStripMenuItem
+			});
+			this.contextMenuStrip1.Name = "contextMenuStrip1";
+			this.contextMenuStrip1.Size = new Size(173, 202);
+			this.assignStadiumToolStripMenuItem.Name = "assignStadiumToolStripMenuItem";
+			this.assignStadiumToolStripMenuItem.Size = new Size(172, 22);
+			this.assignStadiumToolStripMenuItem.Text = "Assign Stadium";
+			this.assignStadiumToolStripMenuItem.Click += this.assignStadiumToolStripMenuItem_Click;
+			this.exludeCompToolStripMenuItem.Name = "exludeCompToolStripMenuItem";
+			this.exludeCompToolStripMenuItem.Size = new Size(172, 22);
+			this.exludeCompToolStripMenuItem.Text = "Exlude Comp";
+			this.exludeCompToolStripMenuItem.Click += this.exludeCompToolStripMenuItem_Click;
+			this.toolToolStripMenuItem.Name = "toolToolStripMenuItem";
+			this.toolToolStripMenuItem.Size = new Size(172, 22);
+			this.toolToolStripMenuItem.Text = "Assign Scoreboard";
+			this.toolToolStripMenuItem.Click += this.toolToolStripMenuItem_Click;
+			this.helloToolStripMenuItem.Name = "helloToolStripMenuItem";
+			this.helloToolStripMenuItem.Size = new Size(172, 22);
+			this.helloToolStripMenuItem.Text = "Assign Movie";
+			this.helloToolStripMenuItem.Click += this.helloToolStripMenuItem_Click;
+			this.enableToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[]
+			{
+				this.stadiumToolStripMenuItem,
+				this.tVLogoToolStripMenuItem,
+				this.scoreBoardToolStripMenuItem,
+				this.movieToolStripMenuItem,
+				this.autorunToolStripMenuItem,
+				this.stadiumNetToolStripMenuItem,
+				this.chantsToolStripMenuItem
+			});
+			this.enableToolStripMenuItem.Name = "enableToolStripMenuItem";
+			this.enableToolStripMenuItem.Size = new Size(172, 22);
+			this.enableToolStripMenuItem.Text = "Enable Modules";
+			this.stadiumToolStripMenuItem.Name = "stadiumToolStripMenuItem";
+			this.stadiumToolStripMenuItem.Size = new Size(134, 22);
+			this.stadiumToolStripMenuItem.Text = "Stadium";
+			this.stadiumToolStripMenuItem.Click += this.stadiumToolStripMenuItem_Click;
+			this.tVLogoToolStripMenuItem.Name = "tVLogoToolStripMenuItem";
+			this.tVLogoToolStripMenuItem.Size = new Size(134, 22);
+			this.tVLogoToolStripMenuItem.Text = "TV Logo";
+			this.tVLogoToolStripMenuItem.Click += this.tVLogoToolStripMenuItem_Click;
+			this.scoreBoardToolStripMenuItem.Name = "scoreBoardToolStripMenuItem";
+			this.scoreBoardToolStripMenuItem.Size = new Size(134, 22);
+			this.scoreBoardToolStripMenuItem.Text = "ScoreBoard";
+			this.scoreBoardToolStripMenuItem.Click += this.scoreBoardToolStripMenuItem_Click;
+			this.movieToolStripMenuItem.Name = "movieToolStripMenuItem";
+			this.movieToolStripMenuItem.Size = new Size(134, 22);
+			this.movieToolStripMenuItem.Text = "Movie";
+			this.movieToolStripMenuItem.Click += this.movieToolStripMenuItem_Click;
+			this.autorunToolStripMenuItem.Name = "autorunToolStripMenuItem";
+			this.autorunToolStripMenuItem.Size = new Size(134, 22);
+			this.autorunToolStripMenuItem.Text = "Autorun";
+			this.autorunToolStripMenuItem.Click += this.autorunToolStripMenuItem_Click;
+			this.stadiumNetToolStripMenuItem.Name = "stadiumNetToolStripMenuItem";
+			this.stadiumNetToolStripMenuItem.Size = new Size(134, 22);
+			this.stadiumNetToolStripMenuItem.Text = "Stadium Nets";
+			this.stadiumNetToolStripMenuItem.Click += this.stadiumNetToolStripMenuItem_Click;
+			this.chantsToolStripMenuItem.Name = "chantsToolStripMenuItem";
+			this.chantsToolStripMenuItem.Size = new Size(134, 22);
+			this.chantsToolStripMenuItem.Text = "Chants";
+			this.chantsToolStripMenuItem.Click += this.chantsToolStripMenuItem_Click;
+			this.showFormToolStripMenuItem.Name = "showFormToolStripMenuItem";
+			this.showFormToolStripMenuItem.Size = new Size(172, 22);
+			this.showFormToolStripMenuItem.Text = "Show Form";
+			this.showFormToolStripMenuItem.Click += this.showFormToolStripMenuItem_Click;
+			this.launchFifa16ToolStripMenuItem.Name = "launchFifa16ToolStripMenuItem";
+			this.launchFifa16ToolStripMenuItem.Size = new Size(172, 22);
+			this.launchFifa16ToolStripMenuItem.Text = "Launch Fifa16";
+			this.launchFifa16ToolStripMenuItem.Click += this.launchFifa16ToolStripMenuItem_Click;
+			this.vIewHelpToolStripMenuItem.Name = "vIewHelpToolStripMenuItem";
+			this.vIewHelpToolStripMenuItem.Size = new Size(172, 22);
+			this.vIewHelpToolStripMenuItem.Text = "VIew Help";
+			this.vIewHelpToolStripMenuItem.Click += this.vIewHelpToolStripMenuItem_Click;
+			this.exitToolStripMenuItem.Name = "exitToolStripMenuItem";
+			this.exitToolStripMenuItem.Size = new Size(172, 22);
+			this.exitToolStripMenuItem.Text = "Exit";
+			this.exitToolStripMenuItem.Click += this.exitToolStripMenuItem_Click;
+			this.button5.Location = new Point(12, 39);
+			this.button5.Name = "button5";
+			this.button5.Size = new Size(181, 23);
+			this.button5.TabIndex = 30;
+			this.button5.Text = "Assign Scorboard";
+			this.button5.UseVisualStyleBackColor = true;
+			this.button5.Click += this.button5_Click;
+			this.button6.Location = new Point(199, 39);
+			this.button6.Name = "button6";
+			this.button6.Size = new Size(181, 23);
+			this.button6.TabIndex = 31;
+			this.button6.Text = "Assign Movie";
+			this.button6.UseVisualStyleBackColor = true;
+			this.button6.Click += this.button6_Click;
+			this.label1.AutoSize = true;
+			this.label1.Location = new Point(9, 94);
+			this.label1.Name = "label1";
+			this.label1.Size = new Size(40, 13);
+			this.label1.TabIndex = 33;
+			this.label1.Text = "Trigger";
+			this.label2.AutoSize = true;
+			this.label2.Location = new Point(94, 111);
+			this.label2.Name = "label2";
+			this.label2.Size = new Size(0, 13);
+			this.label2.TabIndex = 34;
+			this.label3.AutoSize = true;
+			this.label3.Location = new Point(94, 137);
+			this.label3.Name = "label3";
+			this.label3.Size = new Size(0, 13);
+			this.label3.TabIndex = 35;
+			this.label4.AutoSize = true;
+			this.label4.Location = new Point(94, 154);
+			this.label4.Name = "label4";
+			this.label4.Size = new Size(0, 13);
+			this.label4.TabIndex = 36;
+			this.label5.AutoSize = true;
+			this.label5.Location = new Point(94, 171);
+			this.label5.Name = "label5";
+			this.label5.Size = new Size(0, 13);
+			this.label5.TabIndex = 37;
+			this.label6.AutoSize = true;
+			this.label6.Location = new Point(344, 94);
+			this.label6.Name = "label6";
+			this.label6.Size = new Size(0, 13);
+			this.label6.TabIndex = 38;
+			this.button2.Location = new Point(12, 68);
+			this.button2.Name = "button2";
+			this.button2.Size = new Size(181, 23);
+			this.button2.TabIndex = 39;
+			this.button2.Text = "Assign Stadium";
+			this.button2.UseVisualStyleBackColor = true;
+			this.button2.Click += this.button2_Click;
+			this.button7.Location = new Point(199, 68);
+			this.button7.Name = "button7";
+			this.button7.Size = new Size(181, 23);
+			this.button7.TabIndex = 40;
+			this.button7.Text = "Exlude";
+			this.button7.UseVisualStyleBackColor = true;
+			this.button7.Click += this.button7_Click;
+			this.label7.AutoSize = true;
+			this.label7.Location = new Point(94, 210);
+			this.label7.Name = "label7";
+			this.label7.Size = new Size(0, 13);
+			this.label7.TabIndex = 41;
+			this.label8.AutoSize = true;
+			this.label8.Location = new Point(94, 223);
+			this.label8.Name = "label8";
+			this.label8.Size = new Size(0, 13);
+			this.label8.TabIndex = 42;
+			this.label10.AutoSize = true;
+			this.label10.Location = new Point(94, 236);
+			this.label10.Name = "label10";
+			this.label10.Size = new Size(0, 13);
+			this.label10.TabIndex = 43;
+			this.label11.AutoSize = true;
+			this.label11.Location = new Point(94, 249);
+			this.label11.Name = "label11";
+			this.label11.Size = new Size(0, 13);
+			this.label11.TabIndex = 44;
+			this.label12.AutoSize = true;
+			this.label12.Location = new Point(94, 124);
+			this.label12.Name = "label12";
+			this.label12.Size = new Size(0, 13);
+			this.label12.TabIndex = 45;
+			this.label13.AutoSize = true;
+			this.label13.Location = new Point(9, 111);
+			this.label13.Name = "label13";
+			this.label13.Size = new Size(79, 13);
+			this.label13.TabIndex = 46;
+			this.label13.Text = "Home Team ID";
+			this.label14.AutoSize = true;
+			this.label14.Location = new Point(9, 124);
+			this.label14.Name = "label14";
+			this.label14.Size = new Size(77, 13);
+			this.label14.TabIndex = 47;
+			this.label14.Text = "Away Team ID";
+			this.label15.AutoSize = true;
+			this.label15.Location = new Point(9, 171);
+			this.label15.Name = "label15";
+			this.label15.Size = new Size(59, 13);
+			this.label15.TabIndex = 48;
+			this.label15.Text = "Stadium ID";
+			this.label16.AutoSize = true;
+			this.label16.Location = new Point(9, 154);
+			this.label16.Name = "label16";
+			this.label16.Size = new Size(83, 13);
+			this.label16.TabIndex = 49;
+			this.label16.Text = "Comp Round ID";
+			this.label17.AutoSize = true;
+			this.label17.Location = new Point(9, 137);
+			this.label17.Name = "label17";
+			this.label17.Size = new Size(48, 13);
+			this.label17.TabIndex = 50;
+			this.label17.Text = "Comp ID";
+			this.label18.AutoSize = true;
+			this.label18.Location = new Point(9, 249);
+			this.label18.Name = "label18";
+			this.label18.Size = new Size(36, 13);
+			this.label18.TabIndex = 51;
+			this.label18.Text = "Movie";
+			this.label19.AutoSize = true;
+			this.label19.Location = new Point(9, 236);
+			this.label19.Name = "label19";
+			this.label19.Size = new Size(63, 13);
+			this.label19.TabIndex = 52;
+			this.label19.Text = "ScoreBoard";
+			this.label20.AutoSize = true;
+			this.label20.Location = new Point(9, 223);
+			this.label20.Name = "label20";
+			this.label20.Size = new Size(48, 13);
+			this.label20.TabIndex = 53;
+			this.label20.Text = "TV Logo";
+			this.label21.AutoSize = true;
+			this.label21.Location = new Point(9, 210);
+			this.label21.Name = "label21";
+			this.label21.Size = new Size(45, 13);
+			this.label21.TabIndex = 54;
+			this.label21.Text = "Stadium";
+			this.label22.AutoSize = true;
+			this.label22.Location = new Point(12, 276);
+			this.label22.Name = "label22";
+			this.label22.Size = new Size(54, 13);
+			this.label22.TabIndex = 55;
+			this.label22.Text = "Stadium 1";
+			this.label23.AutoSize = true;
+			this.label23.Location = new Point(12, 293);
+			this.label23.Name = "label23";
+			this.label23.Size = new Size(54, 13);
+			this.label23.TabIndex = 56;
+			this.label23.Text = "Stadium 2";
+			this.label24.AutoSize = true;
+			this.label24.Location = new Point(81, 276);
+			this.label24.Name = "label24";
+			this.label24.Size = new Size(41, 13);
+			this.label24.TabIndex = 57;
+			this.label24.Text = "label24";
+			this.label25.AutoSize = true;
+			this.label25.Location = new Point(81, 293);
+			this.label25.Name = "label25";
+			this.label25.Size = new Size(41, 13);
+			this.label25.TabIndex = 58;
+			this.label25.Text = "label25";
+			base.AutoScaleDimensions = new SizeF(6f, 13f);
+			base.AutoScaleMode = AutoScaleMode.Font;
+			base.ClientSize = new Size(391, 270);
+			base.Controls.Add(this.label25);
+			base.Controls.Add(this.label24);
+			base.Controls.Add(this.label23);
+			base.Controls.Add(this.label22);
+			base.Controls.Add(this.label21);
+			base.Controls.Add(this.label20);
+			base.Controls.Add(this.label19);
+			base.Controls.Add(this.label18);
+			base.Controls.Add(this.label17);
+			base.Controls.Add(this.label16);
+			base.Controls.Add(this.label15);
+			base.Controls.Add(this.label14);
+			base.Controls.Add(this.label13);
+			base.Controls.Add(this.label12);
+			base.Controls.Add(this.label11);
+			base.Controls.Add(this.label10);
+			base.Controls.Add(this.label8);
+			base.Controls.Add(this.label7);
+			base.Controls.Add(this.button7);
+			base.Controls.Add(this.button2);
+			base.Controls.Add(this.label6);
+			base.Controls.Add(this.label5);
+			base.Controls.Add(this.label4);
+			base.Controls.Add(this.label3);
+			base.Controls.Add(this.label2);
+			base.Controls.Add(this.label1);
+			base.Controls.Add(this.button6);
+			base.Controls.Add(this.button5);
+			base.Controls.Add(this.label9);
+			base.Controls.Add(this.button3);
+			base.Controls.Add(this.button1);
+			base.Icon = (Icon)componentResourceManager.GetObject("$this.Icon");
+			base.Name = "Form1";
+			this.Text = "CG Server 16";
+			base.MinimumSizeChanged += this.Form1_MinimumSizeChanged;
+			base.FormClosing += this.Form1_FormClosing;
+			base.Load += this.Form1_Load;
+			base.Resize += this.Form1_Resize;
+			this.contextMenuStrip1.ResumeLayout(false);
+			base.ResumeLayout(false);
+			base.PerformLayout();
+		}
+
+		// Token: 0x06000028 RID: 40 RVA: 0x00007F98 File Offset: 0x00006198
+		private void TVBumperPage()
+		{
+			try
+			{
+				FTools.ExtraSetup(this.Nsource, this.Ndest, "0", this.NetColor, this.NetNum);
+				Memory memory = new Memory();
+				memory.Attack(this.MP);
+				if (memory.IsOpen())
+				{
+					IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+					if (iniFile.KeyExists("StadiumNet", "Modules") && iniFile.Read("StadiumNet", "Modules") == "1")
+					{
+						if (string.IsNullOrEmpty(this.curstad) && iniFile.KeyExists(this.STADID, "stadiumnetid") && !iniFile.KeyExists(this.TOURROUNDID, "exclude"))
+						{
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTDP[0]
+							}, iniFile.Read(this.STADID, "stadiumnetid").Split(new char[]
+							{
+								','
+							})[0]);
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTCP[0]
+							}, iniFile.Read(this.STADID, "stadiumnetid").Split(new char[]
+							{
+								','
+							})[1]);
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTRI[0]
+							}, iniFile.Read(this.STADID, "stadiumnetid").Split(new char[]
+							{
+								','
+							})[2]);
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTTR[0]
+							}, iniFile.Read(this.STADID, "stadiumnetid").Split(new char[]
+							{
+								','
+							})[3]);
+							SystemSounds.Beep.Play();
+						}
+						else if (!string.IsNullOrEmpty(this.curstad) && iniFile.KeyExists(this.StadName, "stadiumnetname") && !iniFile.KeyExists(this.TOURROUNDID, "exclude"))
+						{
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTDP[0]
+							}, iniFile.Read(this.StadName, "stadiumnetname").Split(new char[]
+							{
+								','
+							})[0]);
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTCP[0]
+							}, iniFile.Read(this.StadName, "stadiumnetname").Split(new char[]
+							{
+								','
+							})[1]);
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTRI[0]
+							}, iniFile.Read(this.StadName, "stadiumnetname").Split(new char[]
+							{
+								','
+							})[2]);
+							memory.WriteInt(OFFSETS.ORINETDEPTHBASE, new long[]
+							{
+								OFFSETS.NTTR[0]
+							}, iniFile.Read(this.StadName, "stadiumnetname").Split(new char[]
+							{
+								','
+							})[3]);
+							SystemSounds.Beep.Play();
+						}
+					}
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000029 RID: 41 RVA: 0x000082D0 File Offset: 0x000064D0
+		private void stadiumNetToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("StadiumNet", "Modules") == "1")
+				{
+					iniFile.Write("StadiumNet", "0", "Modules");
+					this.stadiumNetToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("StadiumNet", "Modules") == "0")
+				{
+					iniFile.Write("StadiumNet", "1", "Modules");
+					this.stadiumNetToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600002A RID: 42 RVA: 0x00008384 File Offset: 0x00006584
+		private void ChantsRuntimeChecker()
+		{
+			try
+			{
+				if (!this.chantsThreadStarted)
+				{
+					this.chantsThreadStarted = true;
+					this.chantsCts = new CancellationTokenSource();
+					CancellationToken ct = this.chantsCts.Token;
+					Task.Run(delegate()
+					{
+						int num = 0;
+						DateTime dateTime = DateTime.MinValue;
+						bool flag = false;
+						bool flag2 = false;
+						bool flag3 = false;
+						uint num2 = 0U;
+						uint num3 = 0U;
+						WaveOutEvent waveOutEvent = null;
+						AudioFileReader audioFileReader = null;
+						float targetVolume = 0.05f;
+						int num4 = 5;
+						int num5 = 12;
+						int num6 = 300;
+						int num7 = 800;
+						int num8 = 800;
+						int millisecondsTimeout = 500;
+						bool flag4 = Form1.TryMediaFoundationStartup();
+						try
+						{
+							while (!ct.IsCancellationRequested)
+							{
+								try
+								{
+									IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+									if (!iniFile.KeyExists("Chants", "modules") || iniFile.Read("Chants", "modules") != "1")
+									{
+										Thread.Sleep(500);
+									}
+									else
+									{
+										string text = (this.HID ?? "").Split(new char[1])[0].Trim();
+										string text2 = (this.AID ?? "").Split(new char[1])[0].Trim();
+										bool flag5 = !string.IsNullOrWhiteSpace(text);
+										bool flag6 = !string.IsNullOrWhiteSpace(text2);
+										string text3 = (flag5 && iniFile.KeyExists(text, "chantsid")) ? iniFile.Read(text, "chantsid") : null;
+										string value = (flag6 && iniFile.KeyExists(text2, "chantsid")) ? iniFile.Read(text2, "chantsid") : null;
+										bool flag7 = !string.IsNullOrWhiteSpace(text3);
+										string.IsNullOrWhiteSpace(value);
+										Memory memory = new Memory();
+										memory.Attack(this.MP);
+										if (!memory.IsOpen())
+										{
+											Thread.Sleep(500);
+										}
+										else if (!this.IsGameRunning(memory))
+										{
+											this.matchstarted = false;
+											uint num9 = 0U;
+											uint num10 = 0U;
+											try
+											{
+												num9 = memory.GetInt(OFFSETS.GAMESTARTEDBINARYBASE, new long[]
+												{
+													OFFSETS.GAMESTARTEDBINARY[0],
+													OFFSETS.GAMESTARTEDBINARY[1],
+													OFFSETS.GAMESTARTEDBINARY[2],
+													OFFSETS.GAMESTARTEDBINARY[3],
+													OFFSETS.GAMESTARTEDBINARY[4]
+												});
+												num10 = memory.GetInt(OFFSETS.GAMESTATSBASE, new long[]
+												{
+													OFFSETS.GAMERANTIME[0]
+												});
+											}
+											catch
+											{
+											}
+											if (num10 == 0U || num9 != 1U)
+											{
+												if (waveOutEvent != null && (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused))
+												{
+													try
+													{
+														Form1.FadeOutStop(waveOutEvent, num7, ct);
+													}
+													catch
+													{
+													}
+												}
+												this.SafeDispose(ref waveOutEvent, ref audioFileReader);
+												flag = false;
+												flag2 = false;
+												num = 0;
+												dateTime = DateTime.MinValue;
+												flag3 = false;
+												num2 = 0U;
+												num3 = 0U;
+											}
+											else if (waveOutEvent != null && waveOutEvent.PlaybackState == PlaybackState.Playing)
+											{
+												Form1.FadeOutPause(waveOutEvent, num7, ct);
+												flag2 = true;
+												flag = true;
+											}
+											Thread.Sleep(500);
+										}
+										else
+										{
+											this.matchstarted = true;
+											uint @int = memory.GetInt(OFFSETS.GAMESTATSBASE, new long[]
+											{
+												OFFSETS.GAMEHOMEGOALSCORE[0]
+											});
+											uint int2 = memory.GetInt(OFFSETS.GAMESTATSBASE, new long[]
+											{
+												OFFSETS.GAMEAWAYGOALSCORE[0]
+											});
+											if (flag3 && (@int != num2 || int2 != num3))
+											{
+												bool flag8 = @int > num2;
+												bool flag9 = int2 > num3;
+												if (waveOutEvent != null && (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused))
+												{
+													Form1.FadeOutStop(waveOutEvent, num7, ct);
+													this.SafeDispose(ref waveOutEvent, ref audioFileReader);
+													flag = false;
+													flag2 = false;
+												}
+												string text4 = null;
+												if (flag8)
+												{
+													text4 = text;
+												}
+												else if (flag9)
+												{
+													text4 = text2;
+												}
+												if (!string.IsNullOrWhiteSpace(text4))
+												{
+													int num11 = 0;
+													while (num11 < 2000 && !ct.IsCancellationRequested)
+													{
+														Thread.Sleep(100);
+														num11 += 100;
+													}
+													if (this.IsGameRunning(memory) && !ct.IsCancellationRequested)
+													{
+														this.PlayClubSongIfExists(iniFile, text4, ct, num6, num7);
+													}
+												}
+												dateTime = DateTime.UtcNow.AddSeconds((double)num5);
+											}
+											num2 = @int;
+											num3 = int2;
+											flag3 = true;
+											if (flag2 && waveOutEvent != null && waveOutEvent.PlaybackState == PlaybackState.Paused)
+											{
+												waveOutEvent.Play();
+												Form1.FadeIn(waveOutEvent, targetVolume, num6, ct);
+												flag2 = false;
+												flag = true;
+											}
+											if (flag && waveOutEvent != null && audioFileReader != null)
+											{
+												if (waveOutEvent.PlaybackState == PlaybackState.Paused)
+												{
+													waveOutEvent.Play();
+													Form1.FadeIn(waveOutEvent, targetVolume, num6, ct);
+												}
+												bool flag10 = false;
+												Form1.StopReason stopReason = Form1.StopReason.None;
+												while (!ct.IsCancellationRequested)
+												{
+													Thread.Sleep(millisecondsTimeout);
+													if (!this.IsGameRunning(memory))
+													{
+														if (waveOutEvent.PlaybackState == PlaybackState.Playing)
+														{
+															Form1.FadeOutPause(waveOutEvent, num7, ct);
+														}
+														flag2 = true;
+														stopReason = Form1.StopReason.GamePaused;
+														break;
+													}
+													if (waveOutEvent.PlaybackState == PlaybackState.Stopped)
+													{
+														stopReason = Form1.StopReason.TrackEnded;
+														break;
+													}
+													try
+													{
+														if (!flag10 && audioFileReader != null && waveOutEvent != null && waveOutEvent.PlaybackState == PlaybackState.Playing)
+														{
+															double totalMilliseconds = (audioFileReader.TotalTime - audioFileReader.CurrentTime).TotalMilliseconds;
+															if (totalMilliseconds > 0.0 && totalMilliseconds <= (double)num8)
+															{
+																int num12 = (int)totalMilliseconds;
+																if (num12 < 120)
+																{
+																	num12 = 120;
+																}
+																Form1.FadeDownToZero(waveOutEvent, num12, ct);
+																flag10 = true;
+															}
+														}
+													}
+													catch
+													{
+													}
+													uint int3 = memory.GetInt(OFFSETS.GAMESTATSBASE, new long[]
+													{
+														OFFSETS.GAMEHOMEGOALSCORE[0]
+													});
+													uint int4 = memory.GetInt(OFFSETS.GAMESTATSBASE, new long[]
+													{
+														OFFSETS.GAMEAWAYGOALSCORE[0]
+													});
+													if (int3 != num2 || int4 != num3)
+													{
+														Form1.FadeOutStop(waveOutEvent, num7, ct);
+														stopReason = Form1.StopReason.ScoreChanged;
+														break;
+													}
+												}
+												if (stopReason == Form1.StopReason.GamePaused)
+												{
+													flag = true;
+													Thread.Sleep(200);
+												}
+												else
+												{
+													this.SafeDispose(ref waveOutEvent, ref audioFileReader);
+													flag = false;
+													flag2 = false;
+													DateTime dateTime2 = DateTime.UtcNow.AddSeconds((double)num4);
+													if (dateTime < dateTime2)
+													{
+														dateTime = dateTime2;
+													}
+													Thread.Sleep(200);
+												}
+											}
+											else if (DateTime.UtcNow < dateTime)
+											{
+												Thread.Sleep(millisecondsTimeout);
+											}
+											else if (!flag7)
+											{
+												Thread.Sleep(millisecondsTimeout);
+											}
+											else
+											{
+												string[] array = text3.Split(new char[]
+												{
+													','
+												});
+												string str = array[0].Trim().Replace("/", "\\").Trim(new char[]
+												{
+													'\\'
+												});
+												string str2 = Form1.exedir + "\\FSW\\Chants\\" + str;
+												string text5 = str2 + "\\Support";
+												string text6 = str2 + "\\Complaint";
+												int num13 = (int)(@int - int2);
+												string path;
+												float num14;
+												if (num13 == 0)
+												{
+													path = text5;
+													num14 = float.Parse(array[1], CultureInfo.InvariantCulture);
+												}
+												else if (num13 > 0)
+												{
+													path = text5;
+													num14 = float.Parse(array[2], CultureInfo.InvariantCulture);
+												}
+												else if (num13 == -1)
+												{
+													path = text5;
+													num14 = float.Parse(array[3], CultureInfo.InvariantCulture);
+												}
+												else if (num13 == -2)
+												{
+													path = text5;
+													num14 = float.Parse(array[4], CultureInfo.InvariantCulture);
+												}
+												else
+												{
+													path = text6;
+													num14 = float.Parse(array[5], CultureInfo.InvariantCulture);
+												}
+												if (!Directory.Exists(path))
+												{
+													Thread.Sleep(500);
+												}
+												else
+												{
+													string[] files = Directory.GetFiles(path, "*.mp3");
+													if (files == null || files.Length == 0)
+													{
+														Thread.Sleep(500);
+													}
+													else
+													{
+														if (num >= files.Length)
+														{
+															num = 0;
+														}
+														string text7 = files[num];
+														num++;
+														try
+														{
+															audioFileReader = new AudioFileReader(text7);
+															audioFileReader.Volume = 1f;
+															waveOutEvent = new WaveOutEvent();
+															waveOutEvent.DesiredLatency = 100;
+															waveOutEvent.NumberOfBuffers = 2;
+															waveOutEvent.Init(audioFileReader);
+															waveOutEvent.Volume = 0f;
+															targetVolume = num14;
+															waveOutEvent.Play();
+															Form1.FadeIn(waveOutEvent, num14, num6, ct);
+															flag = true;
+															flag2 = false;
+														}
+														catch (Exception ex)
+														{
+															MessageBox.Show("Failed: " + text7 + "\n" + ex.Message);
+															this.SafeDispose(ref waveOutEvent, ref audioFileReader);
+															flag = false;
+															flag2 = false;
+															Thread.Sleep(500);
+														}
+													}
+												}
+											}
+										}
+									}
+								}
+								catch
+								{
+									Thread.Sleep(500);
+								}
+							}
+						}
+						finally
+						{
+							try
+							{
+								if (waveOutEvent != null)
+								{
+									try
+									{
+										Form1.FadeOutStop(waveOutEvent, 200, ct);
+									}
+									catch
+									{
+									}
+								}
+							}
+							catch
+							{
+							}
+							try
+							{
+								if (waveOutEvent != null)
+								{
+									waveOutEvent.Dispose();
+								}
+							}
+							catch
+							{
+							}
+							try
+							{
+								if (audioFileReader != null)
+								{
+									audioFileReader.Dispose();
+								}
+							}
+							catch
+							{
+							}
+							if (flag4)
+							{
+								Form1.TryMediaFoundationShutdown();
+							}
+						}
+					}, ct);
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600002B RID: 43 RVA: 0x000083F8 File Offset: 0x000065F8
+		private void PlayClubSongIfExists(IniFile iniFile, string teamId, CancellationToken ct, int fadeInMs, int fadeOutMs)
+		{
+			try
+			{
+				if (iniFile != null && !string.IsNullOrWhiteSpace(teamId) && iniFile.KeyExists(teamId, "chantsid"))
+				{
+					string text = iniFile.Read(teamId, "chantsid");
+					if (!string.IsNullOrWhiteSpace(text))
+					{
+						string str = text.Split(new char[]
+						{
+							','
+						})[0].Trim().Replace("/", "\\").Trim(new char[]
+						{
+							'\\'
+						});
+						string text2 = Form1.exedir + "\\FSW\\Chants\\" + str + "\\ClubSong.mp3";
+						if (File.Exists(text2))
+						{
+							float volume = float.Parse(text.Split(new char[]
+							{
+								','
+							})[6], CultureInfo.InvariantCulture);
+							this.PlayMp3BlockingWithFade(text2, volume, ct, fadeInMs, fadeOutMs);
+						}
+					}
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600002C RID: 44 RVA: 0x000084D8 File Offset: 0x000066D8
+		private void PlayWavBlockingWithFade(string wavPath, float volume, CancellationToken ct, int fadeInMs, int fadeOutMs)
+		{
+			WaveOutEvent waveOutEvent = null;
+			AudioFileReader audioFileReader = null;
+			try
+			{
+				audioFileReader = new AudioFileReader(wavPath);
+				audioFileReader.Volume = 1f;
+				waveOutEvent = new WaveOutEvent();
+				waveOutEvent.DesiredLatency = 100;
+				waveOutEvent.NumberOfBuffers = 2;
+				waveOutEvent.Init(audioFileReader);
+				waveOutEvent.Volume = 0f;
+				waveOutEvent.Play();
+				int num = 20;
+				int num2 = (fadeInMs <= 0) ? 0 : (fadeInMs / num);
+				if (num2 < 10)
+				{
+					num2 = 10;
+				}
+				if (fadeInMs <= 0)
+				{
+					waveOutEvent.Volume = volume;
+				}
+				else
+				{
+					int num3 = 1;
+					while (num3 <= num && !ct.IsCancellationRequested)
+					{
+						waveOutEvent.Volume = volume * ((float)num3 / (float)num);
+						Thread.Sleep(num2);
+						num3++;
+					}
+					waveOutEvent.Volume = volume;
+				}
+				while (waveOutEvent.PlaybackState == PlaybackState.Playing && !ct.IsCancellationRequested)
+				{
+					Thread.Sleep(200);
+				}
+				if (!ct.IsCancellationRequested && fadeOutMs > 0)
+				{
+					float volume2 = waveOutEvent.Volume;
+					int num4 = fadeOutMs / num;
+					if (num4 < 10)
+					{
+						num4 = 10;
+					}
+					int num5 = num - 1;
+					while (num5 >= 0 && !ct.IsCancellationRequested)
+					{
+						waveOutEvent.Volume = volume2 * ((float)num5 / (float)num);
+						Thread.Sleep(num4);
+						num5--;
+					}
+					waveOutEvent.Volume = 0f;
+				}
+				try
+				{
+					waveOutEvent.Stop();
+				}
+				catch
+				{
+				}
+			}
+			catch
+			{
+			}
+			finally
+			{
+				try
+				{
+					if (waveOutEvent != null)
+					{
+						waveOutEvent.Dispose();
+					}
+				}
+				catch
+				{
+				}
+				try
+				{
+					if (audioFileReader != null)
+					{
+						audioFileReader.Dispose();
+					}
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		// Token: 0x0600002D RID: 45 RVA: 0x000086B0 File Offset: 0x000068B0
+		private void chantsToolStripMenuItem_Click(object sender, EventArgs e)
+		{
+			try
+			{
+				IniFile iniFile = new IniFile(Form1.exedir + "\\FSW\\settings.ini");
+				if (iniFile.Read("Chants", "Modules") == "1")
+				{
+					iniFile.Write("Chants", "0", "Modules");
+					this.chantsToolStripMenuItem.Checked = false;
+				}
+				else if (iniFile.Read("Chants", "Modules") == "0")
+				{
+					iniFile.Write("Chants", "1", "Modules");
+					this.chantsToolStripMenuItem.Checked = true;
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x0600002E RID: 46 RVA: 0x00008764 File Offset: 0x00006964
+		private void PlayMp3BlockingWithFade(string mp3Path, float volume, CancellationToken ct, int fadeInMs, int fadeOutMs)
+		{
+			WaveOutEvent waveOutEvent = null;
+			AudioFileReader audioFileReader = null;
+			try
+			{
+				try
+				{
+					MediaFoundationApi.Startup();
+				}
+				catch
+				{
+				}
+				audioFileReader = new AudioFileReader(mp3Path);
+				audioFileReader.Volume = 1f;
+				waveOutEvent = new WaveOutEvent();
+				waveOutEvent.DesiredLatency = 100;
+				waveOutEvent.NumberOfBuffers = 2;
+				waveOutEvent.Init(audioFileReader);
+				waveOutEvent.Volume = 0f;
+				waveOutEvent.Play();
+				int num = 20;
+				int num2 = (fadeInMs <= 0) ? 0 : (fadeInMs / num);
+				if (num2 < 10)
+				{
+					num2 = 10;
+				}
+				if (fadeInMs <= 0)
+				{
+					waveOutEvent.Volume = volume;
+				}
+				else
+				{
+					int num3 = 1;
+					while (num3 <= num && !ct.IsCancellationRequested)
+					{
+						waveOutEvent.Volume = volume * ((float)num3 / (float)num);
+						Thread.Sleep(num2);
+						num3++;
+					}
+					waveOutEvent.Volume = volume;
+				}
+				while (waveOutEvent.PlaybackState == PlaybackState.Playing && !ct.IsCancellationRequested)
+				{
+					Thread.Sleep(200);
+				}
+				if (!ct.IsCancellationRequested && fadeOutMs > 0)
+				{
+					float volume2 = waveOutEvent.Volume;
+					int num4 = fadeOutMs / num;
+					if (num4 < 10)
+					{
+						num4 = 10;
+					}
+					int num5 = num - 1;
+					while (num5 >= 0 && !ct.IsCancellationRequested)
+					{
+						waveOutEvent.Volume = volume2 * ((float)num5 / (float)num);
+						Thread.Sleep(num4);
+						num5--;
+					}
+					waveOutEvent.Volume = 0f;
+				}
+				try
+				{
+					waveOutEvent.Stop();
+				}
+				catch
+				{
+				}
+			}
+			catch
+			{
+			}
+			finally
+			{
+				try
+				{
+					if (waveOutEvent != null)
+					{
+						waveOutEvent.Dispose();
+					}
+				}
+				catch
+				{
+				}
+				try
+				{
+					if (audioFileReader != null)
+					{
+						audioFileReader.Dispose();
+					}
+				}
+				catch
+				{
+				}
+				try
+				{
+					MediaFoundationApi.Shutdown();
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		// Token: 0x0600002F RID: 47 RVA: 0x00008980 File Offset: 0x00006B80
+		private static void FadeIn(WaveOutEvent output, float targetVolume, int fadeMs, CancellationToken ct)
+		{
+			try
+			{
+				if (output != null)
+				{
+					if (fadeMs <= 0)
+					{
+						output.Volume = targetVolume;
+					}
+					else
+					{
+						int num = 20;
+						int num2 = fadeMs / num;
+						if (num2 < 10)
+						{
+							num2 = 10;
+						}
+						int num3 = 1;
+						while (num3 <= num && !ct.IsCancellationRequested)
+						{
+							output.Volume = targetVolume * ((float)num3 / (float)num);
+							Thread.Sleep(num2);
+							num3++;
+						}
+						output.Volume = targetVolume;
+					}
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000030 RID: 48 RVA: 0x000089F0 File Offset: 0x00006BF0
+		private static void FadeOutStop(WaveOutEvent output, int fadeMs, CancellationToken ct)
+		{
+			try
+			{
+				if (output != null)
+				{
+					if (fadeMs <= 0)
+					{
+						output.Stop();
+					}
+					else
+					{
+						float volume = output.Volume;
+						int num = 20;
+						int num2 = fadeMs / num;
+						if (num2 < 10)
+						{
+							num2 = 10;
+						}
+						int num3 = num - 1;
+						while (num3 >= 0 && !ct.IsCancellationRequested)
+						{
+							output.Volume = volume * ((float)num3 / (float)num);
+							Thread.Sleep(num2);
+							num3--;
+						}
+						output.Volume = 0f;
+						output.Stop();
+					}
+				}
+			}
+			catch
+			{
+				try
+				{
+					if (output != null)
+					{
+						output.Stop();
+					}
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		// Token: 0x06000031 RID: 49 RVA: 0x00008A8C File Offset: 0x00006C8C
+		private static void FadeOutPause(WaveOutEvent output, int fadeMs, CancellationToken ct)
+		{
+			try
+			{
+				if (output != null)
+				{
+					if (fadeMs <= 0)
+					{
+						output.Pause();
+					}
+					else
+					{
+						float volume = output.Volume;
+						int num = 20;
+						int num2 = fadeMs / num;
+						if (num2 < 10)
+						{
+							num2 = 10;
+						}
+						int num3 = num - 1;
+						while (num3 >= 0 && !ct.IsCancellationRequested)
+						{
+							output.Volume = volume * ((float)num3 / (float)num);
+							Thread.Sleep(num2);
+							num3--;
+						}
+						output.Volume = 0f;
+						output.Pause();
+					}
+				}
+			}
+			catch
+			{
+				try
+				{
+					if (output != null)
+					{
+						output.Pause();
+					}
+				}
+				catch
+				{
+				}
+			}
+		}
+
+		// Token: 0x06000032 RID: 50 RVA: 0x00008B28 File Offset: 0x00006D28
+		private static void FadeDownToZero(WaveOutEvent output, int fadeMs, CancellationToken ct)
+		{
+			try
+			{
+				if (output != null)
+				{
+					if (fadeMs <= 0)
+					{
+						output.Volume = 0f;
+					}
+					else
+					{
+						float volume = output.Volume;
+						int num = 20;
+						int num2 = fadeMs / num;
+						if (num2 < 10)
+						{
+							num2 = 10;
+						}
+						int num3 = num - 1;
+						while (num3 >= 0 && !ct.IsCancellationRequested)
+						{
+							output.Volume = volume * ((float)num3 / (float)num);
+							Thread.Sleep(num2);
+							num3--;
+						}
+						output.Volume = 0f;
+					}
+				}
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000033 RID: 51 RVA: 0x00008BAC File Offset: 0x00006DAC
+		private static bool TryMediaFoundationStartup()
+		{
+			bool result;
+			try
+			{
+				MediaFoundationApi.Startup();
+				result = true;
+			}
+			catch
+			{
+				result = false;
+			}
+			return result;
+		}
+
+		// Token: 0x06000034 RID: 52 RVA: 0x00008BD8 File Offset: 0x00006DD8
+		private static void TryMediaFoundationShutdown()
+		{
+			try
+			{
+				MediaFoundationApi.Shutdown();
+			}
+			catch
+			{
+			}
+		}
+
+		// Token: 0x06000035 RID: 53 RVA: 0x00008C00 File Offset: 0x00006E00
+		private bool IsGameRunning(Memory memory)
+		{
+			bool result;
+			try
+			{
+				uint @int = memory.GetInt(OFFSETS.GAMESTARTEDBINARYBASE, new long[]
+				{
+					OFFSETS.GAMESTARTEDBINARY[0],
+					OFFSETS.GAMESTARTEDBINARY[1],
+					OFFSETS.GAMESTARTEDBINARY[2],
+					OFFSETS.GAMESTARTEDBINARY[3],
+					OFFSETS.GAMESTARTEDBINARY[4]
+				});
+				uint int2 = memory.GetInt(OFFSETS.GAMESTATSBASE, new long[]
+				{
+					OFFSETS.GAMERANTIME[0]
+				});
+				result = (@int == 1U && int2 >= 1U && !this.lastpagename.Contains("training/SkillGame"));
+			}
+			catch
+			{
+				result = false;
+			}
+			return result;
+		}
+
+		// Token: 0x06000036 RID: 54 RVA: 0x00008CA4 File Offset: 0x00006EA4
+		private void SafeDispose(ref WaveOutEvent output, ref AudioFileReader reader)
+		{
+			try
+			{
+				WaveOutEvent waveOutEvent = output;
+				if (waveOutEvent != null)
+				{
+					waveOutEvent.Dispose();
+				}
+			}
+			catch
+			{
+			}
+			try
+			{
+				AudioFileReader audioFileReader = reader;
+				if (audioFileReader != null)
+				{
+					audioFileReader.Dispose();
+				}
+			}
+			catch
+			{
+			}
+			output = null;
+			reader = null;
+		}
+
+		// Token: 0x04000001 RID: 1
+		public bool stadmovie;
+
+		// Token: 0x04000002 RID: 2
+		public string StadName;
+
+		// Token: 0x04000003 RID: 3
+		public string stad;
+
+		// Token: 0x04000004 RID: 4
+		public string dest;
+
+		// Token: 0x04000005 RID: 5
+		public string glare1;
+
+		// Token: 0x04000006 RID: 6
+		public string glare3;
+
+		// Token: 0x04000007 RID: 7
+		public int runcount;
+
+		// Token: 0x04000008 RID: 8
+		public string tvlogoscoreboardtype;
+
+		// Token: 0x04000009 RID: 9
+		public string Stadiumtype;
+
+		// Token: 0x0400000A RID: 10
+		public bool pagechange;
+
+		// Token: 0x0400000B RID: 11
+		public string COMPIDTYPE;
+
+		// Token: 0x0400000C RID: 12
+		public string _pagename;
+
+		// Token: 0x0400000D RID: 13
+		private int count;
+
+		// Token: 0x0400000E RID: 14
+		private int count1;
+
+		// Token: 0x0400000F RID: 15
+		public string curstad;
+
+		// Token: 0x04000010 RID: 16
+		public string CCount;
+
+		// Token: 0x04000011 RID: 17
+		public string hookcount;
+
+		// Token: 0x04000012 RID: 18
+		public long PGNAMEBASE;
+
+		// Token: 0x04000013 RID: 19
+		public long HTIDBASE;
+
+		// Token: 0x04000014 RID: 20
+		public long STADIDBASE;
+
+		// Token: 0x04000015 RID: 21
+		public long COMPIDBASE;
+
+		// Token: 0x04000016 RID: 22
+		public long TOURBASE;
+
+		// Token: 0x04000017 RID: 23
+		public long TOURSTADBASE;
+
+		// Token: 0x04000018 RID: 24
+		public long FRIENDLYSTADBASE;
+
+		// Token: 0x04000019 RID: 25
+		public long FRIENDLYHTIDBASE;
+
+		// Token: 0x0400001A RID: 26
+		public string fifaEXE;
+
+		// Token: 0x0400001B RID: 27
+		public string MP;
+
+		// Token: 0x0400001C RID: 28
+		public static string exedir;
+
+		// Token: 0x0400001D RID: 29
+		public string targetpath;
+
+		// Token: 0x0400001E RID: 30
+		public string TVLogo;
+
+		// Token: 0x0400001F RID: 31
+		public string TVdata;
+
+		// Token: 0x04000020 RID: 32
+		public string Scoredata;
+
+		// Token: 0x04000021 RID: 33
+		public string ScoreBoard;
+
+		// Token: 0x04000022 RID: 34
+		public string Movies;
+
+		// Token: 0x04000023 RID: 35
+		public string Movdata;
+
+		// Token: 0x04000024 RID: 36
+		public string MOVBUMP;
+
+		// Token: 0x04000025 RID: 37
+		public string HID;
+
+		// Token: 0x04000026 RID: 38
+		public string AID;
+
+		// Token: 0x04000027 RID: 39
+		public string TOURNAME;
+
+		// Token: 0x04000028 RID: 40
+		public string TOURROUNDID;
+
+		// Token: 0x04000029 RID: 41
+		public string STADID;
+
+		// Token: 0x0400002A RID: 42
+		public string version;
+
+		// Token: 0x0400002B RID: 43
+		public string Psource;
+
+		// Token: 0x0400002C RID: 44
+		public string Nsource;
+
+		// Token: 0x0400002D RID: 45
+		public string PitchMowsource;
+
+		// Token: 0x0400002E RID: 46
+		public string Pdest;
+
+		// Token: 0x0400002F RID: 47
+		public string Ndest;
+
+		// Token: 0x04000030 RID: 48
+		public string PitchMowdest;
+
+		// Token: 0x04000031 RID: 49
+		public string Stadata;
+
+		// Token: 0x04000032 RID: 50
+		public string previewpath;
+
+		// Token: 0x04000033 RID: 51
+		public string injID;
+
+		// Token: 0x04000034 RID: 52
+		public string PitchMowPattern;
+
+		// Token: 0x04000035 RID: 53
+		public string PitchTexNum;
+
+		// Token: 0x04000036 RID: 54
+		public string PoliceOfficer;
+
+		// Token: 0x04000037 RID: 55
+		public string PoliceNum;
+
+		// Token: 0x04000038 RID: 56
+		public string NetColor;
+
+		// Token: 0x04000039 RID: 57
+		public string NetNum;
+
+		// Token: 0x0400003A RID: 58
+		public string stad1;
+
+		// Token: 0x0400003B RID: 59
+		public string stad2;
+
+		// Token: 0x0400003C RID: 60
+		public string derby;
+
+		// Token: 0x0400003D RID: 61
+		private IContainer components;
+
+		// Token: 0x0400003E RID: 62
+		private Button button3;
+
+		// Token: 0x0400003F RID: 63
+		private Button button1;
+
+		// Token: 0x04000040 RID: 64
+		private OpenFileDialog openFileDialog1;
+
+		// Token: 0x04000041 RID: 65
+		private Label label9;
+
+		// Token: 0x04000042 RID: 66
+		private System.Windows.Forms.Timer timer1;
+
+		// Token: 0x04000043 RID: 67
+		private System.Windows.Forms.Timer timer2;
+
+		// Token: 0x04000044 RID: 68
+		private NotifyIcon notifyIcon1;
+
+		// Token: 0x04000045 RID: 69
+		private ContextMenuStrip contextMenuStrip1;
+
+		// Token: 0x04000046 RID: 70
+		private ToolStripMenuItem toolToolStripMenuItem;
+
+		// Token: 0x04000047 RID: 71
+		private ToolStripMenuItem helloToolStripMenuItem;
+
+		// Token: 0x04000048 RID: 72
+		private ToolStripMenuItem exitToolStripMenuItem;
+
+		// Token: 0x04000049 RID: 73
+		private ToolStripMenuItem showFormToolStripMenuItem;
+
+		// Token: 0x0400004A RID: 74
+		private Button button5;
+
+		// Token: 0x0400004B RID: 75
+		private Button button6;
+
+		// Token: 0x0400004C RID: 76
+		private Label label1;
+
+		// Token: 0x0400004D RID: 77
+		private Label label2;
+
+		// Token: 0x0400004E RID: 78
+		private Label label3;
+
+		// Token: 0x0400004F RID: 79
+		private Label label4;
+
+		// Token: 0x04000050 RID: 80
+		private Label label5;
+
+		// Token: 0x04000051 RID: 81
+		private Label label6;
+
+		// Token: 0x04000052 RID: 82
+		private Button button2;
+
+		// Token: 0x04000053 RID: 83
+		private ToolStripMenuItem assignStadiumToolStripMenuItem;
+
+		// Token: 0x04000054 RID: 84
+		private Button button7;
+
+		// Token: 0x04000055 RID: 85
+		private ToolStripMenuItem exludeCompToolStripMenuItem;
+
+		// Token: 0x04000056 RID: 86
+		private Label label7;
+
+		// Token: 0x04000057 RID: 87
+		private Label label8;
+
+		// Token: 0x04000058 RID: 88
+		private Label label10;
+
+		// Token: 0x04000059 RID: 89
+		private Label label11;
+
+		// Token: 0x0400005A RID: 90
+		private Label label12;
+
+		// Token: 0x0400005B RID: 91
+		private ToolStripMenuItem launchFifa16ToolStripMenuItem;
+
+		// Token: 0x0400005C RID: 92
+		private ToolStripMenuItem enableToolStripMenuItem;
+
+		// Token: 0x0400005D RID: 93
+		private ToolStripMenuItem stadiumToolStripMenuItem;
+
+		// Token: 0x0400005E RID: 94
+		private ToolStripMenuItem tVLogoToolStripMenuItem;
+
+		// Token: 0x0400005F RID: 95
+		private ToolStripMenuItem scoreBoardToolStripMenuItem;
+
+		// Token: 0x04000060 RID: 96
+		private ToolStripMenuItem movieToolStripMenuItem;
+
+		// Token: 0x04000061 RID: 97
+		private ToolStripMenuItem autorunToolStripMenuItem;
+
+		// Token: 0x04000062 RID: 98
+		private ToolStripMenuItem vIewHelpToolStripMenuItem;
+
+		// Token: 0x04000063 RID: 99
+		private Label label13;
+
+		// Token: 0x04000064 RID: 100
+		private Label label14;
+
+		// Token: 0x04000065 RID: 101
+		private Label label15;
+
+		// Token: 0x04000066 RID: 102
+		private Label label16;
+
+		// Token: 0x04000067 RID: 103
+		private Label label17;
+
+		// Token: 0x04000068 RID: 104
+		private Label label18;
+
+		// Token: 0x04000069 RID: 105
+		private Label label19;
+
+		// Token: 0x0400006A RID: 106
+		private Label label20;
+
+		// Token: 0x0400006B RID: 107
+		private Label label21;
+
+		// Token: 0x0400006C RID: 108
+		private Label label22;
+
+		// Token: 0x0400006D RID: 109
+		private Label label23;
+
+		// Token: 0x0400006E RID: 110
+		private Label label24;
+
+		// Token: 0x0400006F RID: 111
+		private Label label25;
+
+		// Token: 0x04000070 RID: 112
+		public bool bumperpagechange;
+
+		// Token: 0x04000071 RID: 113
+		private ToolStripMenuItem stadiumNetToolStripMenuItem;
+
+		// Token: 0x04000072 RID: 114
+		public bool skillgamechange;
+
+		// Token: 0x04000073 RID: 115
+		public bool matchstarted;
+
+		// Token: 0x04000074 RID: 116
+		private bool chantsThreadStarted;
+
+		// Token: 0x04000075 RID: 117
+		private CancellationTokenSource chantsCts;
+
+		// Token: 0x04000076 RID: 118
+		private ToolStripMenuItem chantsToolStripMenuItem;
+
+		// Token: 0x04000077 RID: 119
+		private string lastpagename;
+
+		// Token: 0x02000003 RID: 3
+		private enum StopReason
+		{
+			// Token: 0x04000079 RID: 121
+			None,
+			// Token: 0x0400007A RID: 122
+			TrackEnded,
+			// Token: 0x0400007B RID: 123
+			GamePaused,
+			// Token: 0x0400007C RID: 124
+			GameEnded,
+			// Token: 0x0400007D RID: 125
+			ScoreChanged,
+			// Token: 0x0400007E RID: 126
+			Manual
+		}
+	}
+}

@@ -1,0 +1,227 @@
+using System;
+using System.Diagnostics;
+using System.Linq;
+using System.Text;
+
+namespace Server16
+{
+	// Token: 0x0200000E RID: 14
+	public class Memory
+	{
+		// Token: 0x0600007E RID: 126 RVA: 0x0000C590 File Offset: 0x0000A790
+		~Memory()
+		{
+			if (this.ProcessHandle != IntPtr.Zero)
+			{
+				Win32Api.CloseHandle(this.ProcessHandle);
+			}
+		}
+
+		// Token: 0x0600007F RID: 127 RVA: 0x00002353 File Offset: 0x00000553
+		public bool IsOpen()
+		{
+			return !(this.ProcessName == string.Empty) && this.Attack(this.ProcessName);
+		}
+
+		// Token: 0x06000080 RID: 128 RVA: 0x0000C5D4 File Offset: 0x0000A7D4
+		public bool Attack(string _ProcessName)
+		{
+			Process[] processesByName = Process.GetProcessesByName(_ProcessName);
+			bool result;
+			if (processesByName.Length != 0)
+			{
+				this.BaseModule = processesByName[0].MainModule.BaseAddress;
+				this.CurProcess = processesByName[0];
+				this.ProcessID = processesByName[0].Id;
+				this.ProcessName = _ProcessName;
+				this.ProcessHandle = Win32Api.OpenProcess(56U, true, this.CurProcess.Id);
+				result = (this.ProcessHandle != IntPtr.Zero);
+			}
+			else
+			{
+				result = false;
+			}
+			return result;
+		}
+
+		// Token: 0x06000081 RID: 129 RVA: 0x0000C64C File Offset: 0x0000A84C
+		public void WriteInt(long StaticPtr, long[] offsets, string inj)
+		{
+			int value = int.Parse(inj);
+			long num = this.ReadInt64(this.BaseModule.ToInt64() + StaticPtr);
+			for (int i = 1; i < offsets.Count<long>(); i++)
+			{
+				num = this.ReadInt64(num + offsets[i - 1]);
+			}
+			this.WriteInt32(num + offsets.Last<long>(), value);
+		}
+
+		// Token: 0x06000082 RID: 130 RVA: 0x0000C6A4 File Offset: 0x0000A8A4
+		public string GetString(long StaticPtr, long[] offsets)
+		{
+			long num = this.ReadInt64(this.BaseModule.ToInt64() + StaticPtr);
+			for (int i = 1; i < offsets.Count<long>(); i++)
+			{
+				num = this.ReadInt64(num + offsets[i - 1]);
+			}
+			return this.ReadString(num + offsets.Last<long>(), 31UL);
+		}
+
+		// Token: 0x06000083 RID: 131 RVA: 0x00002375 File Offset: 0x00000575
+		public string GetString(long StaticPtr)
+		{
+			return this.ReadString(StaticPtr, 45UL);
+		}
+
+		// Token: 0x06000084 RID: 132 RVA: 0x0000C6F8 File Offset: 0x0000A8F8
+		public long Getaddress(long StaticPtr, long[] offsets)
+		{
+			long num = this.ReadInt64(this.BaseModule.ToInt64() + StaticPtr);
+			for (int i = 1; i < offsets.Count<long>(); i++)
+			{
+				long num2 = num;
+				num = this.ReadInt64(num2 + offsets[i - 1]);
+			}
+			return num + offsets.Last<long>();
+		}
+
+		// Token: 0x06000085 RID: 133 RVA: 0x0000C744 File Offset: 0x0000A944
+		public uint GetInt(long StaticPtr, long[] offsets)
+		{
+			long num = this.ReadInt64(this.BaseModule.ToInt64() + StaticPtr);
+			for (int i = 1; i < offsets.Count<long>(); i++)
+			{
+				long num2 = num;
+				num = this.ReadInt64(num2 + offsets[i - 1]);
+			}
+			return this.ReadUInt32(num + offsets.Last<long>());
+		}
+
+		// Token: 0x06000086 RID: 134 RVA: 0x0000C794 File Offset: 0x0000A994
+		public uint ReadUInt32(long _lpBaseAddress)
+		{
+			byte[] array = new byte[4];
+			int num;
+			Win32Api.ReadProcessMemory(this.ProcessHandle, _lpBaseAddress, array, 4UL, out num);
+			return BitConverter.ToUInt32(array, 0);
+		}
+
+		// Token: 0x06000087 RID: 135 RVA: 0x0000C7C4 File Offset: 0x0000A9C4
+		public ulong ReadUInt64(long _lpBaseAddress)
+		{
+			byte[] array = new byte[8];
+			int num;
+			Win32Api.ReadProcessMemory(this.ProcessHandle, _lpBaseAddress, array, 8UL, out num);
+			return BitConverter.ToUInt64(array, 0);
+		}
+
+		// Token: 0x06000088 RID: 136 RVA: 0x0000C7F4 File Offset: 0x0000A9F4
+		public long ReadInt64(long _lpBaseAddress)
+		{
+			byte[] array = new byte[8];
+			int num;
+			Win32Api.ReadProcessMemory(this.ProcessHandle, _lpBaseAddress, array, 8UL, out num);
+			return BitConverter.ToInt64(array, 0);
+		}
+
+		// Token: 0x06000089 RID: 137 RVA: 0x0000C824 File Offset: 0x0000AA24
+		public int ReadInt32(long _lpBaseAddress)
+		{
+			byte[] array = new byte[4];
+			int num;
+			Win32Api.ReadProcessMemory(this.ProcessHandle, _lpBaseAddress, array, 4UL, out num);
+			return BitConverter.ToInt32(array, 0);
+		}
+
+		// Token: 0x0600008A RID: 138 RVA: 0x0000C854 File Offset: 0x0000AA54
+		public string ReadString(long _lpBaseAddress, ulong _Size)
+		{
+			byte[] array = new byte[_Size];
+			int num;
+			Win32Api.ReadProcessMemory(this.ProcessHandle, _lpBaseAddress, array, _Size, out num);
+			return Encoding.UTF8.GetString(array);
+		}
+
+		// Token: 0x0600008B RID: 139 RVA: 0x0000C888 File Offset: 0x0000AA88
+		public void WriteMemory(long MemoryAddress, byte[] Buffer)
+		{
+			uint num;
+			Win32Api.VirtualProtectEx(this.ProcessHandle, (IntPtr)MemoryAddress, (uint)Buffer.Length, 4U, out num);
+			IntPtr intPtr;
+			Win32Api.WriteProcessMemory(this.ProcessHandle, MemoryAddress, Buffer, (ulong)((long)Buffer.Length), out intPtr);
+		}
+
+		// Token: 0x0600008C RID: 140 RVA: 0x0000C8C4 File Offset: 0x0000AAC4
+		public void WriteInt32(long _lpBaseAddress, int _Value)
+		{
+			byte[] bytes = BitConverter.GetBytes(_Value);
+			this.WriteMemory(_lpBaseAddress, bytes);
+		}
+
+		// Token: 0x0600008D RID: 141 RVA: 0x0000C8E0 File Offset: 0x0000AAE0
+		public void WriteUInt32(long _lpBaseAddress, uint _Value)
+		{
+			byte[] bytes = BitConverter.GetBytes(_Value);
+			this.WriteMemory(_lpBaseAddress, bytes);
+		}
+
+		// Token: 0x0600008E RID: 142 RVA: 0x0000C8FC File Offset: 0x0000AAFC
+		public void WriteString(long _lpBaseAddress, string _str)
+		{
+			byte[] array = Encoding.UTF8.GetBytes(_str);
+			byte[] array2 = new byte[array.Length + 1];
+			array.CopyTo(array2, 0);
+			array = array2;
+			this.WriteMemory(_lpBaseAddress, array);
+		}
+
+		// Token: 0x06000090 RID: 144 RVA: 0x0000C934 File Offset: 0x0000AB34
+		public void WriteStaticInt(long offset, int value)
+		{
+			long lpBaseAddress = this.ReadInt64(this.BaseModule.ToInt64() + offset);
+			this.WriteInt32(lpBaseAddress, value);
+		}
+
+		// Token: 0x06000091 RID: 145 RVA: 0x0000C960 File Offset: 0x0000AB60
+		public void WriteUInt(long StaticPtr, long[] offsets, string inj)
+		{
+			uint value = uint.Parse(inj);
+			long num = this.ReadInt64(this.BaseModule.ToInt64() + StaticPtr);
+			for (int i = 1; i < offsets.Count<long>(); i++)
+			{
+				num = this.ReadInt64(num + offsets[i - 1]);
+			}
+			this.WriteUInt32(num + offsets.Last<long>(), value);
+		}
+
+		// Token: 0x06000092 RID: 146 RVA: 0x0000C9B8 File Offset: 0x0000ABB8
+		public void WriteStringWithOffsets(long StaticPtr, long[] offsets, string _str)
+		{
+			byte[] array = Encoding.UTF8.GetBytes(_str);
+			byte[] array2 = new byte[array.Length + 1];
+			array.CopyTo(array2, 0);
+			array = array2;
+			long num = this.ReadInt64(this.BaseModule.ToInt64() + StaticPtr);
+			for (int i = 1; i < offsets.Count<long>(); i++)
+			{
+				num = this.ReadInt64(num + offsets[i - 1]);
+			}
+			this.WriteMemory(num + offsets.Last<long>(), array);
+		}
+
+		// Token: 0x040000BB RID: 187
+		public Process CurProcess;
+
+		// Token: 0x040000BC RID: 188
+		public IntPtr ProcessHandle;
+
+		// Token: 0x040000BD RID: 189
+		public string ProcessName;
+
+		// Token: 0x040000BE RID: 190
+		public int ProcessID;
+
+		// Token: 0x040000BF RID: 191
+		public IntPtr BaseModule;
+	}
+}

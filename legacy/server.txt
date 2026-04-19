@@ -1,0 +1,28 @@
+// C:\Users\igorv\OneDrive\Área de Trabalho\CG-Serverv1.2-Chants-Anthens\Server16.exe
+// Server16, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
+
+// Ponto de entrada: Server16.Program.Main
+// Horário: 573EFFF3 (20/05/2016 09:15:47)
+
+using System;
+using System.Diagnostics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: CompilationRelaxations(8)]
+[assembly: AssemblyDescription("")]
+[assembly: AssemblyConfiguration("")]
+[assembly: Debuggable(DebuggableAttribute.DebuggingModes.Default | DebuggableAttribute.DebuggingModes.DisableOptimizations | DebuggableAttribute.DebuggingModes.IgnoreSymbolStoreSequencePoints | DebuggableAttribute.DebuggingModes.EnableEditAndContinue)]
+[assembly: RuntimeCompatibility(WrapNonExceptionThrows = true)]
+[assembly: TargetFramework(".NETFramework,Version=v4.5", FrameworkDisplayName = ".NET Framework 4.5")]
+[assembly: AssemblyTitle("Server16")]
+[assembly: AssemblyCopyright("Copyright © Microsoft 2016")]
+[assembly: AssemblyCompany("Microsoft")]
+[assembly: AssemblyProduct("Server16")]
+[assembly: ComVisible(false)]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyTrademark("")]
+[assembly: Guid("76df4aba-8f77-49f8-bcc9-9818da2e8a79")]
