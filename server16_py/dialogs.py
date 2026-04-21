@@ -551,11 +551,15 @@ class StadiumDialog(BaseDialog):
         stadium_name = (stadium_name or "").strip()
         if not stadium_name or stadium_name == "None":
             return None
-        preview_dir = self.stadium_source / stadium_name / "render" / "thumbnail" / "stadium"
+        preview_dir = self.stadium_source / "render" / "thumbnail" / "stadium"
         if not preview_dir.exists():
             return None
-        for candidate in sorted(preview_dir.glob("stadium.*")):
-            if candidate.is_file() and candidate.suffix.lower() in {".png", ".jpg", ".jpeg", ".jepg"}:
+        for candidate in sorted(preview_dir.iterdir()):
+            if not candidate.is_file():
+                continue
+            if candidate.suffix.lower() not in {".png", ".jpg", ".jpeg", ".jepg"}:
+                continue
+            if candidate.stem.casefold() == stadium_name.casefold():
                 return candidate
         return None
 
