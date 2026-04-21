@@ -107,6 +107,7 @@ class Server16App(tk.Tk):
         self._worker_poll_job = None
         self._stadium_task_running = False
         self._stadium_task_signature = None
+        self._stadium_task_request_key = None
         self._last_stadium_applied_signature = None
         self.labels = {}
         self.info_labels = {}
@@ -1454,6 +1455,7 @@ class Server16App(tk.Tk):
                 _, message = event
                 self._stadium_task_running = False
                 self._stadium_task_signature = None
+                self._stadium_task_request_key = None
                 self._set_process_status("Stadium Error", self.error)
                 self._hide_stadium_loading_modal()
                 self.log(message)

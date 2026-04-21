@@ -211,7 +211,7 @@ class StadiumDialog(BaseDialog):
         self._all_stadiums = ["None"]
         self._country_group_labels = {"All Countries": "All Countries"}
         if self.stadium_source.exists():
-            self._all_stadiums.extend(directory.name for directory in sorted(p for p in self.stadium_source.iterdir() if p.is_dir()))
+            self._all_stadiums.extend(self._discover_stadium_names())
         self._country_group_values = self._build_country_group_values(self._all_stadiums)
         self.country_group_var.set(self._country_group_values[0] if self._country_group_values else "All Countries")
         self.grid_columnconfigure(0, weight=5)
@@ -369,6 +369,18 @@ class StadiumDialog(BaseDialog):
         self._on_pitch_changed()
         self._on_net_changed()
         self._on_police_changed()
+
+    def _discover_stadium_names(self) -> list[str]:
+        discovered: dict[str, Path] = {}
+        for item in sorted(self.stadium_source.iterdir(), key=lambda path: (not path.is_dir(), path.name.lower())):
+            if item.is_dir():
+                discovered.setdefault(item.name, item)
+                continue
+            if item.is_file() and item.suffix.lower() == ".rar":
+                stem = item.stem.strip()
+                if stem:
+                    discovered.setdefault(stem, item)
+        return sorted(discovered, key=str.casefold)
 
     def _combo(self, parent: tk.Misc, row: int, label: str, values: list[str], variable: tk.StringVar, callback=None) -> None:
         self._dark_label(parent, label, muted=True, font=("Bahnschrift", 10), anchor="w").grid(row=row, column=0, sticky="w", pady=(0 if row == 0 else 12, 0))
