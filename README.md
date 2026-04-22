@@ -138,7 +138,7 @@ You can build the standalone executable with the included batch file:
 Or run PyInstaller directly:
 
 ```powershell
-pyinstaller --noconfirm --clean --windowed --onefile --name Server16Python --distpath dist --workpath build\pyinstaller --add-data "server16_py\offsets.json;server16_py" main.py
+pyinstaller --noconfirm --clean --distpath dist --workpath build\pyinstaller Server16Python.spec
 ```
 
 The resulting executable will be created at:
@@ -180,6 +180,7 @@ Suggested contribution flow:
 Suggested GitHub release contents:
 
 - `Server16Python.exe`
+- `RELEASE_NOTES_v0.2.1.md`
 - release notes summarizing major fixes and improvements
 - optional screenshots or changelog excerpts
 
