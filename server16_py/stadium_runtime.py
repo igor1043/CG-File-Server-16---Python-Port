@@ -36,6 +36,9 @@ class StadiumRuntime:
         app = self.app
         if app.settings_ini.key_exists(app.TOURROUNDID, "exclude") or app.settings_ini.key_exists(app.TOURNAME, "exclude"):
             app.log(f"Stadium excluded for TOUR={app.TOURNAME} ROUND={app.TOURROUNDID}")
+            # Clear stadium from previous match when this tournament/round is excluded
+            app.curstad = ""
+            app.ScoreboardStadName = ""
             return
         section_id = None
         section_name = None
@@ -73,6 +76,7 @@ class StadiumRuntime:
         app._set_progress(25, "Restoring default stadium")
         copy(app.exedir / "FSW" / "stadium", app.exedir / "data" / "sceneassets")
         app.curstad = ""
+        app.ScoreboardStadName = ""
         app.stadmovie = False
         app._set_display("stadium", "Stadium Module Disable")
         app._update_audio_overview()
@@ -273,12 +277,17 @@ class StadiumRuntime:
                 app.memory.write_int(app.offsets.ORISTADIDBASE, fallback_offsets, payload["injid"])
             std_offsets = app.offsets.STDNAMEOFFSET176 if payload["injid"] == "176" else app.offsets.STDNAMEOFFSET261
             stad_name = payload["stad_name"]
-            std_name = "_" + (app.settings_ini.read(stad_name, "scoreboardstdname").split(",")[0] if app.settings_ini.key_exists(stad_name, "scoreboardstdname") else stad_name)
+            # Extract display name for scoreboardstdname (used in Discord and UI)
+            scoreboard_display_name = ""
+            if app.settings_ini.key_exists(stad_name, "scoreboardstdname"):
+                scoreboard_display_name = app.settings_ini.read(stad_name, "scoreboardstdname").split(",")[0]
+            std_name = "_" + (scoreboard_display_name if scoreboard_display_name else stad_name)
             app.memory.write_string_with_offsets(app.offsets.STDNAMEBASE, std_offsets, std_name)
             app.CCount = inc_count(0, app.CCount)
             app.injID = payload["injid"]
             app.StadName = stad_name
             app.curstad = stad_name
+            app.ScoreboardStadName = scoreboard_display_name  # Save display name for Discord RPC
             app.stadmovie = bool(payload["stadmovie"])
             app._set_display("stadium", stad_name)
             app._set_display("audio_last_action", f"Stadium {stad_name}")
