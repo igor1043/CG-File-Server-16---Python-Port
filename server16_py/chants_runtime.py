@@ -24,28 +24,29 @@ def _ensure_pygame_mixer() -> None:
 
 class MciAudioPlayer:
     """
-    Player with pygame when available and native Windows MCI as fallback.
-    This keeps chants working in packaged builds that do not include pygame.
+    Player that prefers the native Windows MCI backend so chants show up as
+    their own app session in the Windows volume mixer, while still falling
+    back to pygame if the native path is unavailable.
     """
 
     _alias_counter = itertools.count(1)
     _owner: "MciAudioPlayer | None" = None
 
     def __init__(self) -> None:
-        self._backend = "pygame"
+        self._backend = "mci"
         self._pygame = None
         self._winmm = None
         self.alias = f"server16_audio_{next(self._alias_counter)}"
         try:
+            self._winmm = ctypes.WinDLL("winmm")
+            self._winmm.mciSendStringW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
+            self._winmm.mciSendStringW.restype = ctypes.c_uint
+        except Exception:
+            self._backend = "pygame"
             import pygame
 
             self._pygame = pygame
             _ensure_pygame_mixer()
-        except ModuleNotFoundError:
-            self._backend = "mci"
-            self._winmm = ctypes.WinDLL("winmm")
-            self._winmm.mciSendStringW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
-            self._winmm.mciSendStringW.restype = ctypes.c_uint
         self._open = False
         self._paused = False
         self._volume: float = 1.0
@@ -69,6 +70,7 @@ class MciAudioPlayer:
             self._send_mci(f'open "{escaped}" type mpegvideo alias {self.alias}')
         self._open = True
         self._paused = False
+        self.set_volume(self._volume)
 
     def play(self) -> None:
         if not self._open:
