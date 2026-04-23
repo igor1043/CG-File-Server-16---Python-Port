@@ -17,7 +17,7 @@ class AssignmentRuntime:
         app = self.app
         if app._has_selected_fifa_exe():
             return True
-        messagebox.showwarning("Assignment", "Selecione o executavel do FIFA 16 primeiro.")
+        messagebox.showwarning(app.tr("message.assignment"), app.tr("message.warning.select_fifa_first"))
         app.log("Assignment blocked: FIFA EXE not selected")
         return False
 
@@ -91,7 +91,7 @@ class AssignmentRuntime:
             },
         )
         if not comp:
-            messagebox.showwarning("Assignment", "Nenhum contexto de jogo foi capturado ainda.")
+            messagebox.showwarning(app.tr("message.assignment"), app.tr("message.warning.no_context"))
             app.log("Scoreboard assignment skipped: no usable context")
             return
         app.log(f"Scoreboard assignment using {resolved}: {comp}")
@@ -121,7 +121,7 @@ class AssignmentRuntime:
             },
         )
         if not comp:
-            messagebox.showwarning("Assignment", "Nenhum contexto de jogo foi capturado ainda.")
+            messagebox.showwarning(app.tr("message.assignment"), app.tr("message.warning.no_context"))
             app.log("Movie assignment skipped: no usable context")
             return
         app.log(f"Movie assignment using {resolved}: {comp}")
@@ -164,7 +164,7 @@ class AssignmentRuntime:
             },
         )
         if not comp:
-            messagebox.showwarning("Assignment", "Nenhum contexto de jogo foi capturado ainda.")
+            messagebox.showwarning(app.tr("message.assignment"), app.tr("message.warning.no_context"))
             app.log("Stadium assignment skipped: no usable context")
             return
         app.log(f"Stadium assignment using {resolved}: {comp}")
@@ -186,11 +186,11 @@ class AssignmentRuntime:
         if not app.settings_ini.key_exists(comp_id, "exclude"):
             app.settings_ini.write(comp_id, "excluded from stadium server", "exclude")
             app.settings_ini.save()
-            messagebox.showinfo("Exclude", f"{comp_id} agora está excluído do stadium server.")
-        elif messagebox.askyesno("Exclude", f"{comp_id} já está excluído. Reativar?"):
+            messagebox.showinfo(app.tr("message.exclude"), app.tr("message.exclude.added", comp_id=comp_id))
+        elif messagebox.askyesno(app.tr("message.exclude"), app.tr("message.exclude.already", comp_id=comp_id)):
             app.settings_ini.delete_key(comp_id, "exclude")
             app.settings_ini.save()
-            messagebox.showinfo("Exclude", f"{comp_id} foi reativado e voltará a usar os assignments.")
+            messagebox.showinfo(app.tr("message.exclude"), app.tr("message.exclude.removed", comp_id=comp_id))
 
     def scoreboards(self, comp: str, tvlogo: str, scoreboard: str) -> None:
         self.assign_with_delete(comp, "TVLogo", tvlogo, "default", f"Tournament {comp} has been assigned {tvlogo} TVLogo")
@@ -214,7 +214,7 @@ class AssignmentRuntime:
         if not self._ensure_fifa_selected():
             return
         if not comp:
-            messagebox.showwarning("Assignment", "Nenhum contexto de jogo foi capturado ainda.")
+            messagebox.showwarning(app.tr("message.assignment"), app.tr("message.warning.no_context"))
             app.log(f"Assignment skipped: missing context for key={key} value={value}")
             return
         changed = False
@@ -222,14 +222,14 @@ class AssignmentRuntime:
             if value != default_value:
                 app.settings_ini.write(comp, value, key)
                 app.settings_ini.save()
-                messagebox.showinfo("Assignment", success_message)
+                messagebox.showinfo(app.tr("message.assignment"), success_message)
                 changed = True
                 app.log(f"Assignment created: [{key}] {comp}={value}")
             if changed:
                 app.apply_all_runtime()
             return
         if value == default_value:
-            if messagebox.askyesno("Assignment", f"{comp} já possui {key}. Deseja resetar para o padrão?"):
+            if messagebox.askyesno(app.tr("message.assignment"), app.tr("message.prompt.reset_default", comp=comp, key=key)):
                 app.settings_ini.delete_key(comp, key)
                 app.settings_ini.save()
                 changed = True
@@ -237,10 +237,10 @@ class AssignmentRuntime:
             if changed:
                 app.apply_all_runtime()
             return
-        if messagebox.askyesno("Assignment", f"{comp} já possui {key}. Deseja trocar?"):
+        if messagebox.askyesno(app.tr("message.assignment"), app.tr("message.prompt.replace_assignment", comp=comp, key=key)):
             app.settings_ini.write(comp, value, key)
             app.settings_ini.save()
-            messagebox.showinfo("Assignment", success_message)
+            messagebox.showinfo(app.tr("message.assignment"), success_message)
             changed = True
             app.log(f"Assignment updated: [{key}] {comp}={value}")
         if changed:
