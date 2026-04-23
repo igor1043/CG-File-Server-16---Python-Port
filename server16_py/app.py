@@ -213,6 +213,7 @@ class Server16App(tk.Tk):
             self.discord_rpc.connect()
         # Initialize team database (will be loaded when FIFA EXE is selected)
         self.team_db: FifaDatabase | None = None
+        self._team_db_load_token = 0
         self.user32 = ctypes.WinDLL("user32", use_last_error=True)
         self.user32.GetAsyncKeyState.argtypes = [wintypes.INT]
         self.user32.GetAsyncKeyState.restype = wintypes.SHORT
@@ -1701,8 +1702,10 @@ class Server16App(tk.Tk):
         if discord_ini_value in {"0", "1"}:
             self._discord_rpc_enabled = discord_ini_value == "1"
         else:
-            self.settings_ini.write("discordRP", "1" if self._discord_rpc_enabled else "0", "Modules")
-            self.settings_ini.save()
+            # Avoid creating FSW/settings.ini on first app start when FIFA is not linked yet.
+            if self.fifaEXE != "default" or self.settings_ini.path.exists():
+                self.settings_ini.write("discordRP", "1" if self._discord_rpc_enabled else "0", "Modules")
+                self.settings_ini.save()
         self.module_states["Discord RPC"] = self._discord_rpc_enabled
         loaded = ", ".join(
             f"{name}={'1' if enabled else '0'}"
@@ -1755,7 +1758,6 @@ class Server16App(tk.Tk):
             return
         self.settings.fifa_exe = filename
         self.setuppaths()
-        self._load_team_database()
         self.refresh_modules()
         self.log(f"Selected FIFA executable: {filename}")
         self.log("Bootstrap file writes deferred until overlay start or another explicit runtime action")
@@ -1774,25 +1776,63 @@ class Server16App(tk.Tk):
     def _load_team_database(self) -> None:
         """Load FIFA team database for the selected installation"""
         if not self.fifaEXE or self.fifaEXE == "default":
+            self._team_db_load_token += 1
             self.team_db = None
             self.discord_rpc.set_team_name_resolver(None)
+            self._set_progress(0, "Team database idle")
             return
-        
-        try:
-            fifa_root = Path(self.fifaEXE).parent
-            self.team_db = FifaDatabase(fifa_root)
-            if self.team_db.connect():
-                self.team_db.load_all_teams()
-                # Connect resolver to Discord RPC
-                self.discord_rpc.set_team_name_resolver(self.team_db.get_team_name)
-                self.log(f" Team database loaded for {fifa_root.name}")
-            else:
-                reason = self.team_db.last_error if self.team_db else "unknown reason"
-                self.log(f"️  Could not connect to team database: {reason}")
-                self.team_db = None
-        except Exception as e:
-            self.log(f"❌ Error loading team database: {e}")
+
+        self._team_db_load_token += 1
+        load_token = self._team_db_load_token
+        fifa_root = Path(self.fifaEXE).parent
+        self.team_db = None
+        self.discord_rpc.set_team_name_resolver(None)
+        self._set_process_status("Loading Team DB", self.gold)
+        self._set_progress(10, "Preparing team database")
+
+        def _apply_success(db: FifaDatabase, team_count: int) -> None:
+            if load_token != self._team_db_load_token or self._closing:
+                return
+            self.team_db = db
+            self.discord_rpc.set_team_name_resolver(self.team_db.get_team_name)
+            self.log(f" Team database loaded for {fifa_root.name}")
+            self._set_progress(100, f"Team database ready ({team_count} teams)")
+            if not self.memory.is_open():
+                self._set_process_status("Waiting FIFA", self.accent)
+
+        def _apply_failure(reason: str) -> None:
+            if load_token != self._team_db_load_token or self._closing:
+                return
             self.team_db = None
+            self.log(f"️  Could not connect to team database: {reason}")
+            self._set_progress(0, "Team database unavailable")
+            if not self.memory.is_open():
+                self._set_process_status("Waiting FIFA", self.accent)
+
+        def _apply_error(message: str) -> None:
+            if load_token != self._team_db_load_token or self._closing:
+                return
+            self.team_db = None
+            self.log(f"❌ Error loading team database: {message}")
+            self._set_progress(0, "Team database error")
+            if not self.memory.is_open():
+                self._set_process_status("Waiting FIFA", self.accent)
+
+        def _worker() -> None:
+            try:
+                db = FifaDatabase(fifa_root)
+                self.after(0, lambda: self._set_progress(40, "Connecting to fifa_ng_db"))
+                if not db.connect():
+                    reason = db.last_error or "unknown reason"
+                    self.after(0, lambda: _apply_failure(reason))
+                    return
+                self.after(0, lambda: self._set_progress(80, "Reading teams and stadiums"))
+                team_count = db.load_all_teams()
+                self.after(0, lambda: _apply_success(db, team_count))
+            except Exception as exc:
+                self.after(0, lambda: _apply_error(str(exc)))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _resolve_team_name(self, team_id: str) -> str | None:
         """Resolve a team id to its display name using the loaded team database."""
