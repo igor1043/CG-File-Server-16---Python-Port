@@ -75,6 +75,8 @@ class Server16App(tk.Tk):
         self.settings = SettingsStore(self.base_dir / "runtime" / "settings.json")
         self.show_stadium_loading_var = tk.BooleanVar(value=self.settings.show_stadium_loading_notification)
         self.localization = LocalizationManager(self.base_dir / "server16_py" / "locales", self.settings.language)
+        self.log_backup_path = self.log_path.with_suffix(".previous.log")
+        self._prepare_runtime_log()
         self.offsets = Offsets.load()
         self.memory = Memory()
         self.pagechange = False
@@ -619,6 +621,27 @@ class Server16App(tk.Tk):
             self.log("Unhandled exception", exc_value, exc_info=(exc_type, exc_value, exc_tb))
 
         self.report_callback_exception = report
+
+    def _build_runtime_log_header(self) -> str:
+        mapped_executable = self.settings.fifa_exe or "default"
+        settings_path = self.settings.path
+        return "\n".join(
+            (
+                f"Mapped executable: {mapped_executable}",
+                f"Settings file: {settings_path}",
+            )
+        ) + "\n"
+
+    def _prepare_runtime_log(self) -> None:
+        header = self._build_runtime_log_header()
+        try:
+            if self.log_path.exists():
+                previous_content = self.log_path.read_text(encoding="utf-8", errors="replace")
+                if previous_content and previous_content != header:
+                    self.log_backup_path.write_text(previous_content, encoding="utf-8")
+            self.log_path.write_text(header, encoding="utf-8")
+        except Exception:
+            pass
 
     def log(self, message: str, error: Exception | None = None, exc_info=None) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
