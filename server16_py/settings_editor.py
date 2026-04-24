@@ -38,7 +38,7 @@ class SettingsAreaEditor(tk.Toplevel):
         self.frames: dict[str, SettingsSectionFrame] = {}
         for spec in specs:
             frame = SettingsSectionFrame(self.notebook, app, spec)
-            self.notebook.add(frame, text=spec.title)
+            self.notebook.add(frame, text=app.tr(spec.title) if hasattr(app, "tr") else spec.title)
             self.frames[spec.section.lower()] = frame
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         if initial_section:
@@ -84,6 +84,11 @@ class SettingsSectionFrame(tk.Frame):
         self._setup_ui()
         self.bind("<Destroy>", self._on_destroy)
 
+    def tr(self, key: str, **kwargs) -> str:
+        if hasattr(self.app, "tr"):
+            return self.app.tr(key, **kwargs)
+        return key.format(**kwargs) if kwargs else key
+
     def _setup_ui(self) -> None:
         self.grid_columnconfigure(0, weight=2)
         self.grid_columnconfigure(1, weight=3)
@@ -101,12 +106,12 @@ class SettingsSectionFrame(tk.Frame):
         ).grid(row=0, column=0, sticky="w")
         tk.Label(
             header,
-            text=f"Arquivo ativo: {self.app.settings_ini.path}",
+            text=self.tr("dialog.editor.active_file", path=self.app.settings_ini.path),
             bg=self.app.bg,
             fg=self.app.muted,
             font=("Bahnschrift", 9),
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
-        ttk.Button(header, text="Refresh", command=self.reload_entries).grid(row=0, column=1, rowspan=2, sticky="e")
+        ttk.Button(header, text=self.tr("button.refresh"), command=self.reload_entries).grid(row=0, column=1, rowspan=2, sticky="e")
 
         left_card = tk.Frame(self, bg=self.app.card, highlightthickness=1, highlightbackground="#243654")
         left_card.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(0, 12))
@@ -128,7 +133,7 @@ class SettingsSectionFrame(tk.Frame):
         )
         search.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         search.bind("<KeyRelease>", lambda _event: self.reload_entries(preserve=False))
-        ttk.Button(left_top, text="New", command=self.new_entry).grid(row=0, column=1)
+        ttk.Button(left_top, text=self.tr("button.new"), command=self.new_entry).grid(row=0, column=1)
 
         self.entries_list = tk.Listbox(
             left_card,
@@ -151,7 +156,7 @@ class SettingsSectionFrame(tk.Frame):
         entries_scroll.grid(row=1, column=1, sticky="ns", padx=(8, 12), pady=(0, 8))
         self.entries_list.bind("<<ListboxSelect>>", self._on_entry_selected)
 
-        self.count_label = tk.Label(left_card, text="0 entries", bg=self.app.card, fg=self.app.muted, font=("Bahnschrift", 9))
+        self.count_label = tk.Label(left_card, text=self.tr("dialog.editor.entries_count", count=0), bg=self.app.card, fg=self.app.muted, font=("Bahnschrift", 9))
         self.count_label.grid(row=2, column=0, sticky="w", padx=12, pady=(0, 10))
 
         right_card = tk.Frame(self, bg=self.app.card, highlightthickness=1, highlightbackground="#243654")
@@ -163,7 +168,7 @@ class SettingsSectionFrame(tk.Frame):
         form.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
         form.grid_columnconfigure(1, weight=1)
 
-        tk.Label(form, text="Key", bg=self.app.card, fg=self.app.muted, font=("Bahnschrift", 10)).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        tk.Label(form, text=self.tr("dialog.editor.key"), bg=self.app.card, fg=self.app.muted, font=("Bahnschrift", 10)).grid(row=0, column=0, sticky="w", pady=(0, 6))
         self.key_var = tk.StringVar()
         self.key_entry = tk.Entry(
             form,
@@ -185,11 +190,11 @@ class SettingsSectionFrame(tk.Frame):
         actions = tk.Frame(right_card, bg=self.app.card)
         actions.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
         actions.grid_columnconfigure(0, weight=1)
-        ttk.Button(actions, text="Save To settings.ini", command=self.save_entry).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(actions, text="Delete Entry", command=self.delete_entry).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(actions, text="Apply Runtime", command=self._apply_runtime).grid(row=0, column=2, sticky="ew", padx=(6, 0))
+        ttk.Button(actions, text=self.tr("button.save_settings"), command=self.save_entry).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(actions, text=self.tr("button.delete_entry"), command=self.delete_entry).grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(actions, text=self.tr("button.apply_runtime"), command=self._apply_runtime).grid(row=0, column=2, sticky="ew", padx=(6, 0))
 
-        self.status_var = tk.StringVar(value="Selecione ou crie um item para editar.")
+        self.status_var = tk.StringVar(value=self.tr("dialog.editor.no_selection"))
         tk.Label(
             right_card,
             textvariable=self.status_var,
@@ -371,7 +376,7 @@ class SettingsSectionFrame(tk.Frame):
             preview = value if len(value) <= 58 else value[:55] + "..."
             self.entries_list.insert("end", f"{key}  ->  {preview}")
             self._display_keys.append(key)
-        self.count_label.configure(text=f"{len(items)} entries")
+        self.count_label.configure(text=self.tr("dialog.editor.entries_count", count=len(items)))
         if current_selection:
             for index, (key, _value) in enumerate(items):
                 if key == current_selection:
@@ -425,7 +430,7 @@ class SettingsSectionFrame(tk.Frame):
             self.away_prob_var.set(self.CHANTS_DEFAULTS["away_prob"])
         elif self.spec.kind == "exclude":
             self.exclude_var.set("excluded from stadium server")
-        self.status_var.set("Novo item pronto. Salvar grava imediatamente no settings.ini.")
+        self.status_var.set(self.tr("dialog.editor.new_ready"))
 
     def load_entry(self, key: str) -> None:
         self.app.settings_ini.reload()
@@ -444,7 +449,7 @@ class SettingsSectionFrame(tk.Frame):
             self._load_chants_value(value)
         elif self.spec.kind == "exclude":
             self.exclude_var.set(value or "excluded from stadium server")
-        self.status_var.set(f"Editando [{self.spec.section}] {key}")
+        self.status_var.set(self.tr("dialog.editor.editing", section=self.spec.section, key=key))
 
     def _load_stadium_value(self, value: str) -> None:
         self.stadium_list.selection_clear(0, "end")
@@ -554,14 +559,14 @@ class SettingsSectionFrame(tk.Frame):
     def save_entry(self) -> None:
         key = self.key_var.get().strip()
         if not key:
-            messagebox.showwarning("Settings", "Informe a chave da entrada.")
+            messagebox.showwarning(self.tr("message.settings"), self.tr("message.settings.enter_key"))
             return
         if self.spec.section.lower() == "modules":
-            messagebox.showwarning("Settings", "A seção Modules está bloqueada nesta interface.")
+            messagebox.showwarning(self.tr("message.settings"), self.tr("message.settings.modules_locked"))
             return
         value = self._compose_value()
         if not value:
-            messagebox.showwarning("Settings", "Informe um valor válido para salvar.")
+            messagebox.showwarning(self.tr("message.settings"), self.tr("message.settings.enter_valid_value"))
             return
         original_key = self.selected_key
         if original_key and original_key != key:
@@ -569,7 +574,7 @@ class SettingsSectionFrame(tk.Frame):
         self.app.settings_ini.write(key, value, self.spec.section)
         self.app.settings_ini.save()
         self.selected_key = key
-        self.status_var.set(f"[{self.spec.section}] {key} salvo em tempo real.")
+        self.status_var.set(self.tr("dialog.editor.saved", section=self.spec.section, key=key))
         self.reload_entries()
         self._apply_runtime()
 
@@ -577,11 +582,11 @@ class SettingsSectionFrame(tk.Frame):
         key = self.key_var.get().strip() or self.selected_key
         if not key:
             return
-        if not messagebox.askyesno("Settings", f"Remover [{self.spec.section}] {key}?"):
+        if not messagebox.askyesno(self.tr("message.settings"), self.tr("message.settings.remove_entry", section=self.spec.section, key=key)):
             return
         self.app.settings_ini.delete_key(key, self.spec.section)
         self.app.settings_ini.save()
-        self.status_var.set(f"[{self.spec.section}] {key} removido.")
+        self.status_var.set(self.tr("dialog.editor.removed", section=self.spec.section, key=key))
         self.new_entry()
         self.reload_entries(preserve=False)
         self._apply_runtime()
@@ -590,7 +595,7 @@ class SettingsSectionFrame(tk.Frame):
         try:
             self.app.refresh_modules()
             self.app.apply_all_runtime()
-            self.status_var.set(self.status_var.get() + " Runtime atualizado.")
+            self.status_var.set(self.status_var.get() + self.tr("dialog.editor.runtime_updated"))
         except Exception as exc:
             self.app.log("Failed to apply runtime after settings edit", exc)
 
@@ -609,17 +614,17 @@ def stadium_specs() -> list[SectionSpec]:
 
 def asset_specs() -> list[SectionSpec]:
     return [
-        SectionSpec("Scoreboard", "Competition Scoreboards", kind="simple", directory="ScoreBoardGBD"),
-        SectionSpec("TVLogo", "Competition TV Logos", kind="simple", directory="TVLogoGBD"),
-        SectionSpec("HomeTeamScoreBoard", "Home Team Scoreboards", kind="simple", directory="ScoreBoardGBD"),
-        SectionSpec("HomeTeamTvLogo", "Home Team TV Logos", kind="simple", directory="TVLogoGBD"),
-        SectionSpec("movies", "Competition Movies", kind="simple", directory="MoviesGBD"),
-        SectionSpec("TeamMovies", "Team Movies", kind="simple", directory="MoviesGBD"),
-        SectionSpec("DerbyMatch", "Derby Movies", kind="simple", directory="MoviesGBD"),
+        SectionSpec("Scoreboard", "dialog.editor.choice.competition_scoreboards", kind="simple", directory="ScoreBoardGBD"),
+        SectionSpec("TVLogo", "dialog.editor.choice.competition_tvlogos", kind="simple", directory="TVLogoGBD"),
+        SectionSpec("HomeTeamScoreBoard", "dialog.editor.choice.home_team_scoreboards", kind="simple", directory="ScoreBoardGBD"),
+        SectionSpec("HomeTeamTvLogo", "dialog.editor.choice.home_team_tvlogos", kind="simple", directory="TVLogoGBD"),
+        SectionSpec("movies", "dialog.editor.choice.competition_movies", kind="simple", directory="MoviesGBD"),
+        SectionSpec("TeamMovies", "dialog.editor.choice.team_movies", kind="simple", directory="MoviesGBD"),
+        SectionSpec("DerbyMatch", "dialog.editor.choice.derby_movies", kind="simple", directory="MoviesGBD"),
     ]
 
 
 def audio_specs() -> list[SectionSpec]:
     return [
-        SectionSpec("chantsid", "Chants IDs", kind="chants", directory="FSW\\Chants", recursive=True),
+        SectionSpec("chantsid", "dialog.editor.choice.chants_ids", kind="chants", directory="FSW\\Chants", recursive=True),
     ]

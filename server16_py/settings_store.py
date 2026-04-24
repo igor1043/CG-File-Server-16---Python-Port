@@ -11,6 +11,7 @@ class SettingsStore:
         # Backward-compatible: keep this key available even if current UI
         # does not expose it yet.
         "SHOW_STADIUM_LOADING_NOTIFICATION": True,
+        "LANGUAGE": "en",
     }
 
     def __init__(self, path: Path) -> None:
@@ -59,4 +60,15 @@ class SettingsStore:
     @show_stadium_loading_notification.setter
     def show_stadium_loading_notification(self, value: bool) -> None:
         self.data["SHOW_STADIUM_LOADING_NOTIFICATION"] = bool(value)
+        self.save()
+
+    @property
+    def language(self) -> str:
+        value = str(self.data.get("LANGUAGE", "en")).strip().lower()
+        return value if value in {"en", "pt", "es"} else "en"
+
+    @language.setter
+    def language(self, value: str) -> None:
+        normalized = str(value or "en").strip().lower()
+        self.data["LANGUAGE"] = normalized if normalized in {"en", "pt", "es"} else "en"
         self.save()

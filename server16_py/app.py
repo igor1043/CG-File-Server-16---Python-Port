@@ -29,6 +29,7 @@ from .fifa_db import FifaDatabase
 from .file_tools import checkdirs, checkver, copy, copy_if_exists, extra_setup
 from .ini_file import SessionIniFile
 from .memory_access import Memory, MemoryAccessError
+from .localization import LANGUAGE_LABELS, LocalizationManager, SUPPORTED_LANGUAGES
 from .offsets import Offsets
 from .settings_editor import SettingsAreaEditor, asset_specs, audio_specs, stadium_specs
 from .settings_store import SettingsStore
@@ -73,6 +74,7 @@ class Server16App(tk.Tk):
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings = SettingsStore(self.base_dir / "runtime" / "settings.json")
         self.show_stadium_loading_var = tk.BooleanVar(value=self.settings.show_stadium_loading_notification)
+        self.localization = LocalizationManager(self.base_dir / "server16_py" / "locales", self.settings.language)
         self.offsets = Offsets.load()
         self.memory = Memory()
         self.pagechange = False
@@ -119,6 +121,7 @@ class Server16App(tk.Tk):
         self._stadium_task_signature = None
         self._last_stadium_applied_signature = None
         self.labels = {}
+        self.stat_title_labels = {}
         self.info_labels = {}
         self.module_vars = {}
         self.module_checks = {}
@@ -126,9 +129,17 @@ class Server16App(tk.Tk):
         self.log_widget = None
         self.logs_frame = None
         self.toggle_logs_button = None
+        self.locate_fifa_button = None
+        self.launch_fifa_button = None
+        self.assign_scoreboard_button = None
+        self.assign_movie_button = None
+        self.exclude_competition_button = None
         self.start_overlay_button = None
         self.log_status_label = None
         self.log_follow_button = None
+        self.language_label = None
+        self.language_combo = None
+        self.language_var = tk.StringVar(value=self.settings.language)
         self._log_autofollow = True
         self.ui_root = None
         self.tabview = None
@@ -136,9 +147,11 @@ class Server16App(tk.Tk):
         self.logs_tab = None
         self.audio_tab = None
         self.camera_tab = None
+        self.banner_title_label = None
+        self.help_label = None
         self.page_banner = None
         self.progress_bar = None
-        self.progress_text = None
+        self.progress_text_label = None
         self.progress_value = None
         self.stadium_loading_modal = None
         self.stadium_loading_title = None
@@ -181,6 +194,9 @@ class Server16App(tk.Tk):
         self.camera_example_combo = None
         self.camera_instruction_text = None
         self.camera_apply_button = None
+        self.camera_library_card = None
+        self.camera_preview_card = None
+        self.logs_group = None
         self.chants_thread_started = False
         self._chants_stop = threading.Event()
         self._chants_reset_requested = False
@@ -267,6 +283,156 @@ class Server16App(tk.Tk):
             self.log("Discord RPC initialized (enabled in settings)")
         else:
             self.log("Discord RPC initialized (disabled in settings)")
+
+    def tr(self, key: str, **kwargs) -> str:
+        return self.localization.translate(key, **kwargs)
+
+    def display_value(self, key: str, fallback: str | None = None, **kwargs) -> str:
+        text = self.tr(f"display.{key}", **kwargs)
+        if text == f"display.{key}" and fallback is not None:
+            return fallback.format(**kwargs) if kwargs else fallback
+        return text
+
+    def progress_text(self, key: str, **kwargs) -> str:
+        return self.tr(f"progress.{key}", **kwargs)
+
+    def status_text(self, key: str, **kwargs) -> str:
+        return self.tr(f"status.{key}", **kwargs)
+
+    def _language_combo_values(self) -> list[str]:
+        return [f"{code.upper()} - {LANGUAGE_LABELS[code]}" for code in SUPPORTED_LANGUAGES]
+
+    def _language_combo_value(self, language: str | None = None) -> str:
+        code = (language or self.localization.language).strip().lower()
+        return f"{code.upper()} - {LANGUAGE_LABELS.get(code, LANGUAGE_LABELS['en'])}"
+
+    def _selected_language_code(self) -> str:
+        raw = (self.language_var.get() or "").split(" - ", 1)[0].strip().lower()
+        return raw if raw in SUPPORTED_LANGUAGES else "en"
+
+    def _on_language_selected(self, _event=None) -> None:
+        self._set_language(self._selected_language_code())
+
+    def _set_language(self, language: str) -> None:
+        normalized = self.localization.set_language(language)
+        if self.settings.language != normalized:
+            self.settings.language = normalized
+        self.language_var.set(self._language_combo_value(normalized))
+        self._apply_main_localization()
+
+    def _apply_main_localization(self) -> None:
+        window = self._window()
+        try:
+            window.title(self.tr("app.title"))
+        except Exception:
+            pass
+        if self.start_overlay_button is not None:
+            self.start_overlay_button.configure(text=self.tr("button.start_overlay"))
+        if self.locate_fifa_button is not None:
+            self.locate_fifa_button.configure(text=self.tr("button.locate_fifa_exe"))
+        if self.launch_fifa_button is not None:
+            self.launch_fifa_button.configure(text=self.tr("button.launch_fifa"))
+        if self.assign_scoreboard_button is not None:
+            self.assign_scoreboard_button.configure(text=self.tr("button.assign_scoreboard"))
+        if self.assign_movie_button is not None:
+            self.assign_movie_button.configure(text=self.tr("button.assign_movie"))
+        if self.exclude_competition_button is not None:
+            self.exclude_competition_button.configure(text=self.tr("button.exclude_competition"))
+        if self.toggle_logs_button is not None:
+            current = self.tabview.index(self.tabview.select()) if self.tabview is not None else 0
+            logs_index = self.tabview.index(self.logs_tab) if self.tabview is not None and self.logs_tab is not None else -1
+            key = "button.open_logs" if current != logs_index else "button.back_to_dashboard"
+            self.toggle_logs_button.configure(text=self.tr(key))
+        if self.language_label is not None:
+            self.language_label.configure(text=self.tr("label.language"))
+        if self.language_combo is not None:
+            self.language_combo.configure(values=self._language_combo_values())
+        if self.banner_title_label is not None:
+            self.banner_title_label.configure(text=self.tr("banner.control_room"))
+        if self.help_label is not None:
+            self.help_label.configure(text=self.tr("help.overlay_toggle"))
+        if self.tabview is not None:
+            self.tabview.tab(self.dashboard_tab, text=self.tr("tab.dashboard"))
+            self.tabview.tab(self.audio_tab, text=self.tr("tab.chants"))
+            self.tabview.tab(self.camera_tab, text=self.tr("tab.camera"))
+            self.tabview.tab(self.logs_tab, text=self.tr("tab.logs"))
+        if self.logs_group is not None:
+            self.logs_group.configure(text=self.tr("logs.group"))
+        if self.log_follow_button is not None:
+            self.log_follow_button.configure(text=self.tr("button.jump_latest"))
+        self._update_log_follow_ui()
+        self._apply_stat_titles()
+        self._apply_module_labels()
+        self._apply_camera_localization()
+        self._refresh_card_titles()
+
+    def _refresh_card_titles(self) -> None:
+        if hasattr(self, "_card_title_bindings"):
+            for title_label, title_key, subtitle_label, subtitle_key in self._card_title_bindings:
+                if title_label.winfo_exists():
+                    title_label.configure(text=self.tr(title_key))
+                if subtitle_label is not None and subtitle_label.winfo_exists():
+                    subtitle_label.configure(text=self.tr(subtitle_key))
+
+    def _apply_stat_titles(self) -> None:
+        title_map = {
+            "tour": "stat.tournament",
+            "round": "stat.round_id",
+            "page": "stat.current_page",
+            "derby": "stat.derby_key",
+            "match_clock_split": "stat.minute_second",
+            "game_state": "stat.game_state",
+            "goal_active": "stat.goal_status",
+            "last_update": "stat.last_update",
+            "tvlogo": "stat.tv_logo",
+            "scoreboard": "stat.scoreboard",
+            "movie": "stat.movie",
+            "status": "stat.status",
+            "stadium": "stat.current_stadium",
+            "stadid": "stat.stadium_id",
+            "audio_module": "stat.chants_module",
+            "audio_status": "stat.chants_status",
+            "audio_current": "stat.current_chant",
+            "audio_clubsong": "stat.club_anthem",
+            "audio_chants_dir": "stat.chants_folder",
+            "audio_last_action": "stat.last_action",
+            "audio_crowd_mode": "stat.crowd_mode",
+            "audio_crowd_volume": "stat.crowd_volume",
+            "audio_source": "stat.crowd_source",
+            "audio_next": "stat.next_behavior",
+            "home_goals": "stat.home_goals",
+            "away_goals": "stat.away_goals",
+        }
+        for key, label in self.stat_title_labels.items():
+            label.configure(text=self.tr(title_map.get(key, key)))
+
+    def _apply_module_labels(self) -> None:
+        module_map = {
+            "Stadium": "module.stadium",
+            "TvLogo": "module.tvlogo",
+            "ScoreBoard": "module.scoreboard",
+            "Movies": "module.movies",
+            "Autorun": "module.autorun",
+            "StadiumNet": "module.stadiumnet",
+            "Chants": "module.chants",
+            "Discord RPC": "module.discord_rpc",
+        }
+        for name, check in self.module_checks.items():
+            check.configure(text=self.tr(module_map.get(name, name)))
+
+    def _apply_camera_localization(self) -> None:
+        if self.camera_select_button is not None:
+            self.camera_select_button.configure(text=self.tr("button.choose_camera_package"))
+        if self.camera_apply_button is not None:
+            self.camera_apply_button.configure(text=self.tr("button.apply_camera"))
+        if self.camera_name_label is not None and self._camera_selected_name is None:
+            self.camera_name_label.configure(text=self.tr("camera.no_camera_selected"))
+        if self.camera_preview_status is not None and not self._camera_preview_source_key:
+            self.camera_preview_status.configure(text=self.tr("camera.no_preview"))
+        if self.camera_preview_image_label is not None and not getattr(self.camera_preview_image_label, "image", None):
+            self.camera_preview_image_label.configure(text=self.tr("placeholder.preview"))
+        if hasattr(self, "settings_ini"):
+            self.refresh_camera_catalog()
 
     def _resolve_base_dir(self) -> Path:
         if getattr(sys, "frozen", False):
@@ -498,9 +664,9 @@ class Server16App(tk.Tk):
     def _update_log_follow_ui(self) -> None:
         if self.log_status_label is not None:
             if self._log_autofollow:
-                self.log_status_label.configure(text="Following latest logs", fg=self.success)
+                self.log_status_label.configure(text=self.tr("logs.following"), fg=self.success)
             else:
-                self.log_status_label.configure(text="Browsing history", fg=self.gold)
+                self.log_status_label.configure(text=self.tr("logs.browsing"), fg=self.gold)
         if self.log_follow_button is not None:
             self.log_follow_button.configure(state="disabled" if self._log_autofollow else "normal")
 
@@ -509,7 +675,7 @@ class Server16App(tk.Tk):
 
     def _build_ui(self) -> None:
         root = tk.Toplevel(self)
-        root.title("CG Server 16 Python")
+        root.title(self.tr("app.title"))
         root.geometry("1024x680")
         root.minsize(980, 640)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -519,29 +685,50 @@ class Server16App(tk.Tk):
 
         top = tk.Frame(root, bg=self.bg, padx=10, pady=10)
         top.pack(fill="x")
-        self.start_overlay_button = ttk.Button(top, text="Start Overlay", command=self.start_overlay_session)
+        self.start_overlay_button = ttk.Button(top, text=self.tr("button.start_overlay"), command=self.start_overlay_session)
         self.start_overlay_button.pack(side="left")
-        ttk.Button(top, text="Locate FIFA 16 EXE", command=self.select_fifa_exe).pack(side="left", padx=6)
-        ttk.Button(top, text="Launch FIFA 16", command=self.launch_fifa).pack(side="left", padx=6)
-        ttk.Button(top, text="Assign Scoreboard", command=self.assign_scoreboard).pack(side="left", padx=6)
-        ttk.Button(top, text="Assign Movie", command=self.assign_movie).pack(side="left", padx=6)
-        ttk.Button(top, text="Exclude Competition", command=self.exclude_competition).pack(side="left", padx=6)
-        self.toggle_logs_button = ttk.Button(top, text="Open Logs", command=self.toggle_logs)
+        self.locate_fifa_button = ttk.Button(top, text=self.tr("button.locate_fifa_exe"), command=self.select_fifa_exe)
+        self.locate_fifa_button.pack(side="left", padx=6)
+        self.launch_fifa_button = ttk.Button(top, text=self.tr("button.launch_fifa"), command=self.launch_fifa)
+        self.launch_fifa_button.pack(side="left", padx=6)
+        self.assign_scoreboard_button = ttk.Button(top, text=self.tr("button.assign_scoreboard"), command=self.assign_scoreboard)
+        self.assign_scoreboard_button.pack(side="left", padx=6)
+        self.assign_movie_button = ttk.Button(top, text=self.tr("button.assign_movie"), command=self.assign_movie)
+        self.assign_movie_button.pack(side="left", padx=6)
+        self.exclude_competition_button = ttk.Button(top, text=self.tr("button.exclude_competition"), command=self.exclude_competition)
+        self.exclude_competition_button.pack(side="left", padx=6)
+        language_host = tk.Frame(top, bg=self.bg)
+        language_host.pack(side="right", padx=(10, 6))
+        self.language_label = tk.Label(language_host, text=self.tr("label.language"), bg=self.bg, fg=self.muted, font=("Bahnschrift", 9, "bold"))
+        self.language_label.pack(side="left", padx=(0, 6))
+        self.language_combo = ttk.Combobox(
+            language_host,
+            state="readonly",
+            textvariable=self.language_var,
+            values=self._language_combo_values(),
+            width=16,
+            style="Server16.TCombobox",
+        )
+        self.language_combo.pack(side="left")
+        self.language_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
+        self.language_var.set(self._language_combo_value())
+        self.toggle_logs_button = ttk.Button(top, text=self.tr("button.open_logs"), command=self.toggle_logs)
         self.toggle_logs_button.pack(side="right")
 
         header = tk.Frame(root, bg=self.bg, padx=10)
         header.pack(fill="x")
         banner = tk.Frame(header, bg=self.panel, bd=0, highlightthickness=1, highlightbackground="#22314b")
         banner.pack(fill="x")
-        tk.Label(
+        self.banner_title_label = tk.Label(
             banner,
-            text="SERVER16 CONTROL ROOM",
+            text=self.tr("banner.control_room"),
             bg=self.panel,
             fg=self.gold,
             font=("Bahnschrift", 11, "bold"),
             padx=14,
             pady=8,
-        ).pack(side="left")
+        )
+        self.banner_title_label.pack(side="left")
         self.page_banner = tk.Label(
             banner,
             text="-",
@@ -554,7 +741,7 @@ class Server16App(tk.Tk):
         self.page_banner.pack(side="left")
         self.status_pill = tk.Label(
             banner,
-            text="Waiting FIFA",
+            text=self.status_text("waiting_fifa"),
             bg="#1a2740",
             fg=self.accent,
             font=("Bahnschrift", 9, "bold"),
@@ -564,14 +751,15 @@ class Server16App(tk.Tk):
         self.status_pill.pack(side="right", padx=10, pady=6)
         help_bar = tk.Frame(header, bg=self.bg)
         help_bar.pack(fill="x", pady=(8, 0))
-        tk.Label(
+        self.help_label = tk.Label(
             help_bar,
-            text="Space toggles the overlay while FIFA is active ",
+            text=self.tr("help.overlay_toggle"),
             bg=self.bg,
             fg=self.muted,
             font=("Bahnschrift", 9),
             anchor="w",
-        ).pack(side="left")
+        )
+        self.help_label.pack(side="left")
 
         self.tabview = ttk.Notebook(root, style="Server16.TNotebook")
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
@@ -579,10 +767,10 @@ class Server16App(tk.Tk):
         self.logs_tab = tk.Frame(self.tabview, bg=self.bg)
         self.audio_tab = tk.Frame(self.tabview, bg=self.bg)
         self.camera_tab = tk.Frame(self.tabview, bg=self.bg)
-        self.tabview.add(self.dashboard_tab, text="Dashboard")
-        self.tabview.add(self.audio_tab, text="Chants")
-        self.tabview.add(self.camera_tab, text="Camera")
-        self.tabview.add(self.logs_tab, text="Logs")
+        self.tabview.add(self.dashboard_tab, text=self.tr("tab.dashboard"))
+        self.tabview.add(self.audio_tab, text=self.tr("tab.chants"))
+        self.tabview.add(self.camera_tab, text=self.tr("tab.camera"))
+        self.tabview.add(self.logs_tab, text=self.tr("tab.logs"))
 
         dashboard_host = tk.Frame(self.dashboard_tab, bg=self.bg)
         dashboard_host.pack(fill="both", expand=True, padx=10, pady=10)
@@ -622,6 +810,7 @@ class Server16App(tk.Tk):
         self._build_audio_card()
         self._build_camera_tab()
         self._build_logs_card()
+        self._apply_main_localization()
 
     def _build_stadium_loading_modal(self) -> None:
         modal = tk.Toplevel(self._window())
@@ -635,7 +824,7 @@ class Server16App(tk.Tk):
         self.stadium_loading_modal = modal
         self.stadium_loading_title = tk.Label(
             modal_frame,
-            text="Loading Stadium",
+            text=self.tr("stadium_modal.title"),
             bg=self.card,
             fg=self.gold,
             font=("Bahnschrift", 12, "bold"),
@@ -644,7 +833,7 @@ class Server16App(tk.Tk):
         self.stadium_loading_title.pack(fill="x")
         self.stadium_loading_preview = tk.Label(
             modal_frame,
-            text="STADIUM\nPREVIEW",
+            text=self.tr("stadium_modal.preview"),
             bg=self.card_soft,
             fg=self.muted,
             font=("Bahnschrift", 11, "bold"),
@@ -665,7 +854,7 @@ class Server16App(tk.Tk):
         self.stadium_loading_name.pack(fill="x", pady=(6, 4))
         self.stadium_loading_detail = tk.Label(
             modal_frame,
-            text="Preparing stadium assets",
+            text=self.tr("stadium_modal.preparing"),
             bg=self.card,
             fg=self.muted,
             font=("Bahnschrift", 9),
@@ -697,7 +886,7 @@ class Server16App(tk.Tk):
         if self.stadium_loading_name is not None:
             self.stadium_loading_name.configure(text=stadium_name or "-")
         if self.stadium_loading_detail is not None:
-            self.stadium_loading_detail.configure(text=detail)
+            self.stadium_loading_detail.configure(text=detail or self.tr("stadium_modal.preparing"))
         if self.stadium_loading_value is not None:
             self.stadium_loading_value.set(max(0, min(100, progress)))
         self._stadium_loading_restore_fullscreen = self._is_probable_fullscreen_window(self._fifa_hwnd)
@@ -764,13 +953,19 @@ class Server16App(tk.Tk):
         root_y = window.winfo_rooty()
         self.stadium_loading_modal.geometry(f"340x274+{root_x + 24}+{root_y + 24}")
 
-    def _card(self, parent: tk.Misc, title: str, subtitle: str = "") -> tk.Frame:
+    def _card(self, parent: tk.Misc, title_key: str, subtitle_key: str = "") -> tk.Frame:
         card = tk.Frame(parent, bg=self.card, bd=0, highlightthickness=1, highlightbackground="#243654")
         header = tk.Frame(card, bg=self.card)
         header.pack(fill="x", padx=12, pady=(10, 4))
-        tk.Label(header, text=title, bg=self.card, fg=self.fg, font=("Bahnschrift", 13, "bold")).pack(anchor="w")
-        if subtitle:
-            tk.Label(header, text=subtitle, bg=self.card, fg=self.muted, font=("Bahnschrift", 9)).pack(anchor="w", pady=(1, 0))
+        title_label = tk.Label(header, text=self.tr(title_key), bg=self.card, fg=self.fg, font=("Bahnschrift", 13, "bold"))
+        title_label.pack(anchor="w")
+        subtitle_label = None
+        if subtitle_key:
+            subtitle_label = tk.Label(header, text=self.tr(subtitle_key), bg=self.card, fg=self.muted, font=("Bahnschrift", 9))
+            subtitle_label.pack(anchor="w", pady=(1, 0))
+        if not hasattr(self, "_card_title_bindings"):
+            self._card_title_bindings = []
+        self._card_title_bindings.append((title_label, title_key, subtitle_label, subtitle_key))
         return card
 
     def _register_info_label(self, key: str, widget: tk.Widget) -> None:
@@ -891,7 +1086,8 @@ class Server16App(tk.Tk):
         image_path = self._resolve_stadium_preview_path(stadium_name)
         photo = self._load_preview_photo(image_path, (340, 190))
         if photo is None:
-            label.configure(image="", text="STADIUM\nPREVIEW", compound="center")
+            self._stadium_preview_last_value = stadium_name
+            label.configure(image="", text=self.tr("placeholder.stadium_preview"), compound="center")
             return
         self._stadium_preview_image = photo
         label.configure(image=photo, text="", compound="center")
@@ -981,14 +1177,14 @@ class Server16App(tk.Tk):
                 self.log(f"Failed to load team crest {logo_path}", exc, exc_info=sys.exc_info())
         if image_ref is None:
             image_ref = self._build_logo_placeholder_image()
-            label.configure(text="LOGO", compound="center")
+            label.configure(text=self.tr("placeholder.logo"), compound="center")
         else:
             label.configure(text="", compound="center")
         label.configure(image=image_ref)
         self._team_logo_images[prefix] = image_ref
 
     def _build_matchup_card(self, parent: tk.Misc, row: int) -> None:
-        card = self._card(parent, "MATCHUP", "Teams, score and match clock")
+        card = self._card(parent, "card.matchup.title", "card.matchup.subtitle")
         card.grid(row=row, column=0, sticky="ew", pady=(0, 12))
         card.configure(height=230)
         card.grid_propagate(False)
@@ -998,18 +1194,18 @@ class Server16App(tk.Tk):
         body.grid_columnconfigure(1, weight=1)
         body.grid_columnconfigure(2, weight=2)
 
-        self._build_team_panel(body, 0, "TEAM A", "home")
+        self._build_team_panel(body, 0, self.tr("team.a"), "home")
         center = tk.Frame(body, bg=self.card)
         center.grid(row=0, column=1, sticky="nsew", padx=8)
-        tk.Label(center, text="SCORE", bg=self.card, fg=self.muted, font=("Bahnschrift", 9)).pack(pady=(18, 2))
+        tk.Label(center, text=self.tr("match.score"), bg=self.card, fg=self.muted, font=("Bahnschrift", 9)).pack(pady=(18, 2))
         score_label = tk.Label(center, text="0 x 0", bg=self.card, fg=self.gold, font=("Bahnschrift", 28, "bold"))
         score_label.pack()
-        tk.Label(center, text="TIME", bg=self.card, fg=self.muted, font=("Bahnschrift", 9)).pack(pady=(18, 2))
+        tk.Label(center, text=self.tr("match.time"), bg=self.card, fg=self.muted, font=("Bahnschrift", 9)).pack(pady=(18, 2))
         timer_label = tk.Label(center, text="00:00", bg=self.card, fg=self.accent, font=("Consolas", 18, "bold"))
         timer_label.pack()
         self._register_info_label("score", score_label)
         self._register_info_label("timer", timer_label)
-        self._build_team_panel(body, 2, "TEAM B", "away")
+        self._build_team_panel(body, 2, self.tr("team.b"), "away")
 
     def _build_team_panel(self, parent: tk.Misc, column: int, title: str, prefix: str) -> None:
         panel = tk.Frame(parent, bg=self.card_soft, highlightthickness=1, highlightbackground="#243654")
@@ -1020,7 +1216,7 @@ class Server16App(tk.Tk):
             height=72,
             bg=self.card_soft,
             fg=self.muted,
-            text="LOGO",
+            text=self.tr("placeholder.logo"),
             font=("Bahnschrift", 12, "bold"),
             compound="center",
         )
@@ -1033,10 +1229,10 @@ class Server16App(tk.Tk):
             tk.Frame(strips, bg="#243654", width=7, height=7).pack(side="left", padx=2)
         name_key = f"{prefix}_name"
         id_key = "hid" if prefix == "home" else "aid"
-        tk.Label(panel, text="Name", bg=self.card_soft, fg=self.muted, font=("Bahnschrift", 9)).pack(anchor="w", padx=10)
+        tk.Label(panel, text=self.tr("team.name"), bg=self.card_soft, fg=self.muted, font=("Bahnschrift", 9)).pack(anchor="w", padx=10)
         name_label = tk.Label(panel, text=title, bg=self.card_soft, fg=self.fg, font=("Bahnschrift", 14, "bold"))
         name_label.pack(anchor="w", padx=10)
-        tk.Label(panel, text="ID", bg=self.card_soft, fg=self.muted, font=("Bahnschrift", 9)).pack(anchor="w", padx=10, pady=(8, 0))
+        tk.Label(panel, text=self.tr("team.id"), bg=self.card_soft, fg=self.muted, font=("Bahnschrift", 9)).pack(anchor="w", padx=10, pady=(8, 0))
         id_label = tk.Label(panel, text="-", bg=self.card_soft, fg=self.accent, font=("Consolas", 14, "bold"))
         id_label.pack(anchor="w", padx=10, pady=(0, 10))
         self._register_info_label(name_key, name_label)
@@ -1044,7 +1240,7 @@ class Server16App(tk.Tk):
         self._set_display(name_key, title)
 
     def _build_match_card(self, parent: tk.Misc, row: int) -> None:
-        card = self._card(parent, "MATCH HUB", "Tournament, round, page and match state")
+        card = self._card(parent, "card.match.title", "card.match.subtitle")
         card.grid(row=row, column=0, sticky="ew", pady=(0, 12))
         card.configure(height=178)
         card.grid_propagate(False)
@@ -1052,17 +1248,17 @@ class Server16App(tk.Tk):
         body.pack(fill="x", padx=12, pady=(6, 12))
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=1)
-        self._build_stat(body, 0, 0, "Tournament", "tour", "-")
-        self._build_stat(body, 0, 1, "Round ID", "round", "-")
-        self._build_stat(body, 1, 0, "Current Page", "page", "-")
-        self._build_stat(body, 1, 1, "Derby Key", "derby", "-")
-        self._build_stat(body, 2, 0, "Minute / Second", "match_clock_split", "00 / 00")
-        self._build_stat(body, 2, 1, "Game State", "game_state", "Idle")
-        self._build_stat(body, 3, 0, "Goal Status", "goal_active", "No")
-        self._build_stat(body, 3, 1, "Last Update", "last_update", "-")
+        self._build_stat(body, 0, 0, "stat.tournament", "tour", "-")
+        self._build_stat(body, 0, 1, "stat.round_id", "round", "-")
+        self._build_stat(body, 1, 0, "stat.current_page", "page", "-")
+        self._build_stat(body, 1, 1, "stat.derby_key", "derby", "-")
+        self._build_stat(body, 2, 0, "stat.minute_second", "match_clock_split", "00 / 00")
+        self._build_stat(body, 2, 1, "stat.game_state", "game_state", self.display_value("idle"))
+        self._build_stat(body, 3, 0, "stat.goal_status", "goal_active", self.display_value("no"))
+        self._build_stat(body, 3, 1, "stat.last_update", "last_update", "-")
 
     def _build_assets_card(self, parent: tk.Misc, row: int) -> None:
-        card = self._card(parent, "ASSET ROUTING", "Active TV logo, scoreboard and movie")
+        card = self._card(parent, "card.assets.title", "card.assets.subtitle")
         card.grid(row=row, column=0, sticky="ew")
         card.configure(height=164)
         card.grid_propagate(False)
@@ -1070,20 +1266,20 @@ class Server16App(tk.Tk):
         body.pack(fill="x", padx=12, pady=(6, 12))
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=1)
-        self._build_stat(body, 0, 0, "TV Logo", "tvlogo", "default")
-        self._build_stat(body, 0, 1, "Scoreboard", "scoreboard", "default")
-        self._build_stat(body, 1, 0, "Movie", "movie", "default")
-        self._build_stat(body, 1, 1, "Status", "status", "Idle")
-        ttk.Button(card, text="Edit Asset Settings", command=self.open_assets_settings_editor).pack(fill="x", padx=12, pady=(0, 12))
+        self._build_stat(body, 0, 0, "stat.tv_logo", "tvlogo", "default")
+        self._build_stat(body, 0, 1, "stat.scoreboard", "scoreboard", "default")
+        self._build_stat(body, 1, 0, "stat.movie", "movie", "default")
+        self._build_stat(body, 1, 1, "stat.status", "status", self.display_value("idle"))
+        ttk.Button(card, text=self.tr("button.edit_asset_settings"), command=self.open_assets_settings_editor).pack(fill="x", padx=12, pady=(0, 12))
 
     def _build_stadium_card(self, parent: tk.Misc, row: int) -> None:
-        card = self._card(parent, "STADIUM BAY", "Preview and loaded stadium details")
+        card = self._card(parent, "card.stadium.title", "card.stadium.subtitle")
         card.grid(row=row, column=0, sticky="nsew", pady=(0, 12))
         card.configure(height=358)
         card.grid_propagate(False)
         preview = tk.Label(
             card,
-            text="STADIUM\nPREVIEW",
+            text=self.tr("placeholder.stadium_preview"),
             bg=self.card_soft,
             fg=self.muted,
             font=("Bahnschrift", 12, "bold"),
@@ -1097,20 +1293,20 @@ class Server16App(tk.Tk):
         body = tk.Frame(card, bg=self.card)
         body.pack(fill="x", padx=12, pady=(0, 12))
         body.grid_columnconfigure(0, weight=1)
-        self._build_stat(body, 0, 0, "Current Stadium", "stadium", "-", value_wraplength=300, block_height=64)
-        self._build_stat(body, 1, 0, "Stadium ID", "stadid", "-")
-        ttk.Button(card, text="Assign Stadium", command=self.assign_stadium).pack(fill="x", padx=12, pady=(0, 10))
-        ttk.Button(card, text="Edit Stadium Settings", command=self.open_stadium_settings_editor).pack(fill="x", padx=12, pady=(0, 10))
-        self.progress_text = tk.Label(card, text="Idle", bg=self.card, fg=self.muted, font=("Bahnschrift", 9))
-        self.progress_text.pack(anchor="w", padx=12, pady=(0, 4))
+        self._build_stat(body, 0, 0, "stat.current_stadium", "stadium", "-", value_wraplength=300, block_height=64)
+        self._build_stat(body, 1, 0, "stat.stadium_id", "stadid", "-")
+        ttk.Button(card, text=self.tr("button.assign_stadium"), command=self.assign_stadium).pack(fill="x", padx=12, pady=(0, 10))
+        ttk.Button(card, text=self.tr("button.edit_stadium_settings"), command=self.open_stadium_settings_editor).pack(fill="x", padx=12, pady=(0, 10))
+        self.progress_text_label = tk.Label(card, text=self.display_value("idle"), bg=self.card, fg=self.muted, font=("Bahnschrift", 9))
+        self.progress_text_label.pack(anchor="w", padx=12, pady=(0, 4))
         self.progress_value = tk.DoubleVar(value=0)
         self.progress_bar = ttk.Progressbar(card, maximum=100, variable=self.progress_value, style="Accent.Horizontal.TProgressbar")
         self.progress_bar.pack(fill="x", padx=12, pady=(0, 12))
-        self._set_progress(0, "Idle")
+        self._set_progress(0, self.display_value("idle"))
         self._update_stadium_preview(self.labels["stadium"].cget("text"))
 
     def _build_modules_card(self, parent: tk.Misc, row: int) -> None:
-        card = self._card(parent, "MODULES", "Loaded from settings.ini at startup")
+        card = self._card(parent, "card.modules.title", "card.modules.subtitle")
         card.grid(row=row, column=0, sticky="ew")
         card.configure(height=256)
         card.grid_propagate(False)
@@ -1200,25 +1396,25 @@ class Server16App(tk.Tk):
         self._hide_stadium_loading_modal()
 
     def _build_audio_card(self) -> None:
-        card = self._card(self.audio_tab, "CHANTS CONTROL", "Crowd audio, club anthem and detailed playback state")
+        card = self._card(self.audio_tab, "card.chants.title", "card.chants.subtitle")
         card.pack(fill="both", expand=True, padx=10, pady=10)
         body = tk.Frame(card, bg=self.card)
         body.pack(fill="both", expand=True, padx=12, pady=(6, 12))
         body.grid_columnconfigure(0, weight=1)
         body.grid_columnconfigure(1, weight=1)
-        self._build_stat(body, 0, 0, "Chants Module", "audio_module", "Disabled")
-        self._build_stat(body, 0, 1, "Chants Status", "audio_status", "Idle")
-        self._build_stat(body, 1, 0, "Current Chant", "audio_current", "-")
-        self._build_stat(body, 1, 1, "Club Anthem", "audio_clubsong", "-")
-        self._build_stat(body, 2, 0, "Chants Folder", "audio_chants_dir", "-")
-        self._build_stat(body, 2, 1, "Last Action", "audio_last_action", "-")
-        self._build_stat(body, 3, 0, "Crowd Mode", "audio_crowd_mode", "Idle")
-        self._build_stat(body, 3, 1, "Crowd Volume", "audio_crowd_volume", "-")
-        self._build_stat(body, 4, 0, "Crowd Source", "audio_source", "-")
-        self._build_stat(body, 4, 1, "Next Behavior", "audio_next", "-")
-        self._build_stat(body, 5, 0, "Home Goals", "home_goals", "0")
-        self._build_stat(body, 5, 1, "Away Goals", "away_goals", "0")
-        ttk.Button(card, text="Edit Chants Settings", command=self.open_audio_settings_editor).pack(fill="x", padx=12, pady=(0, 12))
+        self._build_stat(body, 0, 0, "stat.chants_module", "audio_module", self.display_value("disabled"))
+        self._build_stat(body, 0, 1, "stat.chants_status", "audio_status", self.display_value("idle"))
+        self._build_stat(body, 1, 0, "stat.current_chant", "audio_current", "-")
+        self._build_stat(body, 1, 1, "stat.club_anthem", "audio_clubsong", "-")
+        self._build_stat(body, 2, 0, "stat.chants_folder", "audio_chants_dir", "-")
+        self._build_stat(body, 2, 1, "stat.last_action", "audio_last_action", "-")
+        self._build_stat(body, 3, 0, "stat.crowd_mode", "audio_crowd_mode", self.display_value("idle"))
+        self._build_stat(body, 3, 1, "stat.crowd_volume", "audio_crowd_volume", "-")
+        self._build_stat(body, 4, 0, "stat.crowd_source", "audio_source", "-")
+        self._build_stat(body, 4, 1, "stat.next_behavior", "audio_next", "-")
+        self._build_stat(body, 5, 0, "stat.home_goals", "home_goals", "0")
+        self._build_stat(body, 5, 1, "stat.away_goals", "away_goals", "0")
+        ttk.Button(card, text=self.tr("button.edit_chants_settings"), command=self.open_audio_settings_editor).pack(fill="x", padx=12, pady=(0, 12))
 
     def _build_camera_tab(self) -> None:
         card_host = tk.Frame(self.camera_tab, bg=self.bg)
@@ -1227,19 +1423,20 @@ class Server16App(tk.Tk):
         card_host.grid_columnconfigure(1, weight=3)
         card_host.grid_rowconfigure(0, weight=1)
 
-        library_card = self._card(card_host, "CAMERA LIBRARY", "Select the Anth package folder / Selecione a pasta do pacote Anth")
+        library_card = self._card(card_host, "card.camera_library.title", "card.camera_library.subtitle")
+        self.camera_library_card = library_card
         library_card.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
         library_body = tk.Frame(library_card, bg=self.card)
         library_body.pack(fill="both", expand=True, padx=12, pady=(6, 12))
         self.camera_select_button = ttk.Button(
             library_body,
-            text="Choose Camera Package / Escolher pacote de camera",
+            text=self.tr("button.choose_camera_package"),
             command=self.select_camera_package,
         )
         self.camera_select_button.pack(fill="x", pady=(0, 8))
         self.camera_package_label = tk.Label(
             library_body,
-            text="No camera package selected / Nenhum pacote de camera selecionado",
+            text=self.tr("camera.no_package_selected"),
             bg=self.card,
             fg=self.muted,
             font=("Bahnschrift", 9),
@@ -1268,7 +1465,8 @@ class Server16App(tk.Tk):
         scrollbar.pack(side="right", fill="y")
         self.camera_listbox.bind("<<ListboxSelect>>", self._on_camera_select)
 
-        detail_card = self._card(card_host, "CAMERA PREVIEW", "Adaptive full preview / Preview completo adaptavel")
+        detail_card = self._card(card_host, "card.camera_preview.title", "card.camera_preview.subtitle")
+        self.camera_preview_card = detail_card
         detail_card.grid(row=0, column=1, sticky="nsew")
         detail_body = tk.Frame(detail_card, bg=self.card)
         detail_body.pack(fill="both", expand=True, padx=12, pady=(6, 12))
@@ -1276,7 +1474,7 @@ class Server16App(tk.Tk):
         detail_body.grid_rowconfigure(1, weight=1)
         self.camera_name_label = tk.Label(
             detail_body,
-            text="No camera selected / Nenhuma camera selecionada",
+            text=self.tr("camera.no_camera_selected"),
             bg=self.card,
             fg=self.gold,
             font=("Bahnschrift", 14, "bold"),
@@ -1299,7 +1497,7 @@ class Server16App(tk.Tk):
         self.camera_preview_canvas.bind("<Configure>", self._on_camera_preview_canvas_configure)
         self.camera_preview_image_label = tk.Label(
             self.camera_preview_frame,
-            text="PREVIEW",
+            text=self.tr("placeholder.preview"),
             bg=self.card_soft,
             fg=self.muted,
             font=("Bahnschrift", 12, "bold"),
@@ -1314,7 +1512,7 @@ class Server16App(tk.Tk):
         self.camera_preview_image_label.pack(anchor="nw")
         self.camera_preview_status = tk.Label(
             detail_body,
-            text="No preview / Sem preview",
+            text=self.tr("camera.no_preview"),
             bg=self.card,
             fg=self.muted,
             font=("Bahnschrift", 9),
@@ -1348,25 +1546,26 @@ class Server16App(tk.Tk):
         self.camera_instruction_text.pack(side="left", fill="both", expand=True)
         camera_instruction_scrollbar.pack(side="right", fill="y")
         self.camera_instruction_text.configure(state="disabled")
-        self.camera_apply_button = ttk.Button(detail_body, text="Apply Camera", command=self.apply_selected_camera)
+        self.camera_apply_button = ttk.Button(detail_body, text=self.tr("button.apply_camera"), command=self.apply_selected_camera)
         self.camera_apply_button.grid(row=5, column=0, sticky="ew", pady=(12, 0))
 
     def _build_logs_card(self) -> None:
-        logs = ttk.LabelFrame(self.logs_tab, text="Logs", padding=10)
+        logs = ttk.LabelFrame(self.logs_tab, text=self.tr("logs.group"), padding=10)
         self.logs_frame = logs
+        self.logs_group = logs
         logs.pack(fill="both", expand=True, padx=10, pady=10)
         header = tk.Frame(logs, bg=self.bg)
         header.pack(fill="x", pady=(0, 8))
         self.log_status_label = tk.Label(
             header,
-            text="Following latest logs",
+            text=self.tr("logs.following"),
             bg=self.bg,
             fg=self.success,
             font=("Bahnschrift", 9, "bold"),
             anchor="w",
         )
         self.log_status_label.pack(side="left")
-        self.log_follow_button = ttk.Button(header, text="Jump To Latest / Ir para o fim", command=self._jump_logs_to_latest)
+        self.log_follow_button = ttk.Button(header, text=self.tr("button.jump_latest"), command=self._jump_logs_to_latest)
         self.log_follow_button.pack(side="right")
         logs_body = tk.Frame(logs, bg=self.panel)
         logs_body.pack(fill="both", expand=True)
@@ -1406,12 +1605,12 @@ class Server16App(tk.Tk):
             package_dir = self.camera_runtime.package_dir()
             if package_dir is not None and package_dir.exists():
                 self.camera_package_label.configure(
-                    text=f"{len(self._camera_presets)} cameras found / encontradas em {package_dir}",
+                    text=self.tr("camera.cameras_found", count=len(self._camera_presets), path=package_dir),
                     fg=self.muted,
                 )
             else:
                 self.camera_package_label.configure(
-                    text="Choose a valid 'Anth's FIFA 16 AIO Camera Mod Package' folder / Escolha uma pasta valida do pacote",
+                    text=self.tr("camera.invalid_package_label"),
                     fg=self.error,
                 )
         if self.camera_listbox is None:
@@ -1448,13 +1647,13 @@ class Server16App(tk.Tk):
     def _display_camera_details(self, preset: CameraPreset | None) -> None:
         self._camera_selected_name = preset.name if preset is not None else None
         if self.camera_name_label is not None:
-            self.camera_name_label.configure(text=preset.name if preset is not None else "No camera selected / Nenhuma camera selecionada")
+            self.camera_name_label.configure(text=preset.name if preset is not None else self.tr("camera.no_camera_selected"))
         if self.camera_apply_button is not None:
             self.camera_apply_button.configure(state="normal" if preset is not None else "disabled")
         if self.camera_instruction_text is not None:
             self.camera_instruction_text.configure(state="normal")
             self.camera_instruction_text.delete("1.0", "end")
-            self.camera_instruction_text.insert("1.0", preset.instructions_text if preset is not None else "No camera selected.\nNenhuma camera selecionada.")
+            self.camera_instruction_text.insert("1.0", preset.instructions_text if preset is not None else self.tr("camera.instructions_missing"))
             self.camera_instruction_text.configure(state="disabled")
         if self.camera_example_combo is not None:
             values = [path.name for path in preset.example_paths] if preset is not None else []
@@ -1464,12 +1663,12 @@ class Server16App(tk.Tk):
                 self._show_camera_example(preset, values[0])
             else:
                 self.camera_example_var.set("")
-                self._clear_camera_preview("No preview / Sem preview")
+                self._clear_camera_preview(self.tr("camera.no_preview"))
 
     def _show_camera_example(self, preset: CameraPreset, image_name: str) -> None:
         target = next((path for path in preset.example_paths if path.name == image_name), None)
         if target is None:
-            self._clear_camera_preview("No preview / Sem preview")
+            self._clear_camera_preview(self.tr("camera.no_preview"))
             return
         cache_key = (preset.name, target.name)
         image_obj = self._camera_preview_cache.get(cache_key)
@@ -1479,17 +1678,17 @@ class Server16App(tk.Tk):
                 self._camera_preview_cache[cache_key] = image_obj
             except Exception as exc:
                 self.log(f"Failed to load camera preview {target}", exc, exc_info=sys.exc_info())
-                self._clear_camera_preview(f"Failed to open  {target.name}")
+                self._clear_camera_preview(self.tr("camera.failed_open_preview", name=target.name))
                 return
         self._camera_preview_source_key = cache_key
         self._render_camera_preview()
         if self.camera_preview_status is not None:
-            self.camera_preview_status.configure(text=f"Preview: {target.name}")
+            self.camera_preview_status.configure(text=self.tr("camera.preview_prefix", name=target.name))
 
     def _clear_camera_preview(self, text: str) -> None:
         self._camera_preview_source_key = None
         if self.camera_preview_image_label is not None:
-            self.camera_preview_image_label.configure(image="", text="PREVIEW")
+            self.camera_preview_image_label.configure(image="", text=self.tr("placeholder.preview"))
             self.camera_preview_image_label.image = None
         if self.camera_preview_status is not None:
             self.camera_preview_status.configure(text=text)
@@ -1525,13 +1724,13 @@ class Server16App(tk.Tk):
         self.camera_preview_image_label.update_idletasks()
 
     def select_camera_package(self) -> None:
-        selected = filedialog.askdirectory(title="Select Anth's FIFA 16 AIO Camera Mod Package")
+        selected = filedialog.askdirectory(title=self.tr("message.camera.select_package_dialog"))
         if not selected:
             return
         if not self.camera_runtime.is_valid_package_dir(selected):
             messagebox.showwarning(
-                "Camera Package / Pacote de camera",
-                "Select the exact folder named 'Anth's FIFA 16 AIO Camera Mod Package'.\nSelecione exatamente a pasta com esse nome.",
+                self.tr("message.camera_package"),
+                self.tr("message.camera.invalid_package"),
             )
             return
         self.settings.camera_package = selected
@@ -1542,10 +1741,10 @@ class Server16App(tk.Tk):
     def apply_selected_camera(self) -> None:
         preset = self._camera_presets_by_name.get(self._camera_selected_name or "")
         if preset is None:
-            messagebox.showwarning("Camera", "Select a camera before applying.\nSelecione uma camera antes de aplicar.")
+            messagebox.showwarning(self.tr("message.camera"), self.tr("message.camera.select_before_apply"))
             return
         if self.fifaEXE == "default":
-            messagebox.showwarning("Camera", "Select the FIFA 16 executable first.\nSelecione o executavel do FIFA 16 primeiro.")
+            messagebox.showwarning(self.tr("message.camera"), self.tr("message.warning.select_fifa_first"))
             return
         if self.camera_apply_button is not None:
             self.camera_apply_button.configure(state="disabled")
@@ -1557,20 +1756,20 @@ class Server16App(tk.Tk):
             regen = result["regenerator"]
             copied_files = result["copied_files"]
             if isinstance(regen, dict) and regen.get("launched"):
-                regen_message = f"REGENERATOR iniciado em {regen['path']}."
+                regen_message = self.tr("message.camera.regen_started", path=regen["path"])
             else:
-                regen_message = regen.get("message", "Nao foi possivel iniciar o REGENERATOR.") if isinstance(regen, dict) else "Nao foi possivel iniciar o REGENERATOR."
-            self.log(f"Camera applied: {preset.name} ({copied_files} arquivos atualizados)")
+                regen_message = self.tr("message.camera.regen_failed")
+            self.log(f"Camera applied: {preset.name} ({copied_files} files updated)")
             self.log(regen_message)
             if self.camera_preview_status is not None:
-                self.camera_preview_status.configure(text=f"Applied / Aplicada: {preset.name}")
+                self.camera_preview_status.configure(text=self.tr("camera.applied_prefix", name=preset.name))
             messagebox.showinfo(
-                "Camera applied / Camera aplicada",
-                f"{preset.name} applied successfully.\n{preset.name} aplicada com sucesso.\n\nUpdated files / Arquivos atualizados: {copied_files}\n{regen_message}",
+                self.tr("message.camera.applied_title"),
+                self.tr("message.camera.apply_success", name=preset.name, count=copied_files, regen=regen_message),
             )
         except Exception as exc:
             self.log(f"Failed to apply camera {preset.name}", exc, exc_info=sys.exc_info())
-            messagebox.showerror("Camera", f"Failed to apply camera:\n{exc}")
+            messagebox.showerror(self.tr("message.camera"), self.tr("message.camera.apply_failed", error=exc))
         finally:
             window.configure(cursor="")
             if self.camera_apply_button is not None:
@@ -1591,7 +1790,8 @@ class Server16App(tk.Tk):
         block.grid(row=row, column=column, sticky="ew", padx=(0, 10), pady=4)
         block.configure(width=190, height=block_height)
         block.grid_propagate(False)
-        tk.Label(block, text=title, bg=self.card, fg=self.muted, font=("Bahnschrift", 9)).pack(anchor="w")
+        title_label = tk.Label(block, text=self.tr(title), bg=self.card, fg=self.muted, font=("Bahnschrift", 9))
+        title_label.pack(anchor="w")
         label = tk.Label(
             block,
             text=default,
@@ -1603,6 +1803,7 @@ class Server16App(tk.Tk):
             wraplength=value_wraplength,
         )
         label.pack(anchor="w", pady=(2, 0))
+        self.stat_title_labels[key] = title_label
         self.labels[key] = label
 
     def toggle_logs(self) -> None:
@@ -1612,16 +1813,16 @@ class Server16App(tk.Tk):
         logs_index = self.tabview.index(self.logs_tab)
         if current == logs_index:
             self.tabview.select(0)
-            self.toggle_logs_button.configure(text="Open Logs")
+            self.toggle_logs_button.configure(text=self.tr("button.open_logs"))
         else:
             self.tabview.select(logs_index)
-            self.toggle_logs_button.configure(text="Back To Dashboard")
+            self.toggle_logs_button.configure(text=self.tr("button.back_to_dashboard"))
 
     def _set_progress(self, value: float, text: str) -> None:
         if self.progress_value is not None:
             self.progress_value.set(max(0, min(100, value)))
-        if self.progress_text is not None:
-            self.progress_text.configure(text=text)
+        if self.progress_text_label is not None:
+            self.progress_text_label.configure(text=text)
         self._set_display("status", text)
         if self._stadium_task_running:
             self._update_stadium_loading_modal(value, text)
@@ -1659,13 +1860,14 @@ class Server16App(tk.Tk):
                 _, message = event
                 self._stadium_task_running = False
                 self._stadium_task_signature = None
-                self._set_process_status("Stadium Error", self.error)
+                self._stadium_task_request_key = None
+                self._set_process_status(self.status_text("stadium_error"), self.error)
                 self._hide_stadium_loading_modal()
                 self.log(message)
         if self._stadium_task_running or not self._worker_queue.empty():
             self._schedule_worker_poll()
 
-    def setuppaths(self) -> None:
+    def setuppaths(self, load_team_database: bool = True) -> None:
         self.fifaEXE = self.settings.fifa_exe
         self.MP = Path(self.fifaEXE).stem if self.fifaEXE != "default" else ""
         self.exedir = Path(self.fifaEXE).parent if self.fifaEXE != "default" else self.base_dir
@@ -1686,7 +1888,8 @@ class Server16App(tk.Tk):
         self.settings_ini = SessionIniFile(self.exedir / "FSW" / "settings.ini")
         self._load_module_states()
         self._update_audio_overview()
-        self._load_team_database()
+        if load_team_database:
+            self._load_team_database()
 
     def _first_existing(self, *paths: Path) -> Path:
         for path in paths:
@@ -1726,6 +1929,8 @@ class Server16App(tk.Tk):
     def module_enabled(self, name: str) -> bool:
         if name == "Discord RPC":
             return self._discord_rpc_enabled
+        if not hasattr(self, "settings_ini") or self.settings_ini is None:
+            return self.module_states.get(name, False)
         enabled = self.settings_ini.read(name, "Modules") == "1"
         self.module_states[name] = enabled
         return enabled
@@ -1739,28 +1944,47 @@ class Server16App(tk.Tk):
             existing.focus_force()
             existing._refresh_active_frame()
             return
-        editor = SettingsAreaEditor(self, title, specs, initial_section=initial_section)
+        editor = SettingsAreaEditor(self, self.tr(title), specs, initial_section=initial_section)
         self._settings_editors[editor_key] = editor
         editor.bind("<Destroy>", lambda _event, key=editor_key: self._settings_editors.pop(key, None))
 
     def open_stadium_settings_editor(self) -> None:
-        self._open_settings_editor("stadium", "Stadium Settings", stadium_specs())
+        self._open_settings_editor("stadium", "dialog.editor.section.stadium_settings", stadium_specs())
 
     def open_assets_settings_editor(self) -> None:
-        self._open_settings_editor("assets", "Asset Settings", asset_specs())
+        self._open_settings_editor("assets", "dialog.editor.section.asset_settings", asset_specs())
 
     def open_audio_settings_editor(self) -> None:
-        self._open_settings_editor("audio", "Chants Settings", audio_specs())
+        self._open_settings_editor("audio", "dialog.editor.section.chants_settings", audio_specs())
 
     def select_fifa_exe(self) -> None:
-        filename = filedialog.askopenfilename(filetypes=[("Executable", "*.exe")], title="Select FIFA 16 EXE")
+        filename = filedialog.askopenfilename(filetypes=[("Executable", "*.exe")], title=self.tr("filedialog.select_fifa_exe"))
         if not filename:
             return
-        self.settings.fifa_exe = filename
-        self.setuppaths()
-        self.refresh_modules()
-        self.log(f"Selected FIFA executable: {filename}")
-        self.log("Bootstrap file writes deferred until overlay start or another explicit runtime action")
+        window = self._window()
+        window.configure(cursor="watch")
+        window.update_idletasks()
+        try:
+            self._set_process_status(self.status_text("loading_fifa_data"), self.accent)
+            self._set_progress(8, self.progress_text("saving_executable"))
+            self.settings.fifa_exe = filename
+            self._set_progress(24, self.progress_text("configuring_paths"))
+            self.setuppaths(load_team_database=False)
+            self._load_team_database(lambda value, text: self._set_progress(value, text))
+            self._set_progress(82, self.progress_text("applying_bootstrap"))
+            self.apply_bootstrap_files()
+            self._set_progress(94, self.progress_text("refreshing_modules"))
+            self.refresh_modules()
+            self._set_progress(100, self.progress_text("fifa_data_ready"))
+            self._set_process_status(self.status_text("fifa_ready"), self.success)
+            self.log(f"Selected FIFA executable: {filename}")
+        except Exception as exc:
+            self._set_process_status(self.status_text("fifa_load_error"), self.error)
+            self.log("Failed while loading FIFA data after selecting executable", exc, exc_info=sys.exc_info())
+            messagebox.showerror(self.tr("message.fifa16"), self.tr("message.error.load_fifa_data"))
+        finally:
+            window.configure(cursor="")
+            window.update_idletasks()
 
     def _auto_detect_fifa_exe(self) -> Path | None:
         for name in ("fifa16.exe", "FIFA16.exe", "FIFA 16.exe", "fifa 16.exe"):
@@ -1773,14 +1997,23 @@ class Server16App(tk.Tk):
                 return candidate
         return None
 
-    def _load_team_database(self) -> None:
+    def _load_team_database(self, progress_callback=None) -> None:
         """Load FIFA team database for the selected installation"""
         if not self.fifaEXE or self.fifaEXE == "default":
             self._team_db_load_token += 1
             self.team_db = None
             self.discord_rpc.set_team_name_resolver(None)
-            self._set_progress(0, "Team database idle")
+            if progress_callback is not None:
+                progress_callback(0, "Team database idle")
+            else:
+                self._set_progress(0, "Team database idle")
             return
+
+        def _report_progress(value: float, text: str) -> None:
+            if progress_callback is not None:
+                progress_callback(value, text)
+            else:
+                self._set_progress(value, text)
 
         self._team_db_load_token += 1
         load_token = self._team_db_load_token
@@ -1788,45 +2021,45 @@ class Server16App(tk.Tk):
         self.team_db = None
         self.discord_rpc.set_team_name_resolver(None)
         self._set_process_status("Loading Team DB", self.gold)
-        self._set_progress(10, "Preparing team database")
+        _report_progress(10, self.progress_text("connecting_database"))
 
         def _apply_success(db: FifaDatabase, team_count: int) -> None:
             if load_token != self._team_db_load_token or self._closing:
                 return
             self.team_db = db
             self.discord_rpc.set_team_name_resolver(self.team_db.get_team_name)
-            self.log(f" Team database loaded for {fifa_root.name}")
-            self._set_progress(100, f"Team database ready ({team_count} teams)")
+            self.log(f" Team database loaded for {fifa_root.name} ({team_count} teams)")
+            _report_progress(100, f"{self.progress_text('database_ready')} ({team_count} teams)")
             if not self.memory.is_open():
-                self._set_process_status("Waiting FIFA", self.accent)
+                self._set_process_status(self.status_text("waiting_fifa"), self.accent)
 
         def _apply_failure(reason: str) -> None:
             if load_token != self._team_db_load_token or self._closing:
                 return
             self.team_db = None
             self.log(f"️  Could not connect to team database: {reason}")
-            self._set_progress(0, "Team database unavailable")
+            _report_progress(0, self.progress_text("database_unavailable"))
             if not self.memory.is_open():
-                self._set_process_status("Waiting FIFA", self.accent)
+                self._set_process_status(self.status_text("waiting_fifa"), self.accent)
 
         def _apply_error(message: str) -> None:
             if load_token != self._team_db_load_token or self._closing:
                 return
             self.team_db = None
             self.log(f"❌ Error loading team database: {message}")
-            self._set_progress(0, "Team database error")
+            _report_progress(0, self.progress_text("database_failed"))
             if not self.memory.is_open():
-                self._set_process_status("Waiting FIFA", self.accent)
+                self._set_process_status(self.status_text("waiting_fifa"), self.accent)
 
         def _worker() -> None:
             try:
                 db = FifaDatabase(fifa_root)
-                self.after(0, lambda: self._set_progress(40, "Connecting to fifa_ng_db"))
+                self.after(0, lambda: _report_progress(40, self.progress_text("connecting_database")))
                 if not db.connect():
                     reason = db.last_error or "unknown reason"
                     self.after(0, lambda: _apply_failure(reason))
                     return
-                self.after(0, lambda: self._set_progress(80, "Reading teams and stadiums"))
+                self.after(0, lambda: _report_progress(80, self.progress_text("loading_teams")))
                 team_count = db.load_all_teams()
                 self.after(0, lambda: _apply_success(db, team_count))
             except Exception as exc:
@@ -1879,8 +2112,8 @@ class Server16App(tk.Tk):
         fifa_path = self._auto_detect_fifa_exe()
         if fifa_path is None:
             messagebox.showwarning(
-                "FIFA 16",
-                "Could not find FIFA 16 in the same folder as this app.\nNao encontrei o FIFA 16 na mesma pasta deste app.",
+                self.tr("message.fifa16"),
+                self.tr("message.warning.find_fifa_same_folder"),
             )
             self.select_fifa_exe()
             fifa_path = self._auto_detect_fifa_exe()
@@ -1892,7 +2125,7 @@ class Server16App(tk.Tk):
         self.refresh_modules()
         self._overlay_enabled = True
         self._launcher_mode = False
-        self._set_process_status("Overlay Armed", self.accent)
+        self._set_process_status(self.status_text("overlay_armed"), self.accent)
         self.log(f"Overlay session armed for FIFA executable: {fifa_path}")
         if not self._is_target_process_running():
             self.launch_fifa()
@@ -1900,7 +2133,7 @@ class Server16App(tk.Tk):
 
     def launch_fifa(self) -> None:
         if self.fifaEXE == "default":
-            messagebox.showwarning("FIFA 16", "Selecione o executável do FIFA 16 primeiro.")
+            messagebox.showwarning(self.tr("message.fifa16"), self.tr("message.warning.select_fifa_first"))
             return
         if self._is_target_process_running():
             self.log(f"FIFA process already running: {self.fifaEXE}")
@@ -1995,7 +2228,7 @@ class Server16App(tk.Tk):
             pass
         self.after(10, self._focus_fifa_window)
         self._overlay_visible = True
-        self._set_process_status("Overlay Visible", self.success)
+        self._set_process_status(self.status_text("overlay_visible"), self.success)
 
     def _hide_overlay(self) -> None:
         window = self._window()
@@ -2006,7 +2239,7 @@ class Server16App(tk.Tk):
             except Exception:
                 pass
         window.withdraw()
-        self._set_process_status("Overlay Hidden", self.gold if self._overlay_enabled else self.accent)
+        self._set_process_status(self.status_text("overlay_hidden"), self.gold if self._overlay_enabled else self.accent)
         self.after(10, self._focus_fifa_window)
         if self._restore_fullscreen_on_hide:
             self.after(120, self._restore_fifa_fullscreen)
@@ -2172,18 +2405,18 @@ class Server16App(tk.Tk):
         try:
             if not self.offsets.is_configured():
                 self._sync_page_banner("Offsets nao configurados na classe Offsets")
-                self._set_process_status("Offsets Missing", self.error)
+                self._set_process_status(self.status_text("offsets_missing"), self.error)
                 self.log("Offsets are not configured")
                 self._poll_job = self.after(500, self.poll_process)
                 return
             running = bool(self.MP) and any(Path((p.info.get("name") or "")).stem.lower() == self.MP.lower() for p in psutil.process_iter(["name"]))
             if running and self.memory.attack(self.MP):
                 self._attached_once = True
-                self._set_process_status("FIFA Attached", self.success)
+                self._set_process_status(self.status_text("fifa_attached"), self.success)
                 self.update_page_name()
             else:
                 self._sync_page_banner("Process not running")
-                self._set_process_status("Waiting FIFA", self.accent)
+                self._set_process_status(self.status_text("waiting_fifa"), self.accent)
                 if self._attached_once:
                     self.log("Game process ended; closing server automatically")
                     self.on_close()
@@ -2191,7 +2424,7 @@ class Server16App(tk.Tk):
                 self._reset_chants_state()
         except Exception as exc:
             self._sync_page_banner(f"Polling error: {exc}")
-            self._set_process_status("Polling Error", self.error)
+            self._set_process_status(self.status_text("polling_error"), self.error)
             self.log("Polling error", exc, exc_info=sys.exc_info())
         if not self._closing:
             self._poll_job = self.after(500, self.poll_process)
@@ -2228,7 +2461,7 @@ class Server16App(tk.Tk):
                 self.refresh_live_context(page_name)
         except Exception as exc:
             self._sync_page_banner(f"Offset pending: {exc}")
-            self._set_process_status("Reading Page", self.gold)
+            self._set_process_status(self.status_text("reading_page"), self.gold)
             self.log("Failed to read page name", exc, exc_info=sys.exc_info())
 
     def _handle_page_transition(self, page_name: str) -> None:
@@ -2296,8 +2529,8 @@ class Server16App(tk.Tk):
         self._set_display("derby", "-")
         self._set_display("stadid", "-")
         self._set_display("stadium", "-")
-        self._set_display("home_name", "TEAM A")
-        self._set_display("away_name", "TEAM B")
+        self._set_display("home_name", self.tr("team.a"))
+        self._set_display("away_name", self.tr("team.b"))
         self._update_team_logo("home", "")
         self._update_team_logo("away", "")
         self._set_display("score", "0 x 0")
@@ -2305,8 +2538,8 @@ class Server16App(tk.Tk):
         self._set_display("home_goals", "0")
         self._set_display("away_goals", "0")
         self._set_display("match_clock_split", "00 / 00")
-        self._set_display("game_state", "Idle")
-        self._set_display("goal_active", "No")
+        self._set_display("game_state", self.display_value("idle"))
+        self._set_display("goal_active", self.display_value("no"))
         self._set_display("last_update", "-")
 
     def _schedule_kickoff_retry(self) -> None:
@@ -2429,8 +2662,8 @@ class Server16App(tk.Tk):
         self._set_display("stadid", self.STADID or "-")
         home_name = self._resolve_team_name(self.HID or "")
         away_name = self._resolve_team_name(self.AID or "")
-        self._set_display("home_name", home_name or (f"Team A ({self.HID})" if self.HID else "TEAM A"))
-        self._set_display("away_name", away_name or (f"Team B ({self.AID})" if self.AID else "TEAM B"))
+        self._set_display("home_name", home_name or (f"{self.tr('team.a')} ({self.HID})" if self.HID else self.tr("team.a")))
+        self._set_display("away_name", away_name or (f"{self.tr('team.b')} ({self.AID})" if self.AID else self.tr("team.b")))
         self._update_live_match_stats(page_name)
         # STADID is intentionally excluded from the signature: it reflects the
         # stadium currently loaded in FIFA memory and fluctuates while the game
@@ -2517,17 +2750,17 @@ class Server16App(tk.Tk):
         self._set_display("match_clock_split", f"{max(0, minutes):02d} / {max(0, seconds):02d}")
         goal_active = time.time() < self._chants_resume_after
         if started == 1 and raw_time and raw_time >= 1:
-            game_state = "Running"
+            game_state = self.display_value("running")
         elif self.matchstarted or self._chants_paused:
-            game_state = "Paused"
+            game_state = self.display_value("paused")
         else:
-            game_state = "Idle"
+            game_state = self.display_value("idle")
         self._set_display("game_state", game_state)
-        self._set_display("goal_active", "Yes" if goal_active else "No")
+        self._set_display("goal_active", self.display_value("yes") if goal_active else self.display_value("no"))
         self._last_live_update = datetime.now().strftime("%H:%M:%S")
         self._set_display("last_update", self._last_live_update)
         if "TV/bumper" in page_name:
-            self._set_display("audio_last_action", "TV bumper active")
+            self._set_display("audio_last_action", self.display_value("tv_bumper_active"))
 
     def _update_discord_presence(self) -> None:
         """Update Discord Rich Presence with current match state."""
