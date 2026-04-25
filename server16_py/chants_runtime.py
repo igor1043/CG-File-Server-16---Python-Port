@@ -40,6 +40,16 @@ class MciAudioPlayer:
         if self._open:
             self._send(f"play {self.alias} from 0")
 
+    def length_ms(self) -> int:
+        if not self._open:
+            return 0
+        try:
+            self._send(f"set {self.alias} time format milliseconds")
+            raw = self._send(f"status {self.alias} length").strip()
+            return max(0, int(raw))
+        except Exception:
+            return 0
+
     def pause(self) -> None:
         if self._open:
             self._send(f"pause {self.alias}")
@@ -176,6 +186,57 @@ class ChantsRuntime:
         self.fade_player(player, 0, volume, fade_ms)
         return player
 
+    def _play_goal_track(
+        self,
+        track: Path,
+        volume: float,
+        current: str,
+        mode: str,
+        source: str,
+        next_text: str,
+        fade_in_ms: int = 300,
+        fade_out_ms: int = 500,
+        minimum_hold_seconds: float = 8.0,
+    ) -> bool:
+        app = self.app
+        player = MciAudioPlayer()
+        try:
+            app._chants_player = player
+            app._chants_target_volume = volume
+            player.open(track)
+            duration_ms = player.length_ms()
+            player.set_volume(0)
+            player.play()
+            self.fade_player(player, 0, volume, fade_in_ms)
+            duration_seconds = duration_ms / 1000 if duration_ms > 0 else 0.0
+            hold_seconds = max(minimum_hold_seconds, duration_seconds)
+            hold_until = time.time() + hold_seconds
+            app._chants_resume_after = max(app._chants_resume_after, hold_until + 1.0)
+            app._set_display_async("audio_current", current)
+            app._set_display_async("audio_crowd_mode", mode)
+            app._set_display_async("audio_crowd_volume", f"{volume:.2f}")
+            app._set_display_async("audio_source", source)
+            app._set_display_async("audio_next", next_text)
+            app.log(f"Goal audio started: {track.name} duration={duration_ms}ms hold={hold_seconds:.1f}s")
+            hard_until = time.time() + max(hold_seconds + 2.0, duration_seconds + 2.0 if duration_seconds > 0 else 180.0)
+            while not app._chants_stop.is_set() and not getattr(app, "_chants_reset_requested", False) and app.module_enabled("Chants"):
+                mode_state = player.mode()
+                if mode_state in {"stopped", "closed"} and time.time() >= hold_until:
+                    break
+                if time.time() >= hard_until:
+                    break
+                time.sleep(0.2)
+            self.fade_player(player, volume, 0, fade_out_ms)
+            app.log(f"Goal audio finished: {track.name}")
+            return True
+        finally:
+            try:
+                player.close()
+            finally:
+                if app._chants_player is player:
+                    app._chants_player = None
+                    app._chants_target_volume = 0.0
+
     def chants_runtime_loop(self) -> None:
         app = self.app
         cooldown_until = 0.0
@@ -262,10 +323,11 @@ class ChantsRuntime:
                     app._set_display_async("audio_next", "Club song, then crowd")
                     if scorer:
                         time.sleep(2.0)
-                        if scorer == hid or app.module_enabled("AwayClubSong"):
-                            self._play_club_song(scorer)
+                        club_song_played = self._play_club_song(scorer)
                         if scorer == aid and away_chants and app.module_enabled("AwayChants"):
-                            self._play_away_reaction(away_chants, score_home, score_away)
+                            self._play_away_reaction(away_chants, score_home, score_away, skip_random=club_song_played)
+                    else:
+                        app.log(f"Goal club song skipped: scorer unavailable for score {score_home} x {score_away} (hid={hid or '-'}, aid={aid or '-'})")
                     cooldown_until = time.time() + 4.5
                     next_chant_after = cooldown_until
                     continue
@@ -397,41 +459,48 @@ class ChantsRuntime:
         app.chants_thread_started = False
         app.log("Chants monitor stopped")
 
-    def _play_club_song(self, team_id: str) -> None:
-        """Play club song using app._chants_player and return immediately.
-        The main chants loop remains free to handle pause/resume globally.
-        """
+    def _play_club_song(self, team_id: str) -> bool:
+        """Play the goal club song and hold the chants loop until it finishes."""
         app = self.app
         if self._special_audio_locked():
-            app._set_display_async("audio_next", "Club song skipped: audio busy")
-            return
+            if app._chants_player is not None:
+                try:
+                    self.fade_player(app._chants_player, app._chants_target_volume or 0.05, 0, 250)
+                    app._chants_player.stop()
+                    app._chants_player.close()
+                except Exception:
+                    pass
+                app._chants_player = None
         if not team_id or not app.settings_ini.key_exists(team_id, "chantsid"):
-            return
+            app.log(f"Goal club song skipped for {team_id or '-'}: chantsid not configured")
+            return False
         raw = app.settings_ini.read(team_id, "chantsid")
         parts = [part.strip() for part in raw.split(",")]
         if len(parts) < 7:
-            return
+            app.log(f"Goal club song skipped for {team_id}: invalid chantsid config")
+            return False
         folder = parts[0].replace("/", "\\").strip("\\")
         club_song = app.exedir / "FSW" / "Chants" / folder / "ClubSong.mp3"
         if not club_song.exists():
-            return
+            app.log(f"Goal club song skipped for {team_id}: missing {club_song}")
+            return False
         volume = self._safe_float(parts[6], 0.08)
         try:
-            app._chants_player = MciAudioPlayer()
-            app._chants_target_volume = volume
-            app._chants_player.open(club_song)
-            app._chants_player.set_volume(0)
-            app._chants_player.play()
-            self.fade_player(app._chants_player, 0, volume, 300)
-            self._mark_special_audio(0.75)
+            played = self._play_goal_track(
+                club_song,
+                volume,
+                "ClubSong",
+                "Club song",
+                f"Club anthem {team_id}",
+                "Return to crowd after anthem",
+                minimum_hold_seconds=12.0,
+            )
             app._set_display_async("audio_current", "ClubSong")
             app._set_display_async("audio_clubsong", team_id)
-            app._set_display_async("audio_crowd_mode", "Club song")
-            app._set_display_async("audio_crowd_volume", f"{volume:.2f}")
-            app._set_display_async("audio_source", f"Club anthem {team_id}")
-            app._set_display_async("audio_next", "Return to crowd after anthem")
+            return played
         except Exception as exc:
             app.log(f"Club song failed for {team_id}", exc, exc_info=sys.exc_info())
+            return False
 
     def _play_away_chant(self, away_chants: str, score_home: int, score_away: int) -> None:
         """Play away chant using app._chants_player and return immediately.
@@ -475,33 +544,34 @@ class ChantsRuntime:
         except Exception as exc:
             app.log("Away chant failed", exc, exc_info=sys.exc_info())
 
-    def _play_away_reaction(self, away_chants: str, score_home: int, score_away: int) -> None:
-        """Play away reaction after away goal and return immediately.
-        The main chants loop remains free to handle pause/resume globally.
-        """
+    def _play_away_reaction(self, away_chants: str, score_home: int, score_away: int, skip_random: bool = False) -> bool:
+        """Play away reaction after an away goal and hold the chants loop until it finishes."""
         app = self.app
         if self._special_audio_locked():
-            return
+            return False
         parts = self._parse_chants_config(away_chants)
-        if len(parts) < 6 or app._chants_rng.random() > 0.45:
-            return
+        if len(parts) < 6 or (not skip_random and app._chants_rng.random() > 0.45):
+            return False
         folder = parts[0].replace("/", "\\").strip("\\")
         support_dir = app.exedir / "FSW" / "Chants" / folder / "Support"
         track = self._pick_random_track(support_dir)
         if track is None:
-            return
+            return False
         base_volume = self._safe_float(parts[2], 0.04)
         volume = max(0.02, min(0.12, base_volume * 0.6))
         app._set_display_async("audio_last_action", f"Away crowd reaction {score_home} x {score_away}")
         try:
-            app._chants_player = MciAudioPlayer()
-            app._chants_target_volume = volume
-            app._chants_player.open(track)
-            app._chants_player.set_volume(0)
-            app._chants_player.play()
-            self.fade_player(app._chants_player, 0, volume, 250)
-            self._mark_special_audio(1.0)
-            app._set_display_async("audio_crowd_mode", "Away reaction")
-            app._set_display_async("audio_source", "Away crowd")
+            played = self._play_goal_track(
+                track,
+                volume,
+                track.stem,
+                "Away reaction",
+                "Away crowd",
+                "Return to crowd after reaction",
+                fade_in_ms=250,
+                fade_out_ms=350,
+            )
+            return played
         except Exception as exc:
             app.log("Away reaction failed", exc, exc_info=sys.exc_info())
+            return False
