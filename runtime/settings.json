@@ -3,6 +3,9 @@
   "discord_rpc": {
     "enabled": true,
     "client_id": "1495719449700077630",
-    "update_interval_ms": 1000
+    "update_interval_ms": 1000,
+    "stadium_preview_provider": "imgbb",
+    "stadium_preview_imgbb_api_key": "af421c8d5d14de2bbefc9697cbe5cae9",
+    "stadium_preview_mode": "url"
   }
 }

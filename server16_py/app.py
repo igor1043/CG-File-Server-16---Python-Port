@@ -24,7 +24,7 @@ from .match_string_patcher import patch_match_string
 from .assignment_runtime import AssignmentRuntime
 from .camera_runtime import CameraPreset, CameraRuntime
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
-from .discord_rpc_runtime import DiscordRPCRuntime
+from .discord_rpc_runtime import DiscordRPCRuntime, StadiumPreviewUploader
 from .fifa_db import FifaDatabase
 from .file_tools import checkdirs, checkver, copy, copy_if_exists, extra_setup
 from .ini_file import SessionIniFile
@@ -236,6 +236,28 @@ class Server16App(tk.Tk):
         self.discord_rpc = DiscordRPCRuntime(client_id, logger=None)
         self._discord_rpc_enabled = discord_rpc_config.get("enabled", False)
         self._discord_rpc_last_presence = None
+        # Stadium preview uploader for Discord Rich Presence
+        _preview_provider = (discord_rpc_config.get("stadium_preview_provider", "discord_webhook") or "discord_webhook").strip().lower()
+        _webhook_url = discord_rpc_config.get("stadium_preview_webhook", "")
+        _imgur_client_id = (discord_rpc_config.get("stadium_preview_imgur_client_id", "") or "").strip()
+        _imgbb_api_key = (discord_rpc_config.get("stadium_preview_imgbb_api_key", "") or "").strip()
+        _uploader_enabled = (
+            bool(_webhook_url)
+            or (_preview_provider == "imgur" and bool(_imgur_client_id))
+            or (_preview_provider == "imgbb" and bool(_imgbb_api_key))
+        )
+        self._stadium_preview_uploader: StadiumPreviewUploader | None = (
+            StadiumPreviewUploader(
+                _webhook_url,
+                provider=_preview_provider,
+                imgur_client_id=_imgur_client_id,
+                imgbb_api_key=_imgbb_api_key,
+            )
+            if _uploader_enabled
+            else None
+        )
+        if self._stadium_preview_uploader is not None:
+            self._stadium_preview_uploader.add_upload_callback(self._on_stadium_preview_uploaded)
         if self._discord_rpc_enabled:
             self.discord_rpc.connect()
         # Initialize team database (will be loaded when FIFA EXE is selected)
@@ -1203,9 +1225,16 @@ class Server16App(tk.Tk):
             preview_dir = root / stadium_name / "render" / "thumbnail"
             if not preview_dir.exists():
                 continue
-            for candidate in sorted(preview_dir.glob("stadium.*")):
-                if candidate.is_file() and candidate.suffix.lower() in {".png", ".jpg", ".jpeg", ".jepg"}:
-                    return candidate
+            # Support both common pack layouts:
+            # 1) .../render/thumbnail/stadium.jpg
+            # 2) .../render/thumbnail/stadium/stadium.jpg
+            candidate_dirs = [preview_dir, preview_dir / "stadium"]
+            for cdir in candidate_dirs:
+                if not cdir.exists():
+                    continue
+                for candidate in sorted(cdir.glob("stadium.*")):
+                    if candidate.is_file() and candidate.suffix.lower() in {".png", ".jpg", ".jpeg", ".jepg"}:
+                        return candidate
         return None
 
     def _load_preview_photo(self, image_path: Path | None, max_size: tuple[int, int]) -> ImageTk.PhotoImage | None:
@@ -2905,6 +2934,12 @@ class Server16App(tk.Tk):
         if "TV/bumper" in page_name:
             self._set_display("audio_last_action", self.display_value("tv_bumper_active"))
 
+    def _on_stadium_preview_uploaded(self, stadium_name: str, url: str) -> None:
+        """Called after a stadium preview is uploaded to Discord webhook.
+        Forces a Discord RPC refresh so the new image URL is applied immediately."""
+        self.log(f"Discord stadium preview uploaded: {stadium_name} -> {url}")
+        self._discord_rpc_last_presence = None
+
     def _update_discord_presence(self) -> None:
         """Update Discord Rich Presence with current match state."""
         # Only update if Discord RPC is enabled
@@ -2939,7 +2974,38 @@ class Server16App(tk.Tk):
                     or getattr(self, "StadName", "")
                 )
             stadium_display = custom_stadium_display or self._resolve_stadium_name(self.STADID) or ""
-            
+
+            # Resolve stadium preview URL via uploader (non-blocking)
+            stadium_image_url: str | None = None
+            if self._stadium_preview_uploader is not None:
+                candidate_names = []
+                for name in [self.curstad, custom_stadium_display, stadium_display]:
+                    norm = (name or "").strip()
+                    if norm and norm not in candidate_names:
+                        candidate_names.append(norm)
+
+                resolved_name = ""
+                preview_path = None
+                for candidate_name in candidate_names:
+                    preview_path = self._resolve_stadium_preview_path(candidate_name)
+                    if preview_path is not None:
+                        resolved_name = candidate_name
+                        break
+
+                if preview_path is not None and resolved_name:
+                    cached = self._stadium_preview_uploader.get_cached_url(resolved_name)
+                    if cached:
+                        stadium_image_url = cached
+                    else:
+                        self._stadium_preview_uploader.get_or_upload(resolved_name, preview_path)
+                        # Upload is async; stadium_image_url stays None until callback fires
+
+            discord_rpc_config = self.settings.data.get("discord_rpc", {})
+            stadium_preview_mode = discord_rpc_config.get("stadium_preview_mode", "button_fallback")
+            stadium_preview_override_url = (discord_rpc_config.get("stadium_preview_override_url", "") or "").strip()
+            if stadium_preview_override_url:
+                stadium_image_url = stadium_preview_override_url
+
             # Build presence using helper
             presence = self.discord_rpc.build_match_presence(
                 home_team=self.HID or "",
@@ -2951,14 +3017,24 @@ class Server16App(tk.Tk):
                 round_name=self.TOURROUNDID or "",
                 stadium=stadium_display,
                 game_state=game_state,
+                stadium_image_url=stadium_image_url,
+                external_image_mode=stadium_preview_mode,
             )
             
             # Only update if presence changed (reduce API calls)
             if presence != self._discord_rpc_last_presence:
-                self.discord_rpc.update_presence(**presence)
+                sent = self.discord_rpc.update_presence(**presence)
                 self._discord_rpc_last_presence = presence
                 # Log Discord RPC updates for debugging
                 self.log(f"Discord RPC updated: {presence.get('state', 'N/A')}")
+                self.log(f"Discord RPC image key: {presence.get('large_image', '')}")
+                self.log(f"Discord RPC external image mode: {stadium_preview_mode}")
+                if stadium_preview_override_url:
+                    self.log(f"Discord RPC external image override URL: {stadium_preview_override_url}")
+                if sent:
+                    self.log("Discord RPC update_presence result: ok")
+                else:
+                    self.log("Discord RPC update_presence result: failed")
         except Exception as exc:
             self.log("Discord RPC update error", exc, exc_info=sys.exc_info())
 
