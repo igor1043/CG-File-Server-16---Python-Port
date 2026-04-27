@@ -537,9 +537,18 @@ class DiscordRPCRuntime:
                 if resolved_name:
                     away_team = resolved_name
         
-        normalized_state = (game_state or "").strip().lower()
-        is_running = normalized_state == "running"
-        is_paused = normalized_state == "paused"
+        normalized_state = str(game_state or "").strip().lower()
+        compact_state = normalized_state.replace("_", " ").replace("-", " ")
+
+        # Accept common runtime/UI variants so localized labels do not break RPC state.
+        is_running = (
+            compact_state in {"running", "run", "en ejecución", "en ejecucion", "rodando"}
+            or compact_state.startswith("run")
+        )
+        is_paused = (
+            compact_state in {"paused", "pause", "pausado"}
+            or compact_state.startswith("paus")
+        )
         is_live = is_running or is_paused
 
         # Determine state line
@@ -551,7 +560,12 @@ class DiscordRPCRuntime:
             else:
                 state_text = f"{home_team} vs {away_team} | waiting to start"
         else:
-            state_text = "Browsing FIFA 16"
+            if is_paused:
+                state_text = f"Paused | {match_time}"
+            elif is_running:
+                state_text = f"Match in progress | {match_time}"
+            else:
+                state_text = "Browsing FIFA 16"
         
         # Determine details line
         # If in a live match with stadium, prioritize stadium name (ignore numeric IDs)

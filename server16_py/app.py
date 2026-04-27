@@ -2956,6 +2956,10 @@ class Server16App(tk.Tk):
             elif "timer" in self.labels:
                 match_time = self.labels.get("timer", tk.Label()).cget("text")
             game_state = self.labels.get("game_state", tk.Label()).cget("text") if "game_state" in self.labels else "Idle"
+            pause_menu_tokens = ("fluxhub", "stadiumpan")
+            if any(token in (page_name or "").lower() for token in pause_menu_tokens):
+                # These pages are in-match pause hubs, so expose paused explicitly to RPC.
+                game_state = "paused"
             custom_stadium_display = ""
             if self._has_active_custom_stadium_assignment():
                 custom_stadium_display = (
