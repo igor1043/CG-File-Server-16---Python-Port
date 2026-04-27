@@ -113,6 +113,9 @@ FIFA 16/
       Nets/
       Police/
   StadiumGBD/
+    render/
+      thumbnail/
+        stadium/
   ScoreBoardGBD/
   TVLogoGBD/
   MoviesGBD/
@@ -142,30 +145,33 @@ When present, these images are shown in:
 - the `Assign Stadium` window under `Visual Details`
 - the `Loading Stadium` modal during stadium application
 
-To be detected correctly, the stadium preview image must now live directly inside the stadium thumbnail folder:
+To be detected correctly, stadium preview images now live in one shared thumbnail folder:
 
 ```text
-StadiumGBD/<stadium name>/render/thumbnail/stadium.png
+StadiumGBD/render/thumbnail/stadium/
 ```
 
-or:
+Each preview file must use the stadium name as its file name. If the stadium is loaded from a `.zip` or `.rar`, use the archive stem.
 
 ```text
-StadiumGBD/<stadium name>/render/thumbnail/stadium.jpg
-StadiumGBD/<stadium name>/render/thumbnail/stadium.jpeg
+StadiumGBD/render/thumbnail/stadium/<stadium name>.png
+StadiumGBD/render/thumbnail/stadium/<stadium name>.jpg
+StadiumGBD/render/thumbnail/stadium/<stadium name>.jpeg
 ```
 
 Example:
 
 ```text
-StadiumGBD/BRA - Maracana - Flamengo/render/thumbnail/stadium.jpg
+StadiumGBD/ARG - Diego Armando Maradona.zip
+StadiumGBD/render/thumbnail/stadium/ARG - Diego Armando Maradona.jpg
 ```
 
 Notes:
 
-- The `<stadium name>` folder must exactly match the stadium folder used by the assignment.
-- The file name must be `stadium` with one of the supported extensions: `.png`, `.jpg`, `.jpeg`, or `.jepg`.
-- The old layout `render/thumbnail/stadium/stadium.*` is no longer used by the current code.
+- The preview file stem must exactly match the stadium folder name or archive stem used by the assignment.
+- Supported preview extensions are `.png`, `.jpg`, `.jpeg`, and `.jepg`.
+- The app also uses this folder when discovering stadium names for the assignment and settings editors, alongside normal stadium folders and `.zip` / `.rar` files in `StadiumGBD`.
+- The old per-stadium layouts `StadiumGBD/<stadium name>/render/thumbnail/stadium.*` and `StadiumGBD/<stadium name>/render/thumbnail/stadium/stadium.*` are no longer used by the current code.
 - If no preview image exists, the stadium still works normally; the preview area is simply hidden where applicable.
 - This structure is intended to make community stadium packs easy to organize and share.
 
@@ -199,7 +205,7 @@ Optional files supported by the runtime:
 - `NoSeats.rx3` for crowd-chair replacement.
 - `StadiumMovie.vp8` and `StadiumBumper.big` for stadium-specific movies.
 
-Archive extraction is used only for loading the stadium files. Preview lookup does not extract archives, so preview images are resolved from the normal `StadiumGBD/<stadium name>/render/thumbnail/stadium.*` path.
+Archive extraction is used only for loading the stadium files. Preview lookup does not extract archives, so preview images are resolved from `StadiumGBD/render/thumbnail/stadium/<stadium name>.*`.
 
 ## Assignment And Settings Editors
 
