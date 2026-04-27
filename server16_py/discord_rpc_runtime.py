@@ -5,10 +5,245 @@ Manages Discord RPC connection and presence updates for FIFA 16 match monitoring
 Provides graceful error handling and thread-safe operations.
 """
 
+import io
+import base64
 import threading
 import time
 import logging
+from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from typing import Optional, Dict, Any
+
+try:
+    from PIL import Image as _PILImage
+    PIL_AVAILABLE = True
+except ImportError:
+    _PILImage = None
+    PIL_AVAILABLE = False
+
+_RPC_IMAGE_MAX_PX = 1024  # Discord RPC recommended max image dimension
+
+try:
+    import requests as _requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    _requests = None
+    REQUESTS_AVAILABLE = False
+
+_PREVIEW_CACHE_TTL = 23 * 3600  # 23 hours (Discord webhook URLs expire ~24h)
+_PENDING_SENTINEL = "__pending__"
+
+
+class StadiumPreviewUploader:
+    """
+    Uploads stadium preview images and caches resulting URLs for reuse
+    within the same session.
+
+    All uploads are performed in daemon threads so they never block the
+    main game-stats loop.
+    """
+
+    def __init__(
+        self,
+        webhook_url: str,
+        logger: Optional[logging.Logger] = None,
+        provider: str = "discord_webhook",
+        imgur_client_id: str = "",
+        imgbb_api_key: str = "",
+    ) -> None:
+        self._webhook_url = webhook_url
+        self._logger = logger or logging.getLogger(__name__)
+        self._provider = (provider or "discord_webhook").strip().lower()
+        self._imgur_client_id = (imgur_client_id or "").strip()
+        self._imgbb_api_key = (imgbb_api_key or "").strip()
+        # { stadium_name: (attachment_url, upload_timestamp) }
+        self._cache: Dict[str, tuple] = {}
+        self._lock = threading.Lock()
+        # Callbacks called with (stadium_name, url) after a successful upload
+        self._on_upload_callbacks: list = []
+
+    def add_upload_callback(self, cb) -> None:
+        """Register a callback invoked on the main thread after a successful upload."""
+        with self._lock:
+            self._on_upload_callbacks.append(cb)
+
+    def get_cached_url(self, stadium_name: str) -> Optional[str]:
+        """Return a valid cached URL or None if missing / expired."""
+        with self._lock:
+            entry = self._cache.get(stadium_name)
+            if entry is None:
+                return None
+            url, ts = entry
+            if url == _PENDING_SENTINEL:
+                return None
+            if time.time() - ts > _PREVIEW_CACHE_TTL:
+                del self._cache[stadium_name]
+                return None
+            return url
+
+    def get_or_upload(self, stadium_name: str, local_path: Path, webhook_url: Optional[str] = None) -> Optional[str]:
+        """
+        Return cached URL if still valid, otherwise schedule an async upload.
+
+        Returns the cached URL immediately if available, or None while the
+        upload thread is running.  Once the thread completes the registered
+        callbacks are fired so the caller can refresh the presence.
+        """
+        if not REQUESTS_AVAILABLE:
+            return None
+
+        cached = self.get_cached_url(stadium_name)
+        if cached:
+            return cached
+
+        provider = self._provider
+        effective_webhook = webhook_url or self._webhook_url
+        if provider == "imgur":
+            if not self._imgur_client_id:
+                self._logger.warning("Imgur provider selected but stadium_preview_imgur_client_id is empty")
+                return None
+        elif provider == "imgbb":
+            if not self._imgbb_api_key:
+                self._logger.warning("ImgBB provider selected but stadium_preview_imgbb_api_key is empty")
+                return None
+        elif not effective_webhook:
+            return None
+
+        # Avoid launching duplicate threads for the same stadium
+        with self._lock:
+            if stadium_name in self._cache:
+                return None  # Upload already in-flight
+            # Reserve the slot so a second call won't start another thread
+            self._cache[stadium_name] = (_PENDING_SENTINEL, time.time())
+
+        t = threading.Thread(
+            target=self._upload_thread,
+            args=(stadium_name, local_path, effective_webhook, provider, self._imgur_client_id, self._imgbb_api_key),
+            daemon=True,
+        )
+        t.start()
+        return None
+
+    def _prepare_image_bytes(self, local_path: Path) -> tuple:
+        """Return (filename, bytes_io, content_type), resizing to <=1024px if needed."""
+        suffix = local_path.suffix.lower()
+        content_type = "image/png" if suffix == ".png" else "image/jpeg"
+        filename = local_path.name
+        if PIL_AVAILABLE:
+            try:
+                img = _PILImage.open(local_path)
+                w, h = img.size
+                if w > _RPC_IMAGE_MAX_PX or h > _RPC_IMAGE_MAX_PX:
+                    img.thumbnail((_RPC_IMAGE_MAX_PX, _RPC_IMAGE_MAX_PX), _PILImage.LANCZOS)
+                    self._logger.debug(f"Stadium preview resized {w}x{h} -> {img.size} for Discord RPC")
+                buf = io.BytesIO()
+                fmt = "PNG" if suffix == ".png" else "JPEG"
+                save_kwargs = {} if fmt == "PNG" else {"quality": 90}
+                img.save(buf, format=fmt, **save_kwargs)
+                buf.seek(0)
+                return filename, buf, content_type
+            except Exception as e:
+                self._logger.debug(f"PIL resize skipped ({e}), uploading original")
+        with open(local_path, "rb") as fh:
+            return filename, io.BytesIO(fh.read()), content_type
+
+    def _upload_to_discord_webhook(self, image_bytes: io.BytesIO, filename: str, content_type: str, webhook_url: str) -> Optional[str]:
+        """Upload preview image to Discord webhook and return attachment URL."""
+        webhook_url = self._with_wait_true(webhook_url)
+        response = _requests.post(
+            webhook_url,
+            files={"file": (filename, image_bytes, content_type)},
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+        attachments = data.get("attachments", [])
+        if not attachments:
+            return None
+        first_attachment = attachments[0]
+        return first_attachment.get("url") or first_attachment.get("proxy_url")
+
+    def _upload_to_imgur(self, image_bytes: io.BytesIO, filename: str, content_type: str, imgur_client_id: str) -> Optional[str]:
+        """Upload preview image to Imgur and return public link."""
+        headers = {"Authorization": f"Client-ID {imgur_client_id}"}
+        response = _requests.post(
+            "https://api.imgur.com/3/image",
+            headers=headers,
+            files={"image": (filename, image_bytes, content_type)},
+            data={"type": "file"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success"):
+            return None
+        data = payload.get("data", {})
+        return data.get("link")
+
+    def _upload_to_imgbb(self, image_bytes: io.BytesIO, imgbb_api_key: str) -> Optional[str]:
+        """Upload preview image to ImgBB and return public link."""
+        encoded = base64.b64encode(image_bytes.getvalue()).decode("ascii")
+        response = _requests.post(
+            "https://api.imgbb.com/1/upload",
+            data={"key": imgbb_api_key, "image": encoded},
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success"):
+            return None
+        data = payload.get("data", {})
+        return data.get("url") or data.get("display_url")
+
+    def _upload_thread(
+        self,
+        stadium_name: str,
+        local_path: Path,
+        webhook_url: str,
+        provider: str,
+        imgur_client_id: str,
+        imgbb_api_key: str,
+    ) -> None:
+        """Worker that performs the multipart upload and updates the cache."""
+        try:
+            filename, image_bytes, content_type = self._prepare_image_bytes(local_path)
+            if provider == "imgur":
+                url = self._upload_to_imgur(image_bytes, filename, content_type, imgur_client_id)
+            elif provider == "imgbb":
+                url = self._upload_to_imgbb(image_bytes, imgbb_api_key)
+            else:
+                url = self._upload_to_discord_webhook(image_bytes, filename, content_type, webhook_url)
+            if not url:
+                self._logger.warning(f"Preview upload returned no URL for '{stadium_name}' (provider={provider})")
+                self._evict(stadium_name)
+                return
+            # Strip trailing '&' that Discord CDN sometimes appends to signed URLs.
+            url = url.rstrip("&")
+            with self._lock:
+                self._cache[stadium_name] = (url, time.time())
+                callbacks = list(self._on_upload_callbacks)
+            self._logger.info(f"Stadium preview uploaded for '{stadium_name}' (provider={provider}): {url}")
+            for cb in callbacks:
+                try:
+                    cb(stadium_name, url)
+                except Exception as e:
+                    self._logger.debug(f"Upload callback error: {e}")
+        except Exception as e:
+            self._logger.warning(f"Failed to upload stadium preview for '{stadium_name}': {e}")
+            self._evict(stadium_name)
+
+    def _with_wait_true(self, webhook_url: str) -> str:
+        """Ensure webhook URL includes wait=true so Discord returns attachment metadata."""
+        parts = urlsplit(webhook_url)
+        query_items = dict(parse_qsl(parts.query, keep_blank_values=True))
+        query_items["wait"] = "true"
+        new_query = urlencode(query_items)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+    def _evict(self, stadium_name: str) -> None:
+        """Remove a pending/failed cache entry so a future call can retry."""
+        with self._lock:
+            self._cache.pop(stadium_name, None)
 
 try:
     from pypresence import Presence
@@ -146,7 +381,7 @@ class DiscordRPCRuntime:
         state: Optional[str] = None,
         details: Optional[str] = None,
         large_image: str = "fifa16",
-        large_text: str = "FIFA 16 Server16",
+        large_text: str = "FIFA 16",
         small_image: Optional[str] = None,
         small_text: Optional[str] = None,
         buttons: Optional[list] = None,
@@ -208,7 +443,8 @@ class DiscordRPCRuntime:
             
             if self.connected and self.client:
                 try:
-                    self.client.update(**presence_data)
+                    rpc_response = self.client.update(**presence_data)
+                    self.logger.info(f"Discord RPC update response: {rpc_response}")
                     self._last_presence = presence_data.copy()
                     return True
                 except Exception as e:
@@ -266,6 +502,8 @@ class DiscordRPCRuntime:
         game_state: str = "Idle",
         home_team_image: Optional[str] = None,
         away_team_image: Optional[str] = None,
+        stadium_image_url: Optional[str] = None,
+        external_image_mode: str = "button_fallback",
     ) -> Dict[str, Any]:
         """
         Build a complete match presence from game state data.
@@ -299,9 +537,18 @@ class DiscordRPCRuntime:
                 if resolved_name:
                     away_team = resolved_name
         
-        normalized_state = (game_state or "").strip().lower()
-        is_running = normalized_state == "running"
-        is_paused = normalized_state == "paused"
+        normalized_state = str(game_state or "").strip().lower()
+        compact_state = normalized_state.replace("_", " ").replace("-", " ")
+
+        # Accept common runtime/UI variants so localized labels do not break RPC state.
+        is_running = (
+            compact_state in {"running", "run", "en ejecución", "en ejecucion", "rodando"}
+            or compact_state.startswith("run")
+        )
+        is_paused = (
+            compact_state in {"paused", "pause", "pausado"}
+            or compact_state.startswith("paus")
+        )
         is_live = is_running or is_paused
 
         # Determine state line
@@ -313,7 +560,12 @@ class DiscordRPCRuntime:
             else:
                 state_text = f"{home_team} vs {away_team} | waiting to start"
         else:
-            state_text = "Browsing FIFA 16"
+            if is_paused:
+                state_text = f"Paused | {match_time}"
+            elif is_running:
+                state_text = f"Match in progress | {match_time}"
+            else:
+                state_text = "Browsing FIFA 16"
         
         # Determine details line
         # If in a live match with stadium, prioritize stadium name (ignore numeric IDs)
@@ -334,18 +586,47 @@ class DiscordRPCRuntime:
         else:
             details_text = "Not in a match"
         
-        # Determine large image
-        large_text = f"Stadium: {stadium}" if stadium else "FIFA 16 Server16"
-        
-        # Use small image if available
-        small_image = home_team_image or away_team_image
-        small_text = home_team or away_team or None
-        
-        return {
+        # Determine large image: stadium preview URL if available, else default asset
+        large_text = f"{stadium}" if stadium else "FIFA 16"
+        preview_button = None
+        if stadium_image_url:
+            # Support multiple external-image formats for RPC compatibility testing.
+            _url = stadium_image_url.strip().rstrip("&")
+            if not (_url.startswith("https://") or _url.startswith("http://")):
+                _url = f"https://{_url}"
+            mode = (external_image_mode or "").strip().lower()
+            if mode == "url":
+                large_image = _url
+            elif mode == "mp_external_raw":
+                large_image = f"mp:external/{_url}"
+            elif mode == "mp_external_no_scheme":
+                _no_scheme = _url
+                for _scheme in ("https://", "http://"):
+                    if _no_scheme.startswith(_scheme):
+                        _no_scheme = _no_scheme[len(_scheme):]
+                        break
+                large_image = f"mp:external/{_no_scheme}"
+            elif mode == "mp_external_encoded":
+                large_image = f"mp:external/{quote(_url, safe='')}"
+            else:
+                # Stable fallback: no broken image, provide preview via button.
+                large_image = "fifa16"
+                preview_button = {"label": "Stadium Preview", "url": _url}
+        else:
+            large_image = "fifa16"
+
+        # Only include a small image when a stadium preview exists.
+        has_stadium_preview = bool((stadium_image_url or "").strip())
+
+        presence = {
             "state": state_text,
             "details": details_text,
-            "large_image": "fifa16",
+            "large_image": large_image,
             "large_text": large_text,
-            "small_image": small_image,
-            "small_text": small_text,
         }
+        if has_stadium_preview:
+            presence["small_image"] = "fifa16"
+            presence["small_text"] = "FIFA 16"
+        if preview_button is not None:
+            presence["buttons"] = [preview_button]
+        return presence
