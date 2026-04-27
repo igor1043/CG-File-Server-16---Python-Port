@@ -1222,19 +1222,9 @@ class Server16App(tk.Tk):
             if root in seen:
                 continue
             seen.add(root)
-            preview_dir = root / stadium_name / "render" / "thumbnail"
-            if not preview_dir.exists():
-                continue
-            # Support both common pack layouts:
-            # 1) .../render/thumbnail/stadium.jpg
-            # 2) .../render/thumbnail/stadium/stadium.jpg
-            candidate_dirs = [preview_dir, preview_dir / "stadium"]
-            for cdir in candidate_dirs:
-                if not cdir.exists():
-                    continue
-                for candidate in sorted(cdir.glob("stadium.*")):
-                    if candidate.is_file() and candidate.suffix.lower() in {".png", ".jpg", ".jpeg", ".jepg"}:
-                        return candidate
+            candidate = resolve_stadium_preview_path(root, stadium_name)
+            if candidate is not None:
+                return candidate
         return None
 
     def _load_preview_photo(self, image_path: Path | None, max_size: tuple[int, int]) -> ImageTk.PhotoImage | None:

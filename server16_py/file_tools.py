@@ -40,16 +40,24 @@ def resolve_stadium_preview_path(stadium_gbd: str | Path, stadium_name: str) -> 
     if not preview_dir.exists():
         return None
 
-    for suffix in sorted(STADIUM_PREVIEW_SUFFIXES):
-        candidate = preview_dir / f"{stadium_name}{suffix}"
-        if candidate.is_file():
-            return candidate
+    lookup_names = [stadium_name]
+    stadium_suffix = Path(stadium_name).suffix.lower()
+    if stadium_suffix in STADIUM_ARCHIVE_SUFFIXES:
+        stem_name = Path(stadium_name).stem.strip()
+        if stem_name:
+            lookup_names.append(stem_name)
 
-    wanted = _normalized_lookup_name(stadium_name)
+    for lookup_name in lookup_names:
+        for suffix in sorted(STADIUM_PREVIEW_SUFFIXES):
+            candidate = preview_dir / f"{lookup_name}{suffix}"
+            if candidate.is_file():
+                return candidate
+
+    wanted = {_normalized_lookup_name(name) for name in lookup_names}
     for candidate in sorted(preview_dir.iterdir(), key=lambda path: path.name.lower()):
         if not candidate.is_file() or candidate.suffix.lower() not in STADIUM_PREVIEW_SUFFIXES:
             continue
-        if _normalized_lookup_name(candidate.stem) == wanted:
+        if _normalized_lookup_name(candidate.stem) in wanted:
             return candidate
     return None
 

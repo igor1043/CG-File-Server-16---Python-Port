@@ -601,18 +601,18 @@ class DiscordRPCRuntime:
         else:
             large_image = "fifa16"
 
-        # Small image: always the game logo
-        small_image = "fifa16"
-        small_text = "FIFA 16"
+        # Only include a small image when a stadium preview exists.
+        has_stadium_preview = bool((stadium_image_url or "").strip())
 
         presence = {
             "state": state_text,
             "details": details_text,
             "large_image": large_image,
             "large_text": large_text,
-            "small_image": small_image,
-            "small_text": small_text,
         }
+        if has_stadium_preview:
+            presence["small_image"] = "fifa16"
+            presence["small_text"] = "FIFA 16"
         if preview_button is not None:
             presence["buttons"] = [preview_button]
         return presence
