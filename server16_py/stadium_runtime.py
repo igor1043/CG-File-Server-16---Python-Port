@@ -186,13 +186,13 @@ class StadiumRuntime:
         section_name: str,
         injid: str,
         stadium_signature: tuple,
-        task_request_key: tuple[str, str, str],
+        task_request_key: tuple[str, str, str] | None = None,
         chosen_stadium: str | None = None,
     ) -> None:
         app = self.app
         app._stadium_task_running = True
         app._stadium_task_signature = stadium_signature
-        app._stadium_task_request_key = task_request_key
+        app._stadium_task_request_key = task_request_key or (section_name, section_id, "")
         app._show_stadium_loading_modal(chosen_stadium or section_id, "Preparing stadium assets", progress=4)
         app._set_progress(8, f"Preparing stadium {section_id}")
         app._update_stadium_loading_modal(10, f"Loading stadium from [{section_name}] {section_id}")
