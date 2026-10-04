@@ -89,10 +89,15 @@ class Memory:
     def attack(self, process_name: str) -> bool:
         import psutil
 
-        self.close()
         for proc in psutil.process_iter(["pid", "name", "exe"]):
             name = (proc.info.get("name") or "").lower()
             if Path(name).stem == process_name.lower():
+                # Polling shares this connection with asset preparation workers.
+                # Closing a live handle on every poll makes their context checks
+                # intermittently report that FIFA has disappeared.
+                if self.process_handle and self.process_id == proc.info["pid"]:
+                    return True
+                self.close()
                 self.process_id = proc.info["pid"]
                 self.process_name = process_name
                 rights = PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION
@@ -101,6 +106,7 @@ class Memory:
                     return False
                 self.base_module = self._get_base_address(proc.info.get("exe"))
                 return True
+        self.close()
         return False
 
     def _get_base_address(self, exe_path: str | None) -> int:
