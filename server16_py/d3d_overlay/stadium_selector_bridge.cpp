@@ -260,7 +260,7 @@ void selector_tick(HWND window,float width,float height) {
                 if (pressed & XINPUT_GAMEPAD_LEFT_SHOULDER) emit(13);
                 else if (pressed & XINPUT_GAMEPAD_RIGHT_SHOULDER) emit(14);
             }
-            if (edge(VK_ESCAPE) || (pressed & XINPUT_GAMEPAD_B)) { emit(7); g_release_until=now+250; }
+            if ((selector_audio_mode() && edge(VK_ESCAPE)) || (pressed & XINPUT_GAMEPAD_B)) { emit(7); g_release_until=now+250; }
             else if (edge(VK_RETURN) || (pressed & XINPUT_GAMEPAD_A)) emit(6);
             if (edge(VK_TAB) || (pressed & XINPUT_GAMEPAD_Y)) emit(9);
             LONG function_action=function_action_edge(keys,g_keyboard);

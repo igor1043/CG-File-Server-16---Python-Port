@@ -434,7 +434,7 @@ class StadiumSelector:
         elif kind==16:
             if value==1:
                 self.search() if self.keyboard else self.apply()
-            elif value in (2,3):
+            elif value==2:
                 if self.keyboard: self.keyboard=False; self.focus=2; self.render()
                 else: self.back()
         elif kind==9: self.action('search')
@@ -638,7 +638,9 @@ class StadiumSelector:
         count=self.count_label(len(self.results))
         total=self.count_label(len(self.entries))
         filtered=bool(self.query or self.country)
-        text(360,87,f'{count} filtrados · {total} no total' if filtered else f'{total} estádios no total',12 if filtered else 14,color=muted,max_width=216)
+        counter=f'{count} filtrados · {total} no total' if filtered else f'{total} estádios no total'
+        counter_size=12 if filtered else 14
+        text(576-draw.textlength(counter,font=self.font(counter_size)),87,counter,counter_size,color=muted,max_width=232)
         entry=self.results[self.index] if self.results else None
         self._request_preview(entry)
         photo_rect=self.PHOTO_RECT
@@ -690,12 +692,12 @@ class StadiumSelector:
                         draw.line((486,380,486,427),fill='#e0e7ef',width=1)
                         image.alpha_composite(logo,(1004+(124-logo.width)//2,744+(124-logo.height)//2))
                     except (OSError,ValueError): pass
-            text(426,438,self.position_label(),13,color=muted,max_width=150)
+            text(576-draw.textlength(self.position_label(),font=self.font(13)),438,self.position_label(),13,color=muted,max_width=150)
         else:
             text(96,390,'Selecione um estádio',21,color=muted,max_width=370)
-            text(426,438,self.position_label(),13,color=muted,max_width=150)
+            text(576-draw.textlength(self.position_label(),font=self.font(13)),438,self.position_label(),13,color=muted,max_width=150)
         draw.line((1,467,598,467),fill='#e9eef4',width=1)
-        button((24,481,292,529),'Voltar · Esc / F2' if self.return_to_menu else 'Cancelar · F2','cancel',self.focus==4)
+        button((24,481,292,529),'Voltar · F2 / B' if self.return_to_menu else 'Cancelar · F2 / B','cancel',self.focus==4)
         button((308,481,576,529),'Aplicar · F1','apply',self.focus==3,primary=True)
         if self.message:
             text(24,536,self.message,13,color='#8c5b24',max_width=552)

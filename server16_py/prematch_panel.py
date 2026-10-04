@@ -151,7 +151,7 @@ class PrematchPanel:
                 font=self.selector.font(18,True)
                 draw.text((cx-draw.textlength(label,font=font)/2,191),label,font=font,fill=ink)
                 text(cx-12,225,f'F{i+1}',13,muted)
-            button(self.BACK,'Fechar · Esc / F3',2)
+            button(self.BACK,'Fechar · F3 / B',2)
         else:
             shared=self.selector.crowd_control.shared
             text(40,104,'Ocupação do estádio',19,bold=True)
@@ -165,7 +165,7 @@ class PrematchPanel:
             text(40,205,'0%',12,muted); text(524,205,'100%',12,muted)
             automatic=f'Regra atual do mod: {shared.automatic_percent}%' if shared.automatic_percent>=0 else 'Aguardando o valor atual do mod de torcida...'
             text(40,230,automatic,14,muted)
-            button((24,278,292,320),'Voltar · Esc / F2',1)
+            button((24,278,292,320),'Voltar · F2 / B',1)
             button((308,278,576,320),'Aplicar · F1',2,True)
         status = self.message or ('← → Ajustar · Enter / A Confirmar · B Voltar' if self.crowd else 'Setas Selecionar · Enter / A Abrir · B Fechar')
         text(24,330,status,11,muted)

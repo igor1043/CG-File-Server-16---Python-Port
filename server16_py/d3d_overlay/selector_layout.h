@@ -20,6 +20,7 @@ inline SelectorLayout selector_layout(float viewport_width,float viewport_height
         available=(std::min)(available,layout.keyboard_y-layout.card_y-viewport_height*.03f);
     }
     layout.card_scale=(std::min)((std::min)(viewport_width*.64f/layout.card_width,available/layout.card_height),1.05f);
+    if (image_height != 400) layout.card_scale *= .6f;
     layout.card_x=(viewport_width-layout.card_width*layout.card_scale)/2.f;
     return layout;
 }

@@ -683,8 +683,16 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     ctx->IASetVertexBuffers(0,1,&g_vb,&stride,&offset);
 
     Vtx11 verts[kColoredVertexCapacity]; int n=0;
+    const float loadingScale=selecting && !drawSelector ? .6f : 1.f;
+    const float loadingX=selecting ? (vpW-PW*loadingScale)/2.f : px;
+    auto DrawTexQuad=[&](ID3D11DeviceContext* context,float x,float y,float w,float h,
+        float vw,float vh,ID3D11ShaderResourceView* texture,float alpha=1.f,
+        float u0=0.f,float v0=0.f,float u1=1.f,float v1=1.f) {
+        ::DrawTexQuad(context,loadingX+(x-px)*loadingScale,py+(y-py)*loadingScale,
+            w*loadingScale,h*loadingScale,vw,vh,texture,alpha,u0,v0,u1,v1);
+    };
     auto R=[&](float x,float y,float w,float h,DWORD col){
-        PushQuad(verts,n,x,y,w,h,vpW,vpH,col);
+        PushQuad(verts,n,loadingX+(x-px)*loadingScale,py+(y-py)*loadingScale,w*loadingScale,h*loadingScale,vpW,vpH,col);
     };
     auto Round=[&](float x,float y,float w,float h,float radius,DWORD col) {
         if (w <= 0.f || h <= 0.f) return;
@@ -785,6 +793,28 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         }
     }
 
+    // FIFA can hide its cursor while our modal owns input. Draw a pointer
+    // last so it remains visible over both the card and virtual keyboard.
+    if (drawSelector || selecting) {
+        POINT pointer;
+        RECT client;
+        if (GetCursorPos(&pointer) && ScreenToClient(scd.OutputWindow,&pointer) &&
+            GetClientRect(scd.OutputWindow,&client) && client.right>0 && client.bottom>0) {
+            float x=pointer.x*vpW/client.right, y=pointer.y*vpH/client.bottom;
+            n=0;
+            for(int row=0;row<18;++row) {
+                float width=1.f+row*.65f;
+                PushQuad(verts,n,x,y+row,width+2.f,1.f,vpW,vpH,0xFF344651);
+                if(row>1) PushQuad(verts,n,x+1.f,y+row,width,1.f,vpW,vpH,0xFFFFFFFF);
+            }
+            ctx->VSSetShader(g_vs,nullptr,0); ctx->PSSetShader(g_ps,nullptr,0);
+            ctx->IASetInputLayout(g_il); ctx->IASetVertexBuffers(0,1,&g_vb,&stride,&offset);
+            if(SUCCEEDED(ctx->Map(g_vb,0,D3D11_MAP_WRITE_DISCARD,0,&ms))) {
+                memcpy(ms.pData,verts,n*sizeof(Vtx11)); ctx->Unmap(g_vb,0);
+                for(int i=0;i<n;i+=4) ctx->Draw(4,i);
+            }
+        }
+    }
     // ── Restore D3D state ──────────────────────────────────────────────────
     ctx->OMSetRenderTargets(8,oldRTV,oldDSV);
     ctx->RSSetViewports(1,&oldVP);
