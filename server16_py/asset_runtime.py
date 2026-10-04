@@ -13,6 +13,13 @@ class AssetRuntime:
     def __init__(self, app: "Server16App") -> None:
         self.app = app
 
+    def _notify_loading(self, action: str, *args, **kwargs) -> None:
+        """Notifications observe asset copies and cannot interrupt their original flow."""
+        try:
+            getattr(self.app, f"_{action}_asset_loading")(*args, **kwargs)
+        except Exception as exc:
+            self.app.log(f"Asset loading notification {action} failed", exc)
+
     def _resolve_assignment_value(self, candidates: list[tuple[str, str]], fallback: tuple[str, str] | None = None) -> str:
         app = self.app
         for key, section in candidates:
@@ -93,30 +100,43 @@ class AssetRuntime:
         else:
             app._set_display("tvlogo", app.display_value("tvlogo_module_disable"))
         if app.module_enabled("ScoreBoard"):
-            copy(app.exedir / "FSW" / "ScoreBoard", app.Scoredata / "game")
-            scoreboard = self._resolve_assignment_value(
-                [
-                    (app.TOURROUNDID, "Scoreboard"),
-                    (app.TOURNAME, "Scoreboard"),
-                    (app.HID, "HomeTeamScoreBoard"),
-                ],
-                fallback=("0", "Scoreboard"),
-            )
-            if scoreboard:
-                variant = app.ScoreBoard / scoreboard / app.tvlogoscoreboardtype
-                scoreboard_dir = app.ScoreBoard / scoreboard
-                if app.tvlogoscoreboardtype != "default" and variant.exists():
-                    copy(variant, app.Scoredata)
-                elif scoreboard_dir.exists():
-                    copy(scoreboard_dir, app.Scoredata)
-                else:
-                    app.log(f"Scoreboard directory not found, keeping default scoreboard: {scoreboard_dir}")
-                    scoreboard = ""
+            self._notify_loading("show", "scoreboard", "Carregando placar", "Padrão", "Preparando arquivos do placar", 0)
+            try:
+                def copy_progress(start: float, end: float):
+                    def update(done: int, total: int, filename: str) -> None:
+                        pct = start + (end - start) * done / max(1, total)
+                        self._notify_loading("update", "scoreboard", pct, f"{filename} ({done}/{total})")
+                    return update
+
+                copy(app.exedir / "FSW" / "ScoreBoard", app.Scoredata / "game", progress_callback=copy_progress(0, 35))
+                app.log("Scoreboard native baseline copied")
+                scoreboard = self._resolve_assignment_value(
+                    [
+                        (app.TOURROUNDID, "Scoreboard"),
+                        (app.TOURNAME, "Scoreboard"),
+                        (app.HID, "HomeTeamScoreBoard"),
+                    ],
+                    fallback=("0", "Scoreboard"),
+                )
+                self._notify_loading("show", "scoreboard", "Carregando placar", scoreboard or "Padrão", "Aplicando atribuição do placar", 40)
                 if scoreboard:
-                    app._set_display("scoreboard", scoreboard)
-                    app.log(f"Applied scoreboard: {scoreboard}")
-            else:
-                app.log("No scoreboard assignment found; default scoreboard active")
+                    variant = app.ScoreBoard / scoreboard / app.tvlogoscoreboardtype
+                    scoreboard_dir = app.ScoreBoard / scoreboard
+                    if app.tvlogoscoreboardtype != "default" and variant.exists():
+                        copy(variant, app.Scoredata, progress_callback=copy_progress(40, 100))
+                    elif scoreboard_dir.exists():
+                        copy(scoreboard_dir, app.Scoredata, progress_callback=copy_progress(40, 100))
+                    else:
+                        app.log(f"Scoreboard directory not found, keeping default scoreboard: {scoreboard_dir}")
+                        scoreboard = ""
+                    if scoreboard:
+                        app._set_display("scoreboard", scoreboard)
+                        app.log(f"Applied scoreboard: {scoreboard}")
+                else:
+                    app.log("No scoreboard assignment found; default scoreboard active")
+                self._notify_loading("update", "scoreboard", 100, "Placar pronto")
+            finally:
+                self._notify_loading("hide", "scoreboard", delay_ms=500)
         else:
             app._set_display("scoreboard", app.display_value("scoreboard_module_disable"))
         self.update_audio_overview()
@@ -140,8 +160,16 @@ class AssetRuntime:
         if movie:
             movie_dir = app.Movies / movie
             if movie_dir.exists():
-                copy_if_exists(movie_dir / "bootflowoutro.vp8", app.Movdata)
-                copy_if_exists(movie_dir / "bumper.big", app.MOVBUMP)
+                self._notify_loading("show", "movie", "Carregando vídeo pré-jogo", movie, "Preparando vídeo e vinheta", 0)
+                try:
+                    video = movie_dir / "bootflowoutro.vp8"
+                    bumper = movie_dir / "bumper.big"
+                    copy_if_exists(video, app.Movdata)
+                    self._notify_loading("update", "movie", 55, f"Vídeo: {video.name}")
+                    copy_if_exists(bumper, app.MOVBUMP)
+                    self._notify_loading("update", "movie", 100, f"Vinheta: {bumper.name}")
+                finally:
+                    self._notify_loading("hide", "movie", delay_ms=500)
                 app._set_display("movie", movie)
                 app._set_display("audio_current", movie)
                 app._set_display("audio_last_action", app.display_value("movie_prefix", fallback="Movie {name}", name=movie))
@@ -155,8 +183,16 @@ class AssetRuntime:
             app._set_display("audio_last_action", app.display_value("stadium_movie"))
             app.log("Applied stadium movie")
         if not movie and not app.stadmovie:
-            copy_if_exists(app.exedir / "FSW" / "Nav" / "bootflowoutro.vp8", app.Movdata)
-            copy_if_exists(app.exedir / "FSW" / "Nav" / "bumper.big", app.MOVBUMP)
+            self._notify_loading("show", "movie", "Carregando vídeo pré-jogo", "Padrão", "Restaurando vídeo e vinheta padrão", 0)
+            try:
+                video = app.exedir / "FSW" / "Nav" / "bootflowoutro.vp8"
+                bumper = app.exedir / "FSW" / "Nav" / "bumper.big"
+                copy_if_exists(video, app.Movdata)
+                self._notify_loading("update", "movie", 55, f"Vídeo: {video.name}")
+                copy_if_exists(bumper, app.MOVBUMP)
+                self._notify_loading("update", "movie", 100, f"Vinheta: {bumper.name}")
+            finally:
+                self._notify_loading("hide", "movie", delay_ms=500)
             app._set_display("movie", "default")
             app._set_display("audio_current", app.display_value("default_navigation_audio"))
             app._set_display("audio_last_action", app.display_value("default_movie_restored"))

@@ -38,6 +38,14 @@ class _OverlayShared(ctypes.Structure):
         ("stadium_name",  ctypes.c_wchar * _MAX_STR),
         ("detail_text",   ctypes.c_wchar * _MAX_STR),
         ("image_path",    ctypes.c_wchar * _MAX_IMG),  # abs path to preview image
+        ("scoreboard_visible", ctypes.c_long),
+        ("scoreboard_progress_x100", ctypes.c_long),
+        ("scoreboard_name", ctypes.c_wchar * _MAX_STR),
+        ("scoreboard_detail", ctypes.c_wchar * _MAX_STR),
+        ("movie_visible", ctypes.c_long),
+        ("movie_progress_x100", ctypes.c_long),
+        ("movie_name", ctypes.c_wchar * _MAX_STR),
+        ("movie_detail", ctypes.c_wchar * _MAX_STR),
     ]
 
 
@@ -176,6 +184,27 @@ class D3DOverlayInjector:
             self._shared.detail_text = detail[:_MAX_STR - 1]
         self._shared.progress_x100 = int(max(0.0, min(100.0, progress)) * 100)
 
+    def show_asset(self, kind: str, name: str, detail: str = "", progress: float = 0.0) -> None:
+        if not self._ready or self._shared is None:
+            return
+        if kind not in {"scoreboard", "movie"}:
+            return
+        setattr(self._shared, f"{kind}_name", name[:_MAX_STR - 1])
+        setattr(self._shared, f"{kind}_detail", detail[:_MAX_STR - 1])
+        setattr(self._shared, f"{kind}_progress_x100", int(max(0.0, min(100.0, progress)) * 100))
+        setattr(self._shared, f"{kind}_visible", 1)
+
+    def update_asset(self, kind: str, progress: float, detail: str = "") -> None:
+        if not self._ready or self._shared is None or kind not in {"scoreboard", "movie"}:
+            return
+        if detail:
+            setattr(self._shared, f"{kind}_detail", detail[:_MAX_STR - 1])
+        setattr(self._shared, f"{kind}_progress_x100", int(max(0.0, min(100.0, progress)) * 100))
+
+    def hide_asset(self, kind: str) -> None:
+        if self._shared is not None and kind in {"scoreboard", "movie"}:
+            setattr(self._shared, f"{kind}_visible", 0)
+
     def hide(self) -> None:
         if self._shared is not None:
             self._shared.visible = 0
@@ -187,6 +216,9 @@ class D3DOverlayInjector:
 
     def destroy(self) -> None:
         self.hide()
+        if self._shared is not None:
+            self._shared.scoreboard_visible = 0
+            self._shared.movie_visible = 0
         if self._shared_ptr:
             try:
                 _k32.UnmapViewOfFile(self._shared_ptr)
@@ -232,12 +264,20 @@ class D3DOverlayInjector:
         self._shared.stadium_name  = ""
         self._shared.detail_text   = ""
         self._shared.image_path    = ""
+        self._shared.scoreboard_visible = 0
+        self._shared.scoreboard_progress_x100 = 0
+        self._shared.scoreboard_name = ""
+        self._shared.scoreboard_detail = ""
+        self._shared.movie_visible = 0
+        self._shared.movie_progress_x100 = 0
+        self._shared.movie_name = ""
+        self._shared.movie_detail = ""
         self._ready = True
         log.debug("D3DOverlay: shared memory opened at 0x%X, size=%d",
                   ptr, ctypes.sizeof(_OverlayShared))
 
     def _find_inject_exe(self) -> str | None:
-        """Locate the x86 injector helper exe (next to DLL or in runtime/)."""
+        """Locate the x64 injector helper exe (next to DLL or in runtime/)."""
         dll_p = Path(self._dll_path)
         candidates = [
             dll_p.parent / "cgfs16_inject.exe",           # e.g. bin/
@@ -249,13 +289,10 @@ class D3DOverlayInjector:
         return None
 
     def _do_inject(self, pid: int) -> bool:
-        """Inject via the x86 cgfs16_inject.exe helper.
+        """Inject via the x64 cgfs16_inject.exe helper into the x64 game.
 
-        FIFA 16 is a 32-bit process.  Our Python host is 64-bit, so any
-        GetProcAddress(LoadLibraryW) we obtain here is a 64-bit address
-        that is invalid inside the 32-bit target.  The x86 helper exe
-        solves this: being 32-bit itself, it holds the correct 32-bit
-        LoadLibraryW address for the WOW64 target.
+        This is independent of the 32-bit Python/database bridge. The helper
+        checks target architecture before writing to the game process.
         """
         import subprocess
 

@@ -48,9 +48,13 @@ set "PDB=%OUTDIR%\cgfs16_overlay.pdb"
 echo Building %OUT% ...
 cl /nologo /O2 /W3 /LD /EHsc /std:c++17 ^
     "%SRC%" ^
+    "%SRCDIR%stadium_selector_bridge.cpp" ^
+    "%SRCDIR%crowd_bridge.cpp" ^
+    "%SRCDIR%mod_xinput_gate.cpp" ^
+    "%SRCDIR%ranking_input_gate.cpp" ^
     /Fe:"%OUT%" ^
     /Fd:"%PDB%" ^
-    /link d3d9.lib user32.lib gdi32.lib
+    /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib gdi32.lib ole32.lib
 
 if %ERRORLEVEL% neq 0 (
     echo.

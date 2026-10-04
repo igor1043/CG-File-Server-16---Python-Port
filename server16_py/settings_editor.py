@@ -5,6 +5,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from .chants_runtime import MciAudioPlayer
 from .file_tools import discover_stadium_names
 
 
@@ -74,6 +75,8 @@ class SettingsSectionFrame(tk.Frame):
         "silence_prob": "0.15",
         "silence_max": "8.0",
         "away_prob": "0.35",
+        "entrance_volume": "0.16",
+        "entrance_delay": "7.0",
     }
 
     def __init__(self, parent: tk.Misc, app, spec: SectionSpec) -> None:
@@ -83,6 +86,10 @@ class SettingsSectionFrame(tk.Frame):
         self.selected_key: str | None = None
         self._refresh_job = None
         self._display_keys: list[str] = []
+        self._preview_player: MciAudioPlayer | None = None
+        self._preview_playing_path: Path | None = None
+        self._preview_poll_job = None
+        self._preview_buttons: dict[Path, ttk.Button] = {}
         self._setup_ui()
         self.bind("<Destroy>", self._on_destroy)
 
@@ -188,6 +195,8 @@ class SettingsSectionFrame(tk.Frame):
         self.body.grid_columnconfigure(0, weight=1)
 
         self._build_editor_body()
+        if self.spec.kind == "chants":
+            self._build_chants_preview_panel(right_card)
 
         actions = tk.Frame(right_card, bg=self.app.card)
         actions.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
@@ -281,6 +290,8 @@ class SettingsSectionFrame(tk.Frame):
         self.silence_prob_var = tk.StringVar(value=self.CHANTS_DEFAULTS["silence_prob"])
         self.silence_max_var = tk.StringVar(value=self.CHANTS_DEFAULTS["silence_max"])
         self.away_prob_var = tk.StringVar(value=self.CHANTS_DEFAULTS["away_prob"])
+        self.entrance_volume_var = tk.StringVar(value=self.CHANTS_DEFAULTS["entrance_volume"])
+        self.entrance_delay_var = tk.StringVar(value=self.CHANTS_DEFAULTS["entrance_delay"])
         folder_choices = self._available_choices()
         self._add_combo_row(self.body, 0, "Chants Folder", self.chants_folder_var, folder_choices or [""])
         self._add_entry_row(self.body, 1, "Vol. Empate", self.default_var)
@@ -292,6 +303,137 @@ class SettingsSectionFrame(tk.Frame):
         self._add_entry_row(self.body, 7, "Prob. Silencio (0-1)", self.silence_prob_var)
         self._add_entry_row(self.body, 8, "Max. Silencio (seg)", self.silence_max_var)
         self._add_entry_row(self.body, 9, "Prob. Away Crowd (0-1)", self.away_prob_var)
+        self._add_entry_row(self.body, 10, "Vol. Entrada", self.entrance_volume_var)
+        self._add_entry_row(self.body, 11, "Atraso da entrada (seg)", self.entrance_delay_var)
+
+    def _build_chants_preview_panel(self, parent: tk.Misc) -> None:
+        preview = tk.LabelFrame(
+            parent,
+            text="Preview dos cânticos",
+            bg=self.app.card,
+            fg=self.app.gold,
+            font=("Bahnschrift", 9, "bold"),
+            bd=1,
+            relief="groove",
+        )
+        preview.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 8))
+        preview.grid_rowconfigure(0, weight=1)
+        preview.grid_columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(preview, bg=self.app.panel, highlightthickness=0, height=120)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(preview, orient="vertical", command=canvas.yview, style="Server16.Vertical.TScrollbar")
+        scroll.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=scroll.set)
+        rows = tk.Frame(canvas, bg=self.app.panel)
+        window_id = canvas.create_window((0, 0), window=rows, anchor="nw")
+        rows.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window_id, width=event.width))
+        self._preview_rows_frame = rows
+        self._preview_canvas = canvas
+        self.chants_folder_var.trace_add("write", lambda *_: self._refresh_chants_preview())
+        self._refresh_chants_preview()
+
+    def _refresh_chants_preview(self) -> None:
+        rows = getattr(self, "_preview_rows_frame", None)
+        if rows is None:
+            return
+        self._stop_preview()
+        for child in rows.winfo_children():
+            child.destroy()
+        self._preview_buttons = {}
+
+        folder = self.chants_folder_var.get().strip()
+        base = self.app.exedir / "FSW" / "Chants" / folder if folder else None
+        files: list[Path] = []
+        if base is not None and base.is_dir():
+            files = sorted(path for path in base.rglob("*.mp3") if not path.name.endswith(".original.mp3"))
+        if not files or base is None:
+            tk.Label(
+                rows,
+                text="Nenhum MP3 encontrado nessa pasta.",
+                bg=self.app.panel,
+                fg=self.app.muted,
+                font=("Bahnschrift", 9),
+            ).pack(anchor="w", padx=8, pady=6)
+            return
+        for path in files:
+            line = tk.Frame(rows, bg=self.app.panel)
+            line.pack(fill="x", padx=6, pady=2)
+            try:
+                display_name = path.relative_to(base).as_posix()
+            except ValueError:
+                display_name = path.name
+            tk.Label(
+                line,
+                text=display_name,
+                bg=self.app.panel,
+                fg=self.app.fg,
+                font=("Consolas", 9),
+                anchor="w",
+            ).pack(side="left", fill="x", expand=True)
+            button = ttk.Button(line, text="▶", width=3, command=lambda item=path: self._toggle_chants_preview(item))
+            button.pack(side="right")
+            self._preview_buttons[path] = button
+
+    def _toggle_chants_preview(self, path: Path) -> None:
+        if self._preview_playing_path == path:
+            self._stop_preview()
+            return
+        self._stop_preview()
+        try:
+            player = MciAudioPlayer()
+            player.open(path)
+            player.play()
+        except Exception as exc:
+            self.app.log(f"Chants preview playback failed for {path}", exc)
+            return
+        self._preview_player = player
+        self._preview_playing_path = path
+        button = self._preview_buttons.get(path)
+        if button is not None:
+            button.configure(text="■")
+        self._schedule_preview_poll()
+
+    def _schedule_preview_poll(self) -> None:
+        if self._preview_player is not None:
+            self._preview_poll_job = self.after(400, self._poll_preview_state)
+
+    def _poll_preview_state(self) -> None:
+        self._preview_poll_job = None
+        if self._preview_player is None:
+            return
+        try:
+            still_playing = self._preview_player.is_playing()
+        except Exception:
+            still_playing = False
+        if still_playing:
+            self._schedule_preview_poll()
+        else:
+            self._stop_preview()
+
+    def _stop_preview(self) -> None:
+        if self._preview_poll_job is not None:
+            try:
+                self.after_cancel(self._preview_poll_job)
+            except Exception:
+                pass
+            self._preview_poll_job = None
+        path = self._preview_playing_path
+        if path is not None:
+            button = self._preview_buttons.get(path)
+            if button is not None:
+                try:
+                    button.configure(text="▶")
+                except Exception:
+                    pass
+        if self._preview_player is not None:
+            try:
+                self._preview_player.close()
+            except Exception:
+                pass
+        self._preview_player = None
+        self._preview_playing_path = None
 
     def _add_entry_row(self, parent: tk.Misc, row: int, label: str, variable: tk.StringVar, readonly: bool = False):
         tk.Label(parent, text=label, bg=self.app.card, fg=self.app.muted, font=("Bahnschrift", 10)).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 10))
@@ -325,6 +467,7 @@ class SettingsSectionFrame(tk.Frame):
         return combo
 
     def _on_destroy(self, _event=None) -> None:
+        self._stop_preview()
         if self._refresh_job is not None:
             try:
                 self.after_cancel(self._refresh_job)
@@ -432,6 +575,8 @@ class SettingsSectionFrame(tk.Frame):
             self.silence_prob_var.set(self.CHANTS_DEFAULTS["silence_prob"])
             self.silence_max_var.set(self.CHANTS_DEFAULTS["silence_max"])
             self.away_prob_var.set(self.CHANTS_DEFAULTS["away_prob"])
+            self.entrance_volume_var.set(self.CHANTS_DEFAULTS["entrance_volume"])
+            self.entrance_delay_var.set(self.CHANTS_DEFAULTS["entrance_delay"])
         elif self.spec.kind == "exclude":
             self.exclude_var.set("excluded from stadium server")
         self.status_var.set(self.tr("dialog.editor.new_ready"))
@@ -494,7 +639,8 @@ class SettingsSectionFrame(tk.Frame):
         parts = [part.strip() for part in value.split(",")]
         # Backward compatibility:
         # old format (7): folder,default,winning,lose1,lose2,lose3,goal
-        # new format (10): folder,default,winning,lose1,lose2,lose3,goal,silence_prob,silence_max,away_prob
+        # current format (12): folder,default,winning,lose1,lose2,lose3,goal,
+        # silence_prob,silence_max,away_prob,entrance_volume,entrance_delay
         if len(parts) >= 7:
             folder = parts[0]
             default = parts[1] if len(parts) > 1 else ""
@@ -506,11 +652,16 @@ class SettingsSectionFrame(tk.Frame):
             silence_prob = parts[7] if len(parts) > 7 else ""
             silence_max = parts[8] if len(parts) > 8 else ""
             away_prob = parts[9] if len(parts) > 9 else ""
+            entrance_volume = parts[10] if len(parts) > 10 else ""
+            entrance_delay = parts[11] if len(parts) > 11 else ""
         else:
             # Very old/invalid payload: keep best effort with defaults.
-            while len(parts) < 10:
+            while len(parts) < 12:
                 parts.append("")
-            folder, default, winning, lose1, lose2, lose3, goal, silence_prob, silence_max, away_prob = parts[:10]
+            (
+                folder, default, winning, lose1, lose2, lose3, goal,
+                silence_prob, silence_max, away_prob, entrance_volume, entrance_delay,
+            ) = parts[:12]
         self.chants_folder_var.set(folder or self.CHANTS_DEFAULTS["folder"])
         self.default_var.set(default or self.CHANTS_DEFAULTS["default"])
         self.winning_var.set(winning or self.CHANTS_DEFAULTS["winning"])
@@ -521,6 +672,8 @@ class SettingsSectionFrame(tk.Frame):
         self.silence_prob_var.set(silence_prob or self.CHANTS_DEFAULTS["silence_prob"])
         self.silence_max_var.set(silence_max or self.CHANTS_DEFAULTS["silence_max"])
         self.away_prob_var.set(away_prob or self.CHANTS_DEFAULTS["away_prob"])
+        self.entrance_volume_var.set(entrance_volume or self.CHANTS_DEFAULTS["entrance_volume"])
+        self.entrance_delay_var.set(entrance_delay or self.CHANTS_DEFAULTS["entrance_delay"])
 
     def _compose_value(self) -> str:
         if self.spec.kind == "simple":
@@ -554,6 +707,8 @@ class SettingsSectionFrame(tk.Frame):
                     self.silence_prob_var.get().strip(),
                     self.silence_max_var.get().strip(),
                     self.away_prob_var.get().strip(),
+                    self.entrance_volume_var.get().strip(),
+                    self.entrance_delay_var.get().strip(),
                 ]
             )
         if self.spec.kind == "exclude":

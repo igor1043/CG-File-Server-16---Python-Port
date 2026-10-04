@@ -31,6 +31,13 @@ desktop.ini
 *.pyz
 *.manifest
 
+# Local test/export artifacts
+artifacts/
+runtime/career_panorama_stadium/
+runtime/career_service/
+runtime/stadium_selector/
+scripts/__pycache__/
+
 # PyInstaller temp data
 localpycs/
 

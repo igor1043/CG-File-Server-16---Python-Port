@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tkinter as tk
 import unicodedata
+import webbrowser
 from pathlib import Path
 from tkinter import ttk
 
@@ -115,6 +116,81 @@ class BaseDialog(tk.Toplevel):
             fg=self.muted if muted else self.fg,
             **kwargs,
         )
+
+
+class StadiumChoiceDialog(BaseDialog):
+    """Small pre-match chooser used when a team has multiple stadiums assigned."""
+
+    def __init__(self, master: tk.Misc, candidates: list[str], on_done) -> None:
+        super().__init__(master, self.tr("dialog.stadium_choice.title"))
+        self.geometry("620x480")
+        self.minsize(520, 380)
+        self._on_done = on_done
+        self._finished = False
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+        self._dark_label(
+            self,
+            self.tr("dialog.stadium_choice.heading"),
+            bg=self.bg,
+            font=("Bahnschrift", 16, "bold"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="ew", padx=16, pady=(16, 4))
+        self._dark_label(
+            self,
+            self.tr("dialog.stadium_choice.hint"),
+            bg=self.bg,
+            muted=True,
+            wraplength=560,
+            justify="left",
+            anchor="w",
+        ).grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
+
+        body = self._card(self, self.tr("dialog.stadium_choice.available"))
+        body.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 14))
+        body.pack_propagate(False)
+        list_wrap = tk.Frame(body, bg=self.card)
+        list_wrap.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        list_wrap.grid_columnconfigure(0, weight=1)
+        list_wrap.grid_rowconfigure(0, weight=1)
+        self.listbox = self._dark_listbox(list_wrap, exportselection=False, font=("Consolas", 11))
+        scrollbar = ttk.Scrollbar(list_wrap, orient="vertical", command=self.listbox.yview, style="Server16.Vertical.TScrollbar")
+        self.listbox.configure(yscrollcommand=scrollbar.set)
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        for candidate in candidates:
+            self.listbox.insert("end", candidate)
+        self.listbox.selection_set(0)
+        self.listbox.activate(0)
+        self.listbox.bind("<Double-Button-1>", lambda _event: self._confirm())
+        self.bind("<Return>", lambda _event: self._confirm())
+        self.bind("<Escape>", lambda _event: self._cancel())
+
+        actions = tk.Frame(self, bg=self.bg)
+        actions.grid(row=3, column=0, sticky="ew", padx=16, pady=(0, 16))
+        actions.grid_columnconfigure(0, weight=1)
+        actions.grid_columnconfigure(1, weight=1)
+        ttk.Button(actions, text=self.tr("button.select_stadium"), command=self._confirm).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(actions, text=self.tr("button.cancel"), command=self._cancel).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.lift()
+        self.attributes("-topmost", True)
+
+    def _finish(self, value: str | None) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self.result = value
+        self.destroy()
+        self._on_done(value)
+
+    def _confirm(self) -> None:
+        selection = self.listbox.curselection()
+        self._finish(self.listbox.get(selection[0]) if selection else None)
+
+    def _cancel(self) -> None:
+        self._finish(None)
 
 
 class ScoreboardDialog(BaseDialog):
@@ -661,3 +737,130 @@ class ExcludeDialog(BaseDialog):
         super().__init__(master, self.tr("dialog.assignment.title.exclude"))
         ttk.Button(self, text=self.tr("button.comp_id"), command=lambda: self.close_ok("COMP ID")).pack(fill="x", padx=12, pady=8)
         ttk.Button(self, text=self.tr("button.comp_round_id"), command=lambda: self.close_ok("COMP ROUND ID")).pack(fill="x", padx=12, pady=(0, 12))
+
+
+class ImgbbApiKeyDialog(BaseDialog):
+    """Edit the ImgBB key used for optional Discord stadium previews."""
+
+    _API_URL = "https://api.imgbb.com/"
+
+    def __init__(self, master: tk.Misc, current_key: str = "") -> None:
+        super().__init__(master, self.tr("dialog.imgbb_key.title"))
+        self.resizable(False, False)
+        self.key_var = tk.StringVar(value=current_key)
+
+        body = tk.Frame(self, bg=self.bg, padx=20, pady=16)
+        body.pack(fill="both", expand=True)
+        tk.Label(
+            body,
+            text=self.tr("dialog.imgbb_key.prompt"),
+            bg=self.bg,
+            fg=self.fg,
+            justify="left",
+            wraplength=420,
+            font=("Bahnschrift", 10),
+        ).pack(anchor="w")
+        entry = tk.Entry(
+            body,
+            textvariable=self.key_var,
+            width=48,
+            bg=self.panel,
+            fg=self.fg,
+            insertbackground=self.fg,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#243654",
+            highlightcolor=self.accent,
+        )
+        entry.pack(fill="x", pady=(10, 10), ipady=4)
+        ttk.Button(
+            body,
+            text=self.tr("dialog.imgbb_key.get_key"),
+            command=lambda: webbrowser.open(self._API_URL),
+        ).pack(anchor="w")
+
+        buttons = tk.Frame(body, bg=self.bg)
+        buttons.pack(fill="x", pady=(16, 0))
+        ttk.Button(
+            buttons,
+            text=self.tr("button.cancel"),
+            command=lambda: self.close_ok(None),
+        ).pack(side="right")
+        ttk.Button(
+            buttons,
+            text=self.tr("dialog.imgbb_key.save"),
+            command=lambda: self.close_ok(self.key_var.get().strip()),
+        ).pack(side="right", padx=(0, 8))
+        entry.bind("<Return>", lambda _event: self.close_ok(self.key_var.get().strip()))
+        entry.bind("<Escape>", lambda _event: self.close_ok(None))
+        entry.focus_set()
+        self.update_idletasks()
+        self.geometry(f"{self.winfo_reqwidth()}x{self.winfo_reqheight()}")
+
+
+class FifaLocationWarningDialog(BaseDialog):
+    """Warn when the app and the linked FIFA executable are not co-located."""
+
+    def __init__(self, master: tk.Misc, fifa_dir: Path, app_dir: Path) -> None:
+        super().__init__(master, self.tr("dialog.fifa_location.title"))
+        self.geometry("520x300")
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", lambda: self.close_ok(False))
+
+        body = tk.Frame(self, bg=self.bg, padx=18, pady=16)
+        body.pack(fill="both", expand=True)
+        tk.Label(
+            body,
+            text=self.tr("dialog.fifa_location.heading"),
+            bg=self.bg,
+            fg=self.gold,
+            font=("Bahnschrift", 12, "bold"),
+            wraplength=460,
+            justify="left",
+            anchor="w",
+        ).pack(fill="x")
+        self._dark_label(
+            body,
+            self.tr("dialog.fifa_location.body"),
+            bg=self.bg,
+            font=("Bahnschrift", 10),
+            wraplength=460,
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", pady=(10, 10))
+
+        paths = tk.Frame(body, bg=self.card, highlightthickness=1, highlightbackground="#243654")
+        paths.pack(fill="x", pady=(0, 14))
+        self._dark_label(
+            paths,
+            self.tr("dialog.fifa_location.app_path", path=str(app_dir)),
+            bg=self.card,
+            muted=True,
+            font=("Consolas", 9),
+            wraplength=430,
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", padx=10, pady=(8, 2))
+        self._dark_label(
+            paths,
+            self.tr("dialog.fifa_location.fifa_path", path=str(fifa_dir)),
+            bg=self.card,
+            muted=True,
+            font=("Consolas", 9),
+            wraplength=430,
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", padx=10, pady=(0, 8))
+
+        actions = tk.Frame(body, bg=self.bg)
+        actions.pack(fill="x", side="bottom")
+        ttk.Button(
+            actions,
+            text=self.tr("dialog.fifa_location.close"),
+            command=lambda: self.close_ok(False),
+        ).pack(side="left", fill="x", expand=True, padx=(0, 6))
+        ttk.Button(
+            actions,
+            text=self.tr("dialog.fifa_location.continue"),
+            command=lambda: self.close_ok(True),
+        ).pack(side="right", fill="x", expand=True, padx=(6, 0))

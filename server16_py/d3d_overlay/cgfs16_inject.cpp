@@ -1,7 +1,7 @@
 /**
- * cgfs16_inject.cpp  -  x86 DLL injector helper for CGFS16
+ * cgfs16_inject.cpp  -  same-architecture DLL injector helper for CGFS16
  *
- * Compiled as x86 so it can inject into 32-bit FIFA 16.
+ * Compiled as x64 for the FIFA 16 game process (not the database bridge).
  * Usage: cgfs16_inject.exe <pid> <absolute_dll_path>
  * Exit codes: 0=ok, 2=OpenProcess, 3=VirtualAllocEx, 4=WriteProcessMemory,
  *             5=CreateRemoteThread, 6=Timeout, 7=LoadLibraryW NULL, 10=64-bit target
@@ -54,9 +54,8 @@ int wmain(int argc, wchar_t* argv[])
     fprintf(stdout, "DEBUG: we_are_wow64=%d target_is_wow64=%d\n",
             (int)weAre64, (int)targetIs32);
 
-    if (weAre64 && !targetIs32) {
-        fprintf(stderr, "ERROR: target pid=%lu is a native 64-bit process; "
-                "cannot inject x86 DLL\n", pid);
+    if (weAre64 != targetIs32) {
+        fprintf(stderr, "ERROR: architecture mismatch for target pid=%lu\n", pid);
         CloseHandle(hProc);
         return 10;
     }
@@ -107,10 +106,11 @@ int wmain(int argc, wchar_t* argv[])
     GetExitCodeThread(hThread, &exitCode);
     CloseHandle(hThread);
 
-    VirtualFreeEx(hProc, remPath, 0, MEM_RELEASE);
+    // Do not free a path that a still-running remote loader may be reading.
+    if (waitResult == WAIT_OBJECT_0) VirtualFreeEx(hProc, remPath, 0, MEM_RELEASE);
     CloseHandle(hProc);
 
-    if (waitResult == WAIT_TIMEOUT) {
+    if (waitResult != WAIT_OBJECT_0) {
         fprintf(stderr, "Timeout waiting for LoadLibraryW\n");
         return 6;
     }

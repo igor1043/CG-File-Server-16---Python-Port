@@ -2,10 +2,9 @@
  * cgfs16_overlay.cpp  -  DXGI/D3D11 SwapChain::Present hook for FIFA 16
  *
  * FIFA 16 (FIFA Infinity mod) uses D3D11 + a dxgi.dll proxy.
- * We create a tiny D3D11 device+SwapChain to get the Present function address,
- * then install an inline (detour) hook on it.
- * The hook fires for every frame FIFA renders, regardless of which dxgi.dll proxy
- * is in use, because the proxy must call through to the real Present body.
+ * We create a tiny D3D11 device+SwapChain to obtain the shared Present vtable.
+ * No machine instructions are overwritten. A proxy with a private vtable may
+ * not be intercepted; in that case selector shortcuts remain disabled.
  *
  * Overlay: D3D11 colored quads (VS/PS compiled at runtime).
  *   Text: GDI offscreen DIBSection -> D3D11 BGRA texture (no GetDC crash).
@@ -27,6 +26,9 @@
 #include <stdint.h>
 #include <algorithm>
 #include <vector>
+#include <cmath>
+#include "stadium_selector_bridge.h"
+#include "selector_layout.h"
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -48,6 +50,14 @@ struct OverlayShared {
     wchar_t stadium_name[MAX_STR];
     wchar_t detail_text[MAX_STR];
     wchar_t image_path[MAX_IMG];  // path to stadium preview image (PNG/JPG/BMP)
+    volatile LONG scoreboard_visible;
+    volatile LONG scoreboard_progress_x100;
+    wchar_t scoreboard_name[MAX_STR];
+    wchar_t scoreboard_detail[MAX_STR];
+    volatile LONG movie_visible;
+    volatile LONG movie_progress_x100;
+    wchar_t movie_name[MAX_STR];
+    wchar_t movie_detail[MAX_STR];
 };
 
 static HANDLE        g_hMap  = NULL;
@@ -58,12 +68,15 @@ static OverlayShared *g_data = NULL;
 // ---------------------------------------------------------------------------
 static char g_logPath[MAX_PATH] = {};
 static CRITICAL_SECTION g_logCs;
+#ifndef CGFS16_OVERLAY_LOG_FILE
+#define CGFS16_OVERLAY_LOG_FILE "cgfs16_overlay.log"
+#endif
 
 static void InitLog() {
     InitializeCriticalSection(&g_logCs);
     char tmp[MAX_PATH] = {};
     GetTempPathA(MAX_PATH, tmp);
-    snprintf(g_logPath, MAX_PATH, "%scgfs16_overlay.log", tmp);
+    snprintf(g_logPath, MAX_PATH, "%s%s", tmp,CGFS16_OVERLAY_LOG_FILE);
     FILE *f = nullptr; fopen_s(&f, g_logPath, "w");
     if (f) { fprintf(f, "[DLL] log: %s\n", g_logPath); fclose(f); }
 }
@@ -78,6 +91,7 @@ static void Log(const char *fmt, ...) {
     }
     LeaveCriticalSection(&g_logCs);
 }
+static void SelectorLog(const char *message) { Log("[Selector] %s",message); }
 
 // ---------------------------------------------------------------------------
 // Hook state
@@ -91,10 +105,7 @@ static void Log(const char *fmt, ...) {
 // ---------------------------------------------------------------------------
 typedef HRESULT (WINAPI *PFN_Present)(IDXGISwapChain*, UINT, UINT);
 
-static uint8_t    *g_presentFnAddr       = nullptr;  // proxy Present body
-static uint8_t     g_origPresentBytes[14]= {};        // saved original bytes
-static uint8_t    *g_presentTrampoline   = nullptr;  // phase-1 trampoline (freed after switch)
-static PFN_Present g_OrigPresent         = nullptr;  // = g_presentFnAddr after restore
+static PFN_Present g_OrigPresent         = nullptr;
 
 static void      **g_fifaVtbl            = nullptr;  // FIFA's swapchain vtable
 static bool        g_hookSwitched        = false;    // phase 1 -> phase 2 done
@@ -119,12 +130,12 @@ float4 PSMain(VS_OUT v) : SV_TARGET { return v.col; }
 // --- Textured quads ---
 Texture2D g_tex : register(t0);
 SamplerState g_samp : register(s0);
-struct VS_IN_T  { float2 pos : POSITION; float2 uv : TEXCOORD; };
-struct VS_OUT_T { float4 pos : SV_POSITION; float2 uv : TEXCOORD; };
+struct VS_IN_T  { float2 pos : POSITION; float2 uv : TEXCOORD; float opacity : COLOR; };
+struct VS_OUT_T { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float opacity : COLOR; };
 VS_OUT_T VSTexMain(VS_IN_T v) {
-    VS_OUT_T o; o.pos = float4(v.pos, 0, 1); o.uv = v.uv; return o;
+    VS_OUT_T o; o.pos = float4(v.pos, 0, 1); o.uv = v.uv; o.opacity=v.opacity; return o;
 }
-float4 PSTexMain(VS_OUT_T v) : SV_TARGET { return g_tex.Sample(g_samp, v.uv); }
+float4 PSTexMain(VS_OUT_T v) : SV_TARGET { float4 color=g_tex.Sample(g_samp,v.uv); color.a*=v.opacity; return color; }
 )";
 
 // Colored quad resources
@@ -145,9 +156,10 @@ static ID3D11SamplerState    *g_samp = nullptr;
 
 // Colored quad vertex
 struct Vtx11 { float x, y; float r, g, b, a; };
+static constexpr size_t kColoredVertexCapacity = 1024;
 
 // Textured quad vertex
-struct VtxT { float x, y, u, v; };
+struct VtxT { float x, y, u, v, opacity; };
 
 // ---------------------------------------------------------------------------
 // Text textures (GDI -> D3D11)
@@ -163,6 +175,10 @@ struct TextTex {
 static TextTex g_ttTitle;    // "Loading Stadium" label
 static TextTex g_ttName;     // stadium name
 static TextTex g_ttDetail;   // detail / progress message
+static TextTex g_ttScoreboardName;
+static TextTex g_ttScoreboardDetail;
+static TextTex g_ttMovieName;
+static TextTex g_ttMovieDetail;
 
 // ---------------------------------------------------------------------------
 // Stadium preview image (WIC -> D3D11)
@@ -172,6 +188,17 @@ static ID3D11ShaderResourceView *g_previewSRV          = nullptr;
 static wchar_t                   g_previewLoadedPath[MAX_IMG] = {};
 static int                       g_previewNatW          = 0;
 static int                       g_previewNatH          = 0;
+static ID3D11ShaderResourceView *g_previousPhoto=nullptr;
+static DWORD g_photoFadeStarted;
+static int g_previousWidth,g_previousHeight;
+static bool g_selectorTexture=false;
+static LONG g_loadedSelectorRevision=0;
+static DWORD g_imageRetryAt=0;
+
+static float photo_fade(DWORD elapsed) {
+    float t=(std::min)(1.f,(float)elapsed/220.f);
+    return t*t*(3.f-2.f*t);
+}
 
 static bool InitD3D11Overlay(ID3D11Device *dev) {
     ID3DBlob *vsBlob = nullptr, *psBlob = nullptr, *err = nullptr;
@@ -204,7 +231,7 @@ static bool InitD3D11Overlay(ID3D11Device *dev) {
     vsBlob->Release(); psBlob->Release();
 
     D3D11_BUFFER_DESC bd = {};
-    bd.ByteWidth      = sizeof(Vtx11) * 512;
+    bd.ByteWidth      = sizeof(Vtx11) * kColoredVertexCapacity;
     bd.Usage          = D3D11_USAGE_DYNAMIC;
     bd.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
     bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -250,8 +277,9 @@ static bool InitD3D11Overlay(ID3D11Device *dev) {
             D3D11_INPUT_ELEMENT_DESC iedT[] = {
                 {"POSITION",0,DXGI_FORMAT_R32G32_FLOAT, 0, 0,D3D11_INPUT_PER_VERTEX_DATA,0},
                 {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT, 0, 8,D3D11_INPUT_PER_VERTEX_DATA,0},
+                {"COLOR",0,DXGI_FORMAT_R32_FLOAT,0,16,D3D11_INPUT_PER_VERTEX_DATA,0},
             };
-            dev->CreateInputLayout(iedT, 2,
+            dev->CreateInputLayout(iedT, 3,
                 vsTBlob->GetBufferPointer(), vsTBlob->GetBufferSize(), &g_ilT);
 
             D3D11_BUFFER_DESC bdT = {};
@@ -285,14 +313,17 @@ static bool InitD3D11Overlay(ID3D11Device *dev) {
 static float PX(float x, float w) { return  x/w*2.f-1.f; }
 static float PY(float y, float h) { return -y/h*2.f+1.f; }
 
-static void PushQuad(Vtx11 *buf, int &n,
+template<size_t Capacity>
+static bool PushQuad(Vtx11 (&buf)[Capacity], int &n,
     float x,float y,float w,float h,float vpW,float vpH,DWORD col)
 {
+    if (n < 0 || static_cast<size_t>(n) + 4 > Capacity) return false;
     float r=((col>>16)&0xFF)/255.f, g2=((col>>8)&0xFF)/255.f,
           b=((col)&0xFF)/255.f,     a=((col>>24)&0xFF)/255.f;
     float x0=PX(x,vpW),y0=PY(y,vpH),x1=PX(x+w,vpW),y1=PY(y+h,vpH);
     buf[n++]={x0,y0,r,g2,b,a}; buf[n++]={x1,y0,r,g2,b,a};
     buf[n++]={x0,y1,r,g2,b,a}; buf[n++]={x1,y1,r,g2,b,a};
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,17 +380,19 @@ static void UpdateTextTex(ID3D11Device *dev, TextTex &tt,
     memset(bits, 0, (size_t)bmpW * bmpH * 4);
     SelectObject(hdc, hf);
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, fgColor);
+    SetTextColor(hdc, RGB(255,255,255));
     RECT rc = {0, 0, bmpW, bmpH};
     DrawTextW(hdc, text, -1, &rc,
               DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     GdiFlush();
 
-    // GDI leaves alpha=0 in BGRA DIBs. Derive alpha from max(R,G,B).
+    // White-on-black yields coverage independent of the requested ink color.
+    // Otherwise dark text on a white panel incorrectly becomes translucent.
     BYTE *px = (BYTE*)bits;
     for (int i = 0; i < bmpW * bmpH; i++) {
         BYTE b = px[0], g = px[1], r = px[2];
         px[3] = (std::max)({b, g, r});
+        px[0]=GetBValue(fgColor); px[1]=GetGValue(fgColor); px[2]=GetRValue(fgColor);
         px += 4;
     }
 
@@ -397,10 +430,6 @@ static void UpdateTextTex(ID3D11Device *dev, TextTex &tt,
 // ---------------------------------------------------------------------------
 static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
 {
-    if (g_previewTex) { g_previewTex->Release(); g_previewTex = nullptr; }
-    if (g_previewSRV) { g_previewSRV->Release(); g_previewSRV = nullptr; }
-    g_previewNatW = g_previewNatH = 0;
-
     IWICImagingFactory *wicF = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
         CLSCTX_INPROC_SERVER, __uuidof(IWICImagingFactory), (void**)&wicF);
@@ -420,7 +449,8 @@ static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
     if (!frame) { wicF->Release(); return false; }
 
     IWICFormatConverter *conv = nullptr;
-    wicF->CreateFormatConverter(&conv);
+    hr=wicF->CreateFormatConverter(&conv);
+    if (FAILED(hr) || !conv) { frame->Release(); wicF->Release(); return false; }
     hr = conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA,
         WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
     frame->Release();
@@ -428,12 +458,13 @@ static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
 
     UINT w = 0, h = 0;
     conv->GetSize(&w, &h);
-    if (!w || !h) { conv->Release(); wicF->Release(); return false; }
+    if (!w || !h || w>8192 || h>8192) { conv->Release(); wicF->Release(); return false; }
 
     std::vector<BYTE> pixels((size_t)w * h * 4);
-    conv->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data());
+    hr=conv->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data());
     conv->Release();
     wicF->Release();
+    if (FAILED(hr)) return false;
 
     D3D11_TEXTURE2D_DESC td = {};
     td.Width            = w;
@@ -449,9 +480,15 @@ static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
     srd.pSysMem     = pixels.data();
     srd.SysMemPitch = w * 4;
 
-    hr = dev->CreateTexture2D(&td, &srd, &g_previewTex);
+    ID3D11Texture2D *replacement=nullptr;
+    ID3D11ShaderResourceView *replacementView=nullptr;
+    hr = dev->CreateTexture2D(&td, &srd, &replacement);
     if (FAILED(hr)) { Log("[WIC] CreateTexture2D hr=0x%08X", (unsigned)hr); return false; }
-    dev->CreateShaderResourceView(g_previewTex, nullptr, &g_previewSRV);
+    hr=dev->CreateShaderResourceView(replacement,nullptr,&replacementView);
+    if (FAILED(hr)) { replacement->Release(); return false; }
+    if (g_previewTex) g_previewTex->Release();
+    if (g_previewSRV) g_previewSRV->Release();
+    g_previewTex=replacement; g_previewSRV=replacementView;
     g_previewNatW = (int)w;
     g_previewNatH = (int)h;
     Log("[WIC] loaded '%ls' %dx%d", path, w, h);
@@ -461,11 +498,11 @@ static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
 // Draw a textured quad; requires g_vsT/g_psT/g_ilT/g_vbT/g_samp already bound.
 static void DrawTexQuad(ID3D11DeviceContext *ctx,
     float x, float y, float w, float h, float vpW, float vpH,
-    ID3D11ShaderResourceView *srv)
+    ID3D11ShaderResourceView *srv,float opacity=1.f,float u0=0.f,float v0=0.f,float u1=1.f,float v1=1.f)
 {
     if (!srv || !g_vbT) return;
     float x0=PX(x,vpW),y0=PY(y,vpH),x1=PX(x+w,vpW),y1=PY(y+h,vpH);
-    VtxT verts[4] = {{x0,y0,0,0},{x1,y0,1,0},{x0,y1,0,1},{x1,y1,1,1}};
+    VtxT verts[4] = {{x0,y0,u0,v0,opacity},{x1,y0,u1,v0,opacity},{x0,y1,u0,v1,opacity},{x1,y1,u1,v1,opacity}};
     D3D11_MAPPED_SUBRESOURCE ms={};
     if (SUCCEEDED(ctx->Map(g_vbT,0,D3D11_MAP_WRITE_DISCARD,0,&ms))) {
         memcpy(ms.pData,verts,sizeof(verts)); ctx->Unmap(g_vbT,0);
@@ -480,11 +517,39 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     // ── Read shared memory ─────────────────────────────────────────────────
     wchar_t stadium[MAX_STR]={}, detail[MAX_STR]={}, imgPath[MAX_IMG]={};
     float pct=0.f;
+    bool stadiumVisible=false, scoreboardVisible=false, movieVisible=false;
+    float scoreboardPct=0.f, moviePct=0.f;
+    wchar_t scoreboardName[MAX_STR]={}, scoreboardDetail[MAX_STR]={};
+    wchar_t movieName[MAX_STR]={}, movieDetail[MAX_STR]={};
     if (g_data) {
+        stadiumVisible=InterlockedCompareExchange(&g_data->visible,0,0)!=0;
         wcsncpy_s(stadium, g_data->stadium_name, MAX_STR-1);
         wcsncpy_s(detail,  g_data->detail_text,  MAX_STR-1);
         wcsncpy_s(imgPath, g_data->image_path,   MAX_IMG-1);
         pct = (float)InterlockedCompareExchange(&g_data->progress_x100,0,0)/100.f;
+        scoreboardVisible=InterlockedCompareExchange(&g_data->scoreboard_visible,0,0)!=0;
+        scoreboardPct=(float)InterlockedCompareExchange(&g_data->scoreboard_progress_x100,0,0)/100.f;
+        wcsncpy_s(scoreboardName,g_data->scoreboard_name,MAX_STR-1);
+        wcsncpy_s(scoreboardDetail,g_data->scoreboard_detail,MAX_STR-1);
+        movieVisible=InterlockedCompareExchange(&g_data->movie_visible,0,0)!=0;
+        moviePct=(float)InterlockedCompareExchange(&g_data->movie_progress_x100,0,0)/100.f;
+        wcsncpy_s(movieName,g_data->movie_name,MAX_STR-1);
+        wcsncpy_s(movieDetail,g_data->movie_detail,MAX_STR-1);
+    }
+    bool selecting=selector_visible() && g_selector;
+    LONG revision=selecting ? InterlockedCompareExchange(&g_selector->render_ready,0,0) : 0;
+    LONG requestedWidth=0,requestedHeight=0;
+    bool published=false;
+    if (selecting && revision>0) {
+        requestedWidth=g_selector->width; requestedHeight=g_selector->height;
+        wcsncpy_s(imgPath,g_selector->image_path,MAX_IMG-1);
+        MemoryBarrier();
+        published=revision==InterlockedCompareExchange(&g_selector->render_ready,0,0) && requestedWidth>0 && requestedHeight>0;
+    }
+    if (selecting && !published) {
+        revision=g_loadedSelectorRevision;
+        requestedWidth=g_selector_draw_width; requestedHeight=g_selector_draw_height;
+        wcscpy_s(imgPath,g_selectorTexture ? g_previewLoadedPath : L"");
     }
 
     DXGI_SWAP_CHAIN_DESC scd={}; sc->GetDesc(&scd);
@@ -493,6 +558,8 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
 
     ID3D11Texture2D *bb=nullptr;
     if (FAILED(sc->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&bb))) return;
+    D3D11_TEXTURE2D_DESC backDesc={}; bb->GetDesc(&backDesc);
+    vpW=(float)backDesc.Width; vpH=(float)backDesc.Height;
     ID3D11RenderTargetView *rtv=nullptr;
     dev->CreateRenderTargetView(bb,nullptr,&rtv);
     bb->Release();
@@ -517,22 +584,59 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     // Panel constants: PW=460, M=20.  Text column starts at px+136 (after image area).
     // maxPixW for text = PW - 136 - 12 = 312 px
     const int kTextMaxW = 312;
-    UpdateTextTex(dev, g_ttTitle,  L"Loading Stadium", 17, false, RGB(0x33,0x99,0xFF), kTextMaxW);
-    UpdateTextTex(dev, g_ttName,   stadium,             16, true,  RGB(0xFF,0xFF,0xFF), kTextMaxW);
-    UpdateTextTex(dev, g_ttDetail, detail,              13, false, RGB(0x99,0xBB,0xDD), kTextMaxW);
+    const wchar_t* loadingTitle = L"Carregando est\u00E1dio";
+    const wchar_t* loadingName = stadium;
+    if (!selecting && wcsncmp(stadium, L"[Carregando placar] ", 20) == 0) {
+        loadingTitle = L"Carregando placar";
+        loadingName = stadium + 20;
+    } else if (!selecting && wcsncmp(stadium, L"[Carregando v\u00EDdeo pr\u00E9-jogo] ", 28) == 0) {
+        loadingTitle = L"Carregando v\u00EDdeo pr\u00E9-jogo";
+        loadingName = stadium + 28;
+    }
+    UpdateTextTex(dev, g_ttTitle,  selecting ? L"Carregando painel" : loadingTitle, 15, false, RGB(0x09,0x68,0xF8), kTextMaxW);
+    UpdateTextTex(dev, g_ttName,   selecting ? (g_selector->enabled==2 ? L"Preparando controles de \u00E1udio" : L"Preparando a lista de est\u00E1dios") : loadingName, 15, true, RGB(0x34,0x46,0x51), kTextMaxW);
+    UpdateTextTex(dev, g_ttDetail, selecting ? L"Aguarde um instante" : detail, 13, false, RGB(0x87,0x97,0xAB), kTextMaxW);
+    wchar_t scoreboardTitle[MAX_STR*2]={}, movieTitle[MAX_STR*2]={};
+    swprintf_s(scoreboardTitle,L"Carregando placar - %ls",scoreboardName[0]?scoreboardName:L"Padr\u00E3o");
+    swprintf_s(movieTitle,L"Carregando v\u00EDdeo pr\u00E9-jogo - %ls",movieName[0]?movieName:L"Padr\u00E3o");
+    UpdateTextTex(dev,g_ttScoreboardName,scoreboardTitle,13,true,RGB(0x34,0x46,0x51),388);
+    UpdateTextTex(dev,g_ttScoreboardDetail,scoreboardDetail,11,false,RGB(0x87,0x97,0xAB),388);
+    UpdateTextTex(dev,g_ttMovieName,movieTitle,13,true,RGB(0x34,0x46,0x51),388);
+    UpdateTextTex(dev,g_ttMovieDetail,movieDetail,11,false,RGB(0x87,0x97,0xAB),388);
 
     // ── Update preview image (WIC) ─────────────────────────────────────────
-    if (wcscmp(imgPath, g_previewLoadedPath) != 0) {
-        wcscpy_s(g_previewLoadedPath, imgPath);
-        if (imgPath[0] != L'\0') {
-            LoadPreviewImageWIC(dev, imgPath);
-        } else {
+    bool changed=wcscmp(imgPath,g_previewLoadedPath)!=0 || (selecting && revision!=g_loadedSelectorRevision) || (!selecting && g_selectorTexture);
+    if (changed && (!selecting || published) && (!g_imageRetryAt || (LONG)(GetTickCount()-g_imageRetryAt)>=0)) {
+        bool transition=selecting && g_selectorTexture && wcsstr(imgPath,L"card_slide_") && g_previewSRV &&
+            g_selector_draw_width==requestedWidth && g_selector_draw_height==requestedHeight;
+        ID3D11ShaderResourceView *previous=transition ? g_previewSRV : nullptr;
+        if (previous) previous->AddRef();
+        bool loaded=imgPath[0] && LoadPreviewImageWIC(dev,imgPath);
+        if (loaded && transition) {
+            if (g_previousPhoto) g_previousPhoto->Release();
+            g_previousPhoto=previous; previous=nullptr;
+            g_previousWidth=requestedWidth; g_previousHeight=requestedHeight;
+            g_photoFadeStarted=GetTickCount();
+        } else if (loaded && g_previousPhoto && (!selecting || g_selector_draw_width!=requestedWidth || g_selector_draw_height!=requestedHeight)) {
+            g_previousPhoto->Release(); g_previousPhoto=nullptr;
+        }
+        if (previous) previous->Release();
+        if (loaded) {
+            wcscpy_s(g_previewLoadedPath,imgPath);
+            g_selectorTexture=selecting; g_loadedSelectorRevision=revision;
+            if (selecting) { g_selector_draw_width=requestedWidth; g_selector_draw_height=requestedHeight; }
+            g_imageRetryAt=0;
+        } else if (!imgPath[0] && !selecting) {
             if (g_previewTex) { g_previewTex->Release(); g_previewTex = nullptr; }
             if (g_previewSRV) { g_previewSRV->Release(); g_previewSRV = nullptr; }
             g_previewNatW = g_previewNatH = 0;
+            g_selectorTexture=false; g_previewLoadedPath[0]=0;
+        } else {
+            g_imageRetryAt=GetTickCount()+250;
+            if (selecting && !g_selectorTexture) { g_selector->visible=0; rtv->Release(); return; }
         }
     }
-
+    bool drawSelector=selecting && g_selectorTexture && g_previewSRV;
     // ── Save D3D state ─────────────────────────────────────────────────────
     ID3D11RenderTargetView *oldRTV[8]={}; ID3D11DepthStencilView *oldDSV=nullptr;
     ctx->OMGetRenderTargets(8,oldRTV,&oldDSV);
@@ -546,6 +650,10 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     ID3D11PixelShader  *oldPS=nullptr; ctx->PSGetShader(&oldPS,nullptr,nullptr);
     ID3D11InputLayout  *oldIL=nullptr; ctx->IAGetInputLayout(&oldIL);
     D3D11_PRIMITIVE_TOPOLOGY oldTopo; ctx->IAGetPrimitiveTopology(&oldTopo);
+    ID3D11Buffer *oldVB=nullptr; UINT oldStride=0,oldOffset=0;
+    ctx->IAGetVertexBuffers(0,1,&oldVB,&oldStride,&oldOffset);
+    ID3D11GeometryShader *oldGS=nullptr; ctx->GSGetShader(&oldGS,nullptr,nullptr);
+    ctx->GSSetShader(nullptr,nullptr,0);
     ID3D11ShaderResourceView *oldSRV=nullptr; ctx->PSGetShaderResources(0,1,&oldSRV);
     ID3D11SamplerState *oldSamp=nullptr; ctx->PSGetSamplers(0,1,&oldSamp);
 
@@ -558,13 +666,14 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 
     // ── Layout constants ────────────────────────────────────────────────────
-    // Panel: 460 x 140, top-right margin 20 px
-    const float PW=460.f, PH=140.f, M=20.f;
-    const float px=vpW-PW-M, py=M;
-    // Image box: 110 x 88 at (px+12, py+16)
-    const float IX=px+12.f, IY=py+16.f, IW=110.f, IH=88.f;
+    // Compact loading panel; the blue fill reports actual copy progress.
+    const float PW=420.f, PH=128.f, M=16.f;
+    const float px=selecting ? (vpW-PW)/2.f : vpW-PW-M, py=M;
+    const float assetBaseY=py+(stadiumVisible?PH+10.f:0.f);
+    // Image box: 96 x 76 at (px+12, py+14)
+    const float IX=px+12.f, IY=py+14.f, IW=96.f, IH=76.f;
     // Text column start
-    const float TX=px+136.f;
+    const float TX=px+120.f;
 
     // ── Colored quads pass ─────────────────────────────────────────────────
     ctx->VSSetShader(g_vs,nullptr,0);
@@ -573,23 +682,43 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     UINT stride=sizeof(Vtx11),offset=0;
     ctx->IASetVertexBuffers(0,1,&g_vb,&stride,&offset);
 
-    Vtx11 verts[128]; int n=0;
+    Vtx11 verts[kColoredVertexCapacity]; int n=0;
     auto R=[&](float x,float y,float w,float h,DWORD col){
         PushQuad(verts,n,x,y,w,h,vpW,vpH,col);
     };
+    auto Round=[&](float x,float y,float w,float h,float radius,DWORD col) {
+        if (w <= 0.f || h <= 0.f) return;
+        radius=std::min(radius,std::min(w,h)/2.f);
+        R(x,y+radius,w,h-radius*2,col);
+        for (int i=0;i<8;++i) {
+            float dy=radius/8.f, distance=radius-(i+.5f)*dy;
+            float inset=radius-sqrtf(radius*radius-distance*distance);
+            R(x+inset,y+i*dy,w-inset*2,dy,col);
+            R(x+inset,y+h-(i+1)*dy,w-inset*2,dy,col);
+        }
+    };
     // Panel background + borders
-    R(px,   py,      PW,  3.f,   0xFF3399FF);  // top accent bar
-    R(px,   py+3.f,  PW,  PH-3.f,0xEE101828); // background
-    R(px,   py+PH-1.f,PW, 1.f,   0xFF3399FF);  // bottom border
-    R(px,   py,      1.f, PH,    0xFF3399FF);  // left border
-    R(px+PW-1.f,py,  1.f, PH,    0xFF3399FF);  // right border
-    // Image placeholder area (dark inset, shown when no image or while loading)
-    R(IX,   IY,      IW,  IH,    0xFF0C1420);  // dark background for image
-    // Progress track + fill
-    float tx2=TX, ty2=py+PH-22.f, tw2=PW-136.f-12.f, th2=10.f;
-    R(tx2,ty2,tw2,th2,0xFF222C3C);
-    float f=(std::max)(0.f,(std::min)(1.f,pct/100.f));
-    if (f>0.f) R(tx2,ty2,tw2*f,th2,0xFF3399FF);
+    if (!drawSelector && stadiumVisible) {
+    Round(px,py,PW,PH,12.f,0xFFDFE6EF);
+    Round(px+1,py+1,PW-2,PH-2,11.f,0xFFFFFFFF);
+    R(IX,   IY,      IW,  IH,    0xFFF0F4F8);
+    // Progress track + determinate fill, updated by the stadium-copy worker.
+    float tx2=TX, ty2=py+PH-18.f, tw2=PW-120.f-12.f, th2=8.f;
+    Round(tx2,ty2,tw2,th2,4.f,0xFFEDF2F7);
+    float progress=std::max(0.f,std::min(100.f,pct))/100.f;
+    if (progress>0.f) Round(tx2,ty2,tw2*progress,th2,4.f,0xFF0968F8);
+    }
+    if (!drawSelector) {
+        auto drawAssetCard=[&](float y,float assetPct) {
+            Round(px,y,PW,66.f,10.f,0xFFDFE6EF);
+            Round(px+1.f,y+1.f,PW-2.f,64.f,9.f,0xFFFFFFFF);
+            Round(px+14.f,y+49.f,PW-28.f,6.f,3.f,0xFFEDF2F7);
+            float fill=std::max(0.f,std::min(100.f,assetPct))/100.f;
+            if(fill>0.f) Round(px+14.f,y+49.f,(PW-28.f)*fill,6.f,3.f,0xFF0968F8);
+        };
+        if(scoreboardVisible) drawAssetCard(assetBaseY,scoreboardPct);
+        if(movieVisible) drawAssetCard(assetBaseY+(scoreboardVisible?76.f:0.f),moviePct);
+    }
 
     D3D11_MAPPED_SUBRESOURCE ms={};
     if (SUCCEEDED(ctx->Map(g_vb,0,D3D11_MAP_WRITE_DISCARD,0,&ms))){
@@ -604,8 +733,28 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         ctx->IASetInputLayout(g_ilT);
         ctx->PSSetSamplers(0,1,&g_samp);
 
+        if (drawSelector) {
+            LONG canvasWidth=g_selector_draw_width,canvasHeight=g_selector_draw_height;
+            auto layout=selector_layout(vpW,vpH,canvasWidth,canvasHeight);
+            float offset=layout.keyboard ? 200.f : 0.f;
+            DrawTexQuad(ctx,layout.card_x,layout.card_y,layout.card_width*layout.card_scale,layout.card_height*layout.card_scale,
+                vpW,vpH,g_previewSRV,1.f,offset/canvasWidth,0.f,(offset+layout.card_width)/canvasWidth,layout.card_height/canvasHeight);
+            if (layout.keyboard) {
+                DrawTexQuad(ctx,layout.keyboard_x,layout.keyboard_y,1000.f*layout.keyboard_scale,230.f*layout.keyboard_scale,
+                    vpW,vpH,g_previewSRV,1.f,0.f,560.f/canvasHeight,1.f,1.f);
+            }
+            if (g_previousPhoto) {
+                float progress=photo_fade((DWORD)(GetTickCount()-g_photoFadeStarted));
+                if (progress<1.f && g_previousWidth==canvasWidth && g_previousHeight==canvasHeight) {
+                    DrawTexQuad(ctx,layout.card_x+24.f*layout.card_scale,layout.card_y+130.f*layout.card_scale,
+                        552.f*layout.card_scale,232.f*layout.card_scale,vpW,vpH,g_previousPhoto,1.f-progress,
+                        (offset+24.f)/g_previousWidth,130.f/g_previousHeight,(offset+576.f)/g_previousWidth,362.f/g_previousHeight);
+                } else { g_previousPhoto->Release(); g_previousPhoto=nullptr; }
+            }
+        } else {
+
         // Stadium preview image (aspect-corrected within IW x IH)
-        if (g_previewSRV && g_previewNatW > 0 && g_previewNatH > 0) {
+        if (!selecting && stadiumVisible && g_previewSRV && g_previewNatW > 0 && g_previewNatH > 0) {
             float imgR = (float)g_previewNatW / (float)g_previewNatH;
             float boxR = IW / IH;
             float dw, dh;
@@ -615,14 +764,25 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         }
 
         // Title "Loading Stadium"
-        if (g_ttTitle.srv)
+        if ((selecting || stadiumVisible) && g_ttTitle.srv)
             DrawTexQuad(ctx, TX, py+14.f, (float)g_ttTitle.width, (float)g_ttTitle.height, vpW, vpH, g_ttTitle.srv);
         // Stadium name
-        if (g_ttName.srv && stadium[0])
+        if (g_ttName.srv && (selecting || (stadiumVisible && stadium[0])))
             DrawTexQuad(ctx, TX, py+36.f, (float)g_ttName.width, (float)g_ttName.height, vpW, vpH, g_ttName.srv);
         // Detail text
-        if (g_ttDetail.srv && detail[0])
+        if (g_ttDetail.srv && (selecting || (stadiumVisible && detail[0])))
             DrawTexQuad(ctx, TX, py+58.f, (float)g_ttDetail.width, (float)g_ttDetail.height, vpW, vpH, g_ttDetail.srv);
+        float assetY=assetBaseY+10.f;
+        if(scoreboardVisible) {
+            if(g_ttScoreboardName.srv) DrawTexQuad(ctx,px+14.f,assetY+9.f,(float)g_ttScoreboardName.width,(float)g_ttScoreboardName.height,vpW,vpH,g_ttScoreboardName.srv);
+            if(g_ttScoreboardDetail.srv) DrawTexQuad(ctx,px+14.f,assetY+27.f,(float)g_ttScoreboardDetail.width,(float)g_ttScoreboardDetail.height,vpW,vpH,g_ttScoreboardDetail.srv);
+        }
+        if(movieVisible) {
+            float movieY=assetY+(scoreboardVisible?76.f:0.f);
+            if(g_ttMovieName.srv) DrawTexQuad(ctx,px+14.f,movieY+9.f,(float)g_ttMovieName.width,(float)g_ttMovieName.height,vpW,vpH,g_ttMovieName.srv);
+            if(g_ttMovieDetail.srv) DrawTexQuad(ctx,px+14.f,movieY+27.f,(float)g_ttMovieDetail.width,(float)g_ttMovieDetail.height,vpW,vpH,g_ttMovieDetail.srv);
+        }
+        }
     }
 
     // ── Restore D3D state ──────────────────────────────────────────────────
@@ -635,6 +795,8 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     ctx->PSSetShader(oldPS,nullptr,0);
     ctx->IASetInputLayout(oldIL);
     ctx->IASetPrimitiveTopology(oldTopo);
+    ctx->IASetVertexBuffers(0,1,&oldVB,&oldStride,&oldOffset);
+    ctx->GSSetShader(oldGS,nullptr,0);
     ctx->PSSetShaderResources(0,1,&oldSRV);
     ctx->PSSetSamplers(0,1,&oldSamp);
     for(auto *r:oldRTV) if(r) r->Release();
@@ -647,6 +809,8 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     if(oldIL)   oldIL->Release();
     if(oldSRV)  oldSRV->Release();
     if(oldSamp) oldSamp->Release();
+    if(oldVB) oldVB->Release();
+    if(oldGS) oldGS->Release();
     rtv->Release();
 }
 
@@ -654,42 +818,16 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
 // Hooked IDXGISwapChain::Present
 // ---------------------------------------------------------------------------
 static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT flags) {
-    // Phase 1 -> Phase 2 switch: on the very first call we:
-    //   a) restore the inline hook bytes (so g_presentFnAddr is the clean original again),
-    //   b) patch FIFA's real swapchain vtable[8] -> HookedPresent (vtable hook),
-    //   c) record g_OrigPresent = original function pointer (no trampoline needed).
-    if (!g_hookSwitched) {
-        g_hookSwitched = true;
-
-        // Restore inline hook (original bytes back in place)
-        DWORD old = 0;
-        if (VirtualProtect(g_presentFnAddr, 14, PAGE_EXECUTE_READWRITE, &old)) {
-            memcpy(g_presentFnAddr, g_origPresentBytes, 14);
-            VirtualProtect(g_presentFnAddr, 14, old, &old);
-            FlushInstructionCache(GetCurrentProcess(), g_presentFnAddr, 14);
-        }
-        if (g_presentTrampoline) {
-            VirtualFree(g_presentTrampoline, 0, MEM_RELEASE);
-            g_presentTrampoline = nullptr;
-        }
-        // Original function pointer = the (now restored) proxy Present body
-        g_OrigPresent = reinterpret_cast<PFN_Present>(g_presentFnAddr);
-
-        // Patch FIFA's actual swapchain vtable
-        g_fifaVtbl = *reinterpret_cast<void***>(sc);
-        if (VirtualProtect(&g_fifaVtbl[8], sizeof(void*), PAGE_EXECUTE_READWRITE, &old)) {
-            g_fifaVtbl[8] = reinterpret_cast<void*>(HookedPresent);
-            VirtualProtect(&g_fifaVtbl[8], sizeof(void*), old, &old);
-        }
-        Log("[Present] switched to vtable hook sc=%p vtbl=%p origFn=%p",
-            sc, g_fifaVtbl, g_OrigPresent);
-    }
 
     LONG n = InterlockedIncrement(&g_frameCount);
     if (n==1 || (n%600)==0)
         Log("[Present] frame=%ld visible=%d", n, g_data?(int)g_data->visible:-1);
 
-    if (g_data && InterlockedCompareExchange(&g_data->visible,0,0) != 0) {
+    DXGI_SWAP_CHAIN_DESC selectorDesc={}; sc->GetDesc(&selectorDesc);
+    selector_tick(selectorDesc.OutputWindow,(float)selectorDesc.BufferDesc.Width,(float)selectorDesc.BufferDesc.Height);
+    if ((g_data && (InterlockedCompareExchange(&g_data->visible,0,0) != 0
+        || InterlockedCompareExchange(&g_data->scoreboard_visible,0,0) != 0
+        || InterlockedCompareExchange(&g_data->movie_visible,0,0) != 0)) || selector_visible()) {
         ID3D11Device *dev=nullptr;
         if (SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device),(void**)&dev))) {
             ID3D11DeviceContext *ctx=nullptr;
@@ -705,44 +843,9 @@ static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT 
     return g_OrigPresent(sc, syncInterval, flags);
 }
 
-// ---------------------------------------------------------------------------
-// Inline hook helpers (x64: FF 25 00000000 [8-byte addr] = 14 bytes)
-// ---------------------------------------------------------------------------
-static uint8_t *InstallInlineHook(uint8_t *fn, void *hook, uint8_t *saved) {
-    DWORD old=0;
-    if (!VirtualProtect(fn,14,PAGE_EXECUTE_READWRITE,&old)) {
-        Log("[Hook] VirtualProtect failed %lu fn=%p", GetLastError(),fn); return nullptr;
-    }
-    memcpy(saved,fn,14);
-    fn[0]=0xFF; fn[1]=0x25;
-    *reinterpret_cast<DWORD*>(fn+2)=0;
-    *reinterpret_cast<void**>(fn+6)=hook;
-    VirtualProtect(fn,14,old,&old);
-    FlushInstructionCache(GetCurrentProcess(),fn,14);
-
-    uint8_t *t=(uint8_t*)VirtualAlloc(nullptr,64,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE);
-    if (!t){ Log("[Hook] VirtualAlloc failed %lu",GetLastError()); return nullptr; }
-    memcpy(t,saved,14);
-    t[14]=0xFF; t[15]=0x25;
-    *reinterpret_cast<DWORD*>(t+16)=0;
-    *reinterpret_cast<void**>(t+20)=fn+14;
-    return t;
-}
-
-static void RemoveInlineHook(uint8_t *fn, uint8_t *tramp, const uint8_t *saved) {
-    if (!fn||!tramp) return;
-    DWORD old=0;
-    VirtualProtect(fn,14,PAGE_EXECUTE_READWRITE,&old);
-    memcpy(fn,saved,14);
-    VirtualProtect(fn,14,old,&old);
-    FlushInstructionCache(GetCurrentProcess(),fn,14);
-    VirtualFree(tramp,0,MEM_RELEASE);
-}
-
-// ---------------------------------------------------------------------------
-// Hook setup: temp D3D11 device+swapchain -> get Present addr -> inline hook
-// ---------------------------------------------------------------------------
+// Install a shared COM-vtable hook without copying machine instructions.
 static DWORD WINAPI HookThread(LPVOID) {
+    selector_initialize(SelectorLog);
     Log("[HookThread] started pid=%lu", GetCurrentProcessId());
     Sleep(500);
 
@@ -778,7 +881,7 @@ static DWORD WINAPI HookThread(LPVOID) {
     }
 
     void **vt=*reinterpret_cast<void***>(tmpSC);
-    g_presentFnAddr=reinterpret_cast<uint8_t*>(vt[8]); // IDXGISwapChain::Present = slot 8
+    auto g_presentFnAddr=reinterpret_cast<uint8_t*>(vt[8]); // IDXGISwapChain::Present = slot 8
 
     MEMORY_BASIC_INFORMATION mbi={};
     VirtualQuery(g_presentFnAddr,&mbi,sizeof(mbi));
@@ -789,13 +892,19 @@ static DWORD WINAPI HookThread(LPVOID) {
     tmpSC->Release(); if (tmpDev) tmpDev->Release();
     DestroyWindow(hw); UnregisterClassW(wc.lpszClassName,wc.hInstance);
 
-    g_presentTrampoline=InstallInlineHook(g_presentFnAddr,(void*)HookedPresent,g_origPresentBytes);
-    if (g_presentTrampoline) {
-        g_OrigPresent=reinterpret_cast<PFN_Present>(g_presentTrampoline);
-        Log("[HookThread] Present inline hook installed ok (tramp=%p)",g_presentTrampoline);
-    } else {
-        Log("[HookThread] Present inline hook FAILED");
-    }
+    // Swapchains sharing this implementation share its COM vtable. Replace
+    // only the Present pointer: no arbitrary instruction bytes/trampoline.
+    // If a graphics proxy uses a different vtable the selector stays disabled.
+    g_fifaVtbl=vt;
+    g_OrigPresent=reinterpret_cast<PFN_Present>(vt[8]);
+    DWORD previous=0;
+    if (VirtualProtect(&vt[8],sizeof(void *),PAGE_READWRITE,&previous)) {
+        g_hookSwitched=true;
+        InterlockedExchangePointer((PVOID volatile *)&vt[8],(void *)HookedPresent);
+        DWORD ignored;
+        VirtualProtect(&vt[8],sizeof(void *),previous,&ignored);
+        Log("[HookThread] Present vtable hook installed at %p",vt);
+    } else Log("[HookThread] Present vtable unavailable; no function bytes changed");
 
     Log("[HookThread] done");
     return 0;
@@ -826,16 +935,13 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID) {
         Log("[DllMain] DETACH");
         if (g_hookSwitched) {
             // Restore vtable hook
-            if (g_fifaVtbl) {
+            if (g_fifaVtbl && g_fifaVtbl[8]==reinterpret_cast<void*>(HookedPresent)) {
                 DWORD old = 0;
                 if (VirtualProtect(&g_fifaVtbl[8], sizeof(void*), PAGE_EXECUTE_READWRITE, &old)) {
                     g_fifaVtbl[8] = reinterpret_cast<void*>(g_OrigPresent);
                     VirtualProtect(&g_fifaVtbl[8], sizeof(void*), old, &old);
                 }
             }
-        } else {
-            // Still in phase 1 — restore inline hook
-            RemoveInlineHook(g_presentFnAddr, g_presentTrampoline, g_origPresentBytes);
         }
         // Do NOT release D3D11 resources — FIFA is shutting down, releasing COM
         // objects owned by its device here can cause secondary crashes.

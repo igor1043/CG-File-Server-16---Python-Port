@@ -7,7 +7,7 @@ set "WORKPATH=build\pyinstaller"
 set "DISTPATH=dist"
 set "OVERLAY_DLL=bin\cgfs16_overlay.dll"
 set "INJECTOR_EXE=bin\cgfs16_inject.exe"
-set "FIFA_LIBRARY=bin\FifaLibrary14.dll"
+set "FIFA_LIBRARY=bin\FifaLibrary16.dll"
 
 echo ============================================================
 echo  CGFS16 - Full Build
@@ -32,7 +32,11 @@ if errorlevel 1 exit /b 1
 call :require_file "%FIFA_LIBRARY%" "FIFA database library"
 if errorlevel 1 exit /b 1
 
-echo [3/3] Running PyInstaller ...
+echo [3/4] Setting up 32-bit Python bridge ...
+call "scripts\setup_python32.bat"
+if errorlevel 1 exit /b 1
+
+echo [4/4] Running PyInstaller ...
 pyinstaller ^
   --noconfirm ^
   --clean ^
@@ -63,7 +67,7 @@ exit /b !ERRORLEVEL!
 
 :find_visual_studio
 set "VS="
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -property installationPath 2^>nul`) do set "VS=%%i"
+for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -property installationPath 2^>nul`) do set "VS=%%i"
 if defined VS goto check_vcvars
 call :use_prebuilt_helpers "No Visual Studio installation found."
 exit /b !ERRORLEVEL!
@@ -86,6 +90,10 @@ echo.
 echo [1/3] Compiling cgfs16_overlay.dll ...
 cl /nologo /O2 /W3 /LD /EHsc /std:c++17 ^
   "server16_py\d3d_overlay\cgfs16_overlay.cpp" ^
+  "server16_py\d3d_overlay\stadium_selector_bridge.cpp" ^
+  "server16_py\d3d_overlay\mod_xinput_gate.cpp" ^
+  "server16_py\d3d_overlay\ranking_input_gate.cpp" ^
+  "server16_py\d3d_overlay\crowd_bridge.cpp" ^
   /Fe:"%OVERLAY_DLL%" ^
   /Fd:"bin\cgfs16_overlay.pdb" ^
   /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib gdi32.lib ole32.lib

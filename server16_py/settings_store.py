@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 
@@ -27,6 +28,10 @@ class SettingsStore:
         # Backward-compatible: keep this key available even if current UI
         # does not expose it yet.
         "SHOW_STADIUM_LOADING_NOTIFICATION": True,
+        "KEEP_OPEN_ON_GAME_CLOSE": True,
+        "RANDOM_STADIUM_SELECTION": True,
+        "CROWD_MASTER_VOLUME": 1.0,
+        "GOAL_MASTER_VOLUME": 1.0,
         "LANGUAGE": "en",
         # Discord Rich Presence defaults.  Users can override any key in their
         # runtime/settings.json; missing keys fall back to these values so the
@@ -64,7 +69,9 @@ class SettingsStore:
             self.data = dict(self.DEFAULTS)
 
     def save(self) -> None:
-        self.path.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+        temporary = self.path.with_name(self.path.name + '.tmp')
+        temporary.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+        temporary.replace(self.path)
 
     @property
     def fifa_exe(self) -> str:
@@ -92,6 +99,40 @@ class SettingsStore:
     def show_stadium_loading_notification(self, value: bool) -> None:
         self.data["SHOW_STADIUM_LOADING_NOTIFICATION"] = bool(value)
         self.save()
+
+    @property
+    def keep_open_on_game_close(self) -> bool:
+        return bool(self.data.get("KEEP_OPEN_ON_GAME_CLOSE", True))
+
+    @keep_open_on_game_close.setter
+    def keep_open_on_game_close(self, value: bool) -> None:
+        self.data["KEEP_OPEN_ON_GAME_CLOSE"] = bool(value)
+        self.save()
+
+    @property
+    def random_stadium_selection(self) -> bool:
+        return bool(self.data.get("RANDOM_STADIUM_SELECTION", True))
+
+    @random_stadium_selection.setter
+    def random_stadium_selection(self, value: bool) -> None:
+        self.data["RANDOM_STADIUM_SELECTION"] = bool(value)
+        self.save()
+
+    @property
+    def crowd_master_volume(self) -> float:
+        try:
+            value = float(self.data.get("CROWD_MASTER_VOLUME", 1.0))
+        except (TypeError, ValueError):
+            value = 1.0
+        return max(0.0, min(2.0, value)) if math.isfinite(value) else 1.0
+
+    @property
+    def goal_master_volume(self) -> float:
+        try:
+            value = float(self.data.get("GOAL_MASTER_VOLUME", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        return max(0.0, min(1.0, value)) if math.isfinite(value) else 1.0
 
     @property
     def language(self) -> str:

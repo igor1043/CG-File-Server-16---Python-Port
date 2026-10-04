@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ctypes
+import json
+import os
 import queue
 import random
 import subprocess
@@ -21,21 +23,42 @@ from PIL import Image, ImageTk
 
 from . import __version__ as APP_VERSION
 from .asset_runtime import AssetRuntime
+from .audio_profiles import AudioProfileRuntime
 from .db_patcher import restore_stadium_names
 from .match_string_patcher import patch_match_string
 from .assignment_runtime import AssignmentRuntime
 from .camera_runtime import CameraPreset, CameraRuntime
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
+from .entrance_runtime import TeamEntranceRuntime
 from .discord_rpc_runtime import DiscordRPCRuntime, StadiumPreviewUploader
 from .fifa_db import FifaDatabase
-from .file_tools import checkdirs, checkver, copy, copy_if_exists, extra_setup, resolve_stadium_preview_path
+from .gamepad_runtime import (
+    XINPUT_GAMEPAD_BACK,
+    XINPUT_GAMEPAD_DPAD_LEFT,
+    XINPUT_GAMEPAD_DPAD_RIGHT,
+    XINPUT_GAMEPAD_START,
+    XInputGamepadReader,
+)
+from .file_tools import (
+    checkdirs,
+    checkver,
+    clear_generated_cache,
+    copy,
+    copy_if_exists,
+    extra_setup,
+    resolve_stadium_preview_path,
+    restore_native_assets,
+)
+from .dialogs import FifaLocationWarningDialog, ImgbbApiKeyDialog
 from .ini_file import SessionIniFile
 from .memory_access import Memory, MemoryAccessError
+from .match_state import outside_match_page, pause_page, post_match_page
 from .localization import LANGUAGE_LABELS, LocalizationManager, SUPPORTED_LANGUAGES
 from .offsets import Offsets
 from .settings_editor import SettingsAreaEditor, asset_specs, audio_specs, stadium_specs
 from .settings_store import SettingsStore
 from .stadium_runtime import StadiumRuntime
+from .stadium_selector import StadiumSelector
 from .update_checker import GithubReleaseChecker, UpdateCheckResult
 try:
     from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector
@@ -72,8 +95,19 @@ class Server16App(tk.Tk):
     UPDATE_REPO_OWNER = "igor1043"
     UPDATE_REPO_NAME = "CG-File-Server-16---Python-Port"
 
-    def __init__(self) -> None:
+    def __init__(self, splash=None) -> None:
+        if splash is not None:
+            splash.close()
+            splash = None
         super().__init__()
+        self._ui_thread = threading.get_ident()
+        self._ui_events = queue.Queue()
+        self._ui_event_job = None
+        self._log_lock = threading.Lock()
+        self._stadium_selector = None
+        self._manual_stadium_override = None
+        self._stadium_fixture_entered = False
+        self._launch_splash = splash
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.withdraw()
         self.base_dir = self._resolve_base_dir()
@@ -84,7 +118,11 @@ class Server16App(tk.Tk):
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings = SettingsStore(self.base_dir / "runtime" / "settings.json")
         self.show_stadium_loading_var = tk.BooleanVar(value=self.settings.show_stadium_loading_notification)
+        self.keep_open_var = tk.BooleanVar(value=self.settings.keep_open_on_game_close)
+        self.random_stadium_selection_var = tk.BooleanVar(value=self.settings.random_stadium_selection)
         self.localization = LocalizationManager(self.base_dir / "server16_py" / "locales", self.settings.language)
+        if self._launch_splash is not None:
+            self._launch_splash.set_message(self.tr("splash.starting"))
         self.log_backup_path = self.log_path.with_suffix(".previous.log")
         self._prepare_runtime_log()
         self.offsets = Offsets.load()
@@ -93,6 +131,8 @@ class Server16App(tk.Tk):
         self.skillgamechange = False
         self.bumperpagechange = False
         self.matchstarted = False
+        self._match_audio_ended = False
+        self._native_assets_restored_for_match = False
         self.lastpagename = ""
         self.curstad = ""
         self.StadName = ""
@@ -125,14 +165,40 @@ class Server16App(tk.Tk):
         self._overlay_toggle_ready_at = 0.0
         self._overlay_hwnd = 0
         self._fifa_hwnd = 0
+        self._crowd_volume_window = None
+        self._crowd_volume_canvas = None
+        self._crowd_volume_value_label = None
+        self._crowd_volume_hwnd = 0
+        self._crowd_volume_visible = False
+        self._crowd_volume_hide_at = 0.0
+        self._crowd_volume_gamepad = XInputGamepadReader()
+        self._crowd_volume_previous_buttons = 0
+        self._crowd_volume_combo_latched = False
+        self._crowd_volume_start_pressed_at = 0.0
+        self._crowd_volume_back_pressed_at = 0.0
+        self._crowd_volume_last_direction = 0
+        self._crowd_volume_next_adjust_at = 0.0
+        self._crowd_master_volume = self.settings.crowd_master_volume
+        self._goal_master_volume = self.settings.goal_master_volume
+        self._goal_audio_player = None
+        self._goal_base_volume = 0.0
+        self._crowd_master_volume_dirty = False
+        self.audio_profiles = AudioProfileRuntime(self)
         self._restore_fullscreen_on_hide = False
         self._launcher_mode = True
         self._worker_queue: queue.Queue[tuple] = queue.Queue()
         self._worker_poll_job = None
         self._stadium_task_running = False
+        self._asset_loading_started_at: dict[str, float] = {}
+        self._asset_loading_hide_jobs: dict[str, str] = {}
+        self._asset_loading_fallback: set[str] = set()
         self._stadium_task_signature = None
         self._stadium_task_request_key = None
         self._last_stadium_applied_signature = None
+        self._stadium_choice_dialog = None
+        self._stadium_choice_signature = None
+        self._stadium_choice_result = None
+        self._stadium_choice_ready = False
         self.labels = {}
         self.stat_title_labels = {}
         self.info_labels = {}
@@ -142,6 +208,10 @@ class Server16App(tk.Tk):
         self.log_widget = None
         self.logs_frame = None
         self.check_update_button = None
+        self.check_update_badge = None
+        self._update_available = False
+        self.clean_cache_button = None
+        self.imgbb_key_button = None
         self.locate_fifa_button = None
         self.launch_fifa_button = None
         self.assign_scoreboard_button = None
@@ -225,9 +295,15 @@ class Server16App(tk.Tk):
         self._chants_last_track = None
         self._chants_last_goal_time = 0.0
         self._chants_player: MciAudioPlayer | None = None
+        self._chants_base_volume = 0.0
+        self._chants_volume_is_crowd = False
         self._chant_track_index = 0
         self._chants_paused = False
         self._chants_target_volume = 0.0
+        self._entrance_active = False
+        self._entrance_armed = False
+        self._entrance_pre_match_guard = False
+        self._entrance_pre_match_guard_set_at = 0.0
         self._last_score_snapshot = (0, 0)
         self._last_chants_score_snapshot: tuple[int, int] | None = None
         self._chants_resume_after = 0.0
@@ -237,6 +313,7 @@ class Server16App(tk.Tk):
         self.assets_runtime = AssetRuntime(self)
         self.stadium_runtime = StadiumRuntime(self)
         self.chants_runtime = ChantsRuntime(self)
+        self.entrance_runtime = TeamEntranceRuntime(self)
         self.assignment_runtime = AssignmentRuntime(self)
         self.camera_runtime = CameraRuntime(self)
         # Initialize DiscordRPC (loads from settings.json)
@@ -310,7 +387,15 @@ class Server16App(tk.Tk):
         self._build_ui()
         self._install_exception_hook()
         self._build_stadium_loading_modal()
+        self._build_crowd_volume_window()
+        self._ui_event_job = self.after(50,self._drain_ui_events)
+        try:
+            self._stadium_selector = StadiumSelector(self)
+        except Exception as exc:
+            self.log('Stadium selector initialization failed',exc)
         self.setuppaths()
+        if not self._check_fifa_location():
+            return
         self.refresh_camera_catalog()
         self.refresh_modules()
         self.log("Bootstrap file writes are deferred until an explicit runtime action")
@@ -318,6 +403,7 @@ class Server16App(tk.Tk):
         self._poll_job = self.after(500, self.poll_process)
         self._stats_job = self.after(250, self.stats_loop)
         self._overlay_job = self.after(80, self.overlay_loop)
+        self.after(3000, lambda: self.check_updates(silent=True))
         if self.module_enabled("Chants"):
             self._start_chants_runtime()
         # Log DiscordRPC initialization status
@@ -382,6 +468,10 @@ class Server16App(tk.Tk):
             self.exclude_competition_button.configure(text=self.tr("button.exclude_competition"))
         if self.check_update_button is not None:
             self.check_update_button.configure(text=self._check_update_button_text())
+        if self.clean_cache_button is not None:
+            self.clean_cache_button.configure(text=self.tr("button.clean_cache"))
+        if self.imgbb_key_button is not None:
+            self.imgbb_key_button.configure(text=self.tr("button.imgbb_key"))
         if self.language_label is not None:
             self.language_label.configure(text=self.tr("label.language"))
         if self.language_combo is not None:
@@ -399,6 +489,12 @@ class Server16App(tk.Tk):
             self.logs_group.configure(text=self.tr("logs.group"))
         if self.log_follow_button is not None:
             self.log_follow_button.configure(text=self.tr("button.jump_latest"))
+        if getattr(self, "keep_open_switch", None) is not None:
+            self.keep_open_switch.configure(text=self.tr("toggle.keep_open"))
+        if getattr(self, "random_stadium_switch", None) is not None:
+            self.random_stadium_switch.configure(text=self.tr("toggle.random_stadium_selection"))
+        if getattr(self, "_regen_bh_btn", None) is not None:
+            self._regen_bh_btn.configure(text=self.tr("button.regen_bh"))
         self._update_log_follow_ui()
         self._apply_stat_titles()
         self._apply_module_labels()
@@ -454,6 +550,7 @@ class Server16App(tk.Tk):
             "Autorun": "module.autorun",
             "StadiumNet": "module.stadiumnet",
             "Chants": "module.chants",
+            "TeamEntrance": "module.team_entrance",
             "DiscordRPC": "module.discord_rpc",
         }
         for name, check in self.module_checks.items():
@@ -499,6 +596,7 @@ class Server16App(tk.Tk):
             return
         icon_value = str(self.icon_path)
         try:
+            window.iconbitmap(icon_value)
             window.iconbitmap(default=icon_value)
         except Exception:
             pass
@@ -690,10 +788,14 @@ class Server16App(tk.Tk):
         elif error is not None:
             line = f"{line}\n{traceback.format_exc().strip()}" if traceback.format_exc().strip() != "NoneType: None" else line
         try:
-            with self.log_path.open("a", encoding="utf-8") as handle:
-                handle.write(line + "\n")
+            with self._log_lock:
+                with self.log_path.open("a", encoding="utf-8") as handle:
+                    handle.write(line + "\n")
         except Exception:
             pass
+        self._post_ui(self._append_log_line,line)
+
+    def _append_log_line(self,line) -> None:
         if self.log_widget is not None:
             if self._log_widget_is_near_bottom():
                 self._log_autofollow = True
@@ -703,6 +805,29 @@ class Server16App(tk.Tk):
                 self.log_widget.see("end")
             self.log_widget.configure(state="disabled")
             self._update_log_follow_ui()
+
+    def _post_ui(self,callback,*args) -> None:
+        if getattr(self,'_closing',False):
+            return
+        if threading.get_ident()==self._ui_thread:
+            callback(*args)
+        else:
+            self._ui_events.put((callback,args))
+
+    def _drain_ui_events(self) -> None:
+        self._ui_event_job=None
+        if self._closing:
+            return
+        for _ in range(100):
+            try:
+                callback,args=self._ui_events.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback(*args)
+            except Exception as exc:
+                self.log('Queued UI callback failed',exc)
+        self._ui_event_job=self.after(50,self._drain_ui_events)
 
     def _log_widget_is_near_bottom(self) -> bool:
         if self.log_widget is None:
@@ -774,6 +899,17 @@ class Server16App(tk.Tk):
         self.language_var.set(self._language_combo_value())
         self.check_update_button = ttk.Button(top, text=self.tr("button.check_update"), command=self.check_updates)
         self.check_update_button.pack(side="right", padx=(0, 6))
+        self.check_update_badge = tk.Label(
+            top,
+            text="NEW",
+            bg="#c94f58",
+            fg="#ffffff",
+            font=("Bahnschrift", 8, "bold"),
+            padx=5,
+            pady=2,
+        )
+        self.check_update_badge.pack(side="right", padx=(0, 6))
+        self.check_update_badge.pack_forget()
 
         header = tk.Frame(root, bg=self.bg, padx=10)
         header.pack(fill="x")
@@ -867,81 +1003,105 @@ class Server16App(tk.Tk):
         right.grid_columnconfigure(0, weight=1)
         self._build_stadium_card(right, 0)
         self._build_modules_card(right, 1)
+        self._build_maintenance_card(right, 2)
         self._build_audio_card()
         self._build_camera_tab()
         self._build_logs_card()
         self._apply_main_localization()
 
+    def _build_maintenance_card(self, parent: tk.Misc, row: int) -> None:
+        card = self._card(parent, "card.maintenance.title", "card.maintenance.subtitle")
+        card.grid(row=row, column=0, sticky="ew", pady=(12, 0))
+        buttons = tk.Frame(card, bg=self.card)
+        buttons.pack(fill="x", padx=12, pady=(6, 12))
+        self.clean_cache_button = ttk.Button(
+            buttons,
+            text=self.tr("button.clean_cache"),
+            command=self._clean_generated_cache,
+        )
+        self.clean_cache_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.imgbb_key_button = ttk.Button(
+            buttons,
+            text=self.tr("button.imgbb_key"),
+            command=self._change_imgbb_api_key,
+        )
+        self.imgbb_key_button.pack(side="left", fill="x", expand=True)
+
     def _build_stadium_loading_modal(self) -> None:
+        loading_bg,loading_ink,loading_muted,loading_blue='#ffffff','#344651','#8797ab','#0968f8'
         modal = tk.Toplevel(self._window())
         modal.withdraw()
         modal.overrideredirect(True)
         modal.attributes("-topmost", True)
-        modal.configure(bg=self.card)
+        modal.configure(bg=loading_bg)
         self._apply_window_icon(modal)
-        modal_frame = tk.Frame(modal, bg=self.card, highlightthickness=1, highlightbackground="#2a3c59", padx=14, pady=12)
+        modal_frame = tk.Frame(modal, bg=loading_bg, highlightthickness=1, highlightbackground="#dfe6ef", padx=14, pady=12)
         modal_frame.pack(fill="both", expand=True)
         self.stadium_loading_modal = modal
         self.stadium_loading_title = tk.Label(
             modal_frame,
             text=self.tr("stadium_modal.title"),
-            bg=self.card,
-            fg=self.gold,
-            font=("Bahnschrift", 12, "bold"),
+            bg=loading_bg,
+            fg=loading_blue,
+            font=("Segoe UI", 12, "bold"),
             anchor="w",
         )
         self.stadium_loading_title.pack(fill="x")
         self.stadium_loading_preview = tk.Label(
             modal_frame,
             text=self.tr("stadium_modal.preview"),
-            bg=self.card_soft,
-            fg=self.muted,
-            font=("Bahnschrift", 11, "bold"),
+            bg='#f0f4f8',
+            fg=loading_muted,
+            font=("Segoe UI", 11, "bold"),
             justify="center",
             anchor="center",
             highlightthickness=1,
-            highlightbackground="#243654",
+            highlightbackground="#dfe6ef",
         )
         self.stadium_loading_preview.pack(fill="x", pady=(8, 8), ipady=24)
         self.stadium_loading_name = tk.Label(
             modal_frame,
             text="-",
-            bg=self.card,
-            fg=self.fg,
-            font=("Bahnschrift", 11, "bold"),
+            bg=loading_bg,
+            fg=loading_ink,
+            font=("Segoe UI", 11, "bold"),
             anchor="w",
         )
         self.stadium_loading_name.pack(fill="x", pady=(6, 4))
         self.stadium_loading_detail = tk.Label(
             modal_frame,
             text=self.tr("stadium_modal.preparing"),
-            bg=self.card,
-            fg=self.muted,
-            font=("Bahnschrift", 9),
+            bg=loading_bg,
+            fg=loading_muted,
+            font=("Segoe UI", 9),
             anchor="w",
             justify="left",
         )
         self.stadium_loading_detail.pack(fill="x", pady=(0, 8))
         self.stadium_loading_value = tk.DoubleVar(value=0)
+        ttk.Style(self).configure('StadiumLoading.Horizontal.TProgressbar',background=loading_blue,troughcolor='#edf2f7',bordercolor=loading_bg,lightcolor=loading_blue,darkcolor=loading_blue)
         self.stadium_loading_bar = ttk.Progressbar(
             modal_frame,
             maximum=100,
             variable=self.stadium_loading_value,
-            style="Accent.Horizontal.TProgressbar",
+            style="StadiumLoading.Horizontal.TProgressbar",
             mode="determinate",
             length=292,
         )
         self.stadium_loading_bar.pack(fill="x", pady=(2, 0))
         modal.geometry("340x274")
 
-    def _show_stadium_loading_modal(self, stadium_name: str, detail: str = "Preparing stadium assets", progress: float = 0.0) -> None:
+    def _show_stadium_loading_modal(self, stadium_name: str, detail: str = "Preparing stadium assets", progress: float = 0.0, title: str | None = None, use_d3d: bool = True) -> None:
         if not self.show_stadium_loading_var.get():
             self._stadium_loading_visible = False
             self._stadium_loading_restore_fullscreen = False
             return
         self._cancel_stadium_loading_hide()
+        title = title or self.tr("stadium_modal.title")
+        if self.stadium_loading_title is not None:
+            self.stadium_loading_title.configure(text=title)
         # ── D3D injection overlay (visible in fullscreen) ─────────────────────
-        if self._try_d3d_overlay_show(stadium_name, detail, progress):
+        if use_d3d and self._try_d3d_overlay_show(stadium_name, detail, progress):
             return
         # ── Tkinter modal fallback ────────────────────────────────────────────
         if self.stadium_loading_modal is None:
@@ -958,8 +1118,8 @@ class Server16App(tk.Tk):
         self._stadium_loading_visible = True
         self._position_stadium_loading_modal()
         self.stadium_loading_modal.deiconify()
+        self.stadium_loading_bar.stop()
         self.stadium_loading_modal.update_idletasks()
-        self.stadium_loading_modal.update()
         self._stadium_loading_hwnd = self.stadium_loading_modal.winfo_id()
         self._apply_noactivate_window_style(self._stadium_loading_hwnd)
         try:
@@ -974,6 +1134,20 @@ class Server16App(tk.Tk):
         Returns True if the overlay was shown via D3D injection, False if we
         should fall back to the Tkinter modal.
         """
+        if not self._ensure_d3d_overlay_injected():
+            return False
+        inj = self._d3d_injector
+        if inj is None:
+            return False
+        inj.show(stadium_name, detail or self.tr("stadium_modal.preparing"), progress,
+                 image_path=str(self._resolve_stadium_preview_path(stadium_name) or ""))
+        self._d3d_overlay_shown_at = time.monotonic()
+        self._stadium_loading_visible = True
+        self.log(f"Stadium notification via D3D overlay: {stadium_name}")
+        return True
+
+    def _ensure_d3d_overlay_injected(self) -> bool:
+        """Initialize the stadium overlay and inject it once per FIFA PID."""
         if _D3DOverlayInjector is None:
             self.log("D3D overlay: injector module not available (import failed)")
             return False
@@ -981,7 +1155,6 @@ class Server16App(tk.Tk):
         if not dll_path.exists():
             self.log(f"D3D overlay: DLL not found at {dll_path}")
             return False
-        # Create the injector lazily (once per app session)
         if self._d3d_injector is None:
             try:
                 self._d3d_injector = _D3DOverlayInjector(dll_path)
@@ -989,28 +1162,20 @@ class Server16App(tk.Tk):
                 self.log(f"D3D overlay injector init failed: {exc}")
                 self._d3d_injector = None
                 return False
-        inj = self._d3d_injector
-        if not inj.is_ready():
-            self.log(f"D3D overlay: not ready (shared_mem={inj._ready}, "
-                     f"dll={dll_path.exists()}, "
-                     f"exe={inj._find_inject_exe() is not None})")
+        injector = self._d3d_injector
+        if not injector.is_ready():
+            self.log(
+                "D3D overlay: shared channel or injector helper is unavailable"
+            )
             return False
-        # Inject into FIFA if not already done
         pid = self._resolve_fifa_pid()
-        if pid and not inj.is_injected(pid):
-            ok = inj.inject(pid)
-            if not ok:
-                self.log("D3D overlay: injection failed, using modal fallback")
-                return False
-            self.log(f"D3D overlay: DLL injected into FIFA pid {pid}")
-        elif not pid:
-            self.log("D3D overlay: FIFA not running, using modal fallback")
+        if not pid:
             return False
-        inj.show(stadium_name, detail or self.tr("stadium_modal.preparing"), progress,
-                 image_path=str(self._resolve_stadium_preview_path(stadium_name) or ""))
-        self._d3d_overlay_shown_at = time.monotonic()
-        self._stadium_loading_visible = True
-        self.log(f"Stadium notification via D3D overlay: {stadium_name}")
+        if not injector.is_injected(pid):
+            if not injector.inject(pid):
+                self.log("D3D overlay: injection failed")
+                return False
+            self.log(f"D3D stadium overlay injected into FIFA pid {pid}")
         return True
 
     def _cancel_stadium_loading_hide(self) -> None:
@@ -1065,6 +1230,7 @@ class Server16App(tk.Tk):
             except Exception:
                 pass
         if self.stadium_loading_modal is not None:
+            self.stadium_loading_bar.stop()
             self.stadium_loading_modal.withdraw()
         was_visible = self._stadium_loading_visible
         self._stadium_loading_visible = False
@@ -1093,11 +1259,61 @@ class Server16App(tk.Tk):
         if self.stadium_loading_value is not None:
             self.stadium_loading_value.set(max(0, min(100, value)))
         if self.stadium_loading_detail is not None:
+            self.stadium_loading_detail.configure(text=detail or self.tr("stadium_modal.preparing"))
+        if self.stadium_loading_detail is not None:
             self.stadium_loading_detail.configure(text=detail)
         if self._stadium_loading_visible:
             self._position_stadium_loading_modal()
             self.stadium_loading_modal.update_idletasks()
-            self.stadium_loading_modal.update()
+
+    def _show_asset_loading(self, kind: str, title: str, name: str, detail: str, progress: float) -> None:
+        if not self.show_stadium_loading_var.get():
+            return
+        previous = self._asset_loading_hide_jobs.pop(kind, None)
+        if previous is not None:
+            try:
+                self.after_cancel(previous)
+            except Exception:
+                pass
+        self._asset_loading_started_at[kind] = time.monotonic()
+        if self._d3d_injector is not None and self._d3d_injector.is_injected():
+            self._asset_loading_fallback.discard(kind)
+            self._d3d_injector.show_asset(kind, name, detail, progress)
+            return
+        self._asset_loading_fallback.add(kind)
+        self._show_stadium_loading_modal(name, detail, progress, title=title, use_d3d=False)
+
+    def _update_asset_loading(self, kind: str, progress: float, detail: str) -> None:
+        if kind in self._asset_loading_fallback:
+            self._update_stadium_loading_modal(progress, detail)
+        elif self._d3d_injector is not None and self._d3d_injector.is_injected():
+            self._d3d_injector.update_asset(kind, progress, detail)
+
+    def _hide_asset_loading(self, kind: str, delay_ms: int = 0) -> None:
+        if kind not in self._asset_loading_started_at and kind not in self._asset_loading_fallback:
+            return
+        previous = self._asset_loading_hide_jobs.pop(kind, None)
+        if previous is not None:
+            try:
+                self.after_cancel(previous)
+            except Exception:
+                pass
+        elapsed_ms = int((time.monotonic() - self._asset_loading_started_at.get(kind, time.monotonic())) * 1000)
+        wait_ms = max(delay_ms, 1200 - elapsed_ms)
+        if wait_ms > 0:
+            self._asset_loading_hide_jobs[kind] = self.after(wait_ms, self._finish_asset_loading, kind)
+            return
+        self._finish_asset_loading(kind)
+
+    def _finish_asset_loading(self, kind: str) -> None:
+        self._asset_loading_hide_jobs.pop(kind, None)
+        self._asset_loading_started_at.pop(kind, None)
+        if kind in self._asset_loading_fallback:
+            self._asset_loading_fallback.discard(kind)
+            if not self._stadium_task_running and not self._asset_loading_fallback:
+                self._hide_stadium_loading_modal()
+        elif self._d3d_injector is not None:
+            self._d3d_injector.hide_asset(kind)
 
     def _position_stadium_loading_modal(self) -> None:
         if self.stadium_loading_modal is None:
@@ -1149,10 +1365,7 @@ class Server16App(tk.Tk):
             self._update_stadium_preview(text)
 
     def _set_display_async(self, key: str, text: str) -> None:
-        try:
-            self.after(0, lambda: self._set_display(key, text))
-        except Exception:
-            pass
+        self._post_ui(self._set_display,key,text)
 
     def _on_dashboard_configure(self, _event=None) -> None:
         if self.dashboard_canvas is not None and self.dashboard_content is not None:
@@ -1473,7 +1686,7 @@ class Server16App(tk.Tk):
     def _build_modules_card(self, parent: tk.Misc, row: int) -> None:
         card = self._card(parent, "card.modules.title", "card.modules.subtitle")
         card.grid(row=row, column=0, sticky="ew")
-        card.configure(height=256)
+        card.configure(height=328)
         card.grid_propagate(False)
         modules = tk.Frame(card, bg=self.card)
         modules.pack(fill="x", padx=12, pady=(6, 12))
@@ -1488,6 +1701,7 @@ class Server16App(tk.Tk):
             "StadiumName",
             "AwayChants",
             "AwayClubSong",
+            "TeamEntrance",
             "DiscordRPC",
         ]
         for idx, name in enumerate(module_names):
@@ -1512,6 +1726,28 @@ class Server16App(tk.Tk):
             command=self._toggle_stadium_loading_visibility,
         )
         notification_switch.pack(anchor="w", padx=12, pady=(0, 10))
+        self.keep_open_switch = ttk.Checkbutton(
+            card,
+            style="Switch.TCheckbutton",
+            text=self.tr("toggle.keep_open"),
+            variable=self.keep_open_var,
+            command=self._toggle_keep_open,
+        )
+        self.keep_open_switch.pack(anchor="w", padx=12, pady=(0, 10))
+        self.random_stadium_switch = ttk.Checkbutton(
+            card,
+            style="Switch.TCheckbutton",
+            text=self.tr("toggle.random_stadium_selection"),
+            variable=self.random_stadium_selection_var,
+            command=self._toggle_random_stadium_selection,
+        )
+        self.random_stadium_switch.pack(anchor="w", padx=12, pady=(0, 10))
+        self._regen_bh_btn = ttk.Button(
+            card,
+            text=self.tr("button.regen_bh"),
+            command=self._run_regen_bh,
+        )
+        self._regen_bh_btn.pack(fill="x", padx=12, pady=(0, 10))
 
     def _toggle_discord_rpc(self) -> None:
         """Toggle DiscordRPC on/off and save to settings."""
@@ -1561,6 +1797,117 @@ class Server16App(tk.Tk):
             return
         self._hide_stadium_loading_modal()
 
+    def _toggle_keep_open(self) -> None:
+        self.settings.keep_open_on_game_close = self.keep_open_var.get()
+        self.settings.save()
+
+    def _toggle_random_stadium_selection(self) -> None:
+        self.settings.random_stadium_selection = self.random_stadium_selection_var.get()
+        self.settings.save()
+
+    def _refresh_bh_button_state(self) -> None:
+        button = getattr(self, "_regen_bh_btn", None)
+        if button is None:
+            return
+        fifa_exe = getattr(self, "fifaEXE", "default")
+        ready = (
+            not getattr(self, "_bh_regen_running", False)
+            and fifa_exe != "default"
+            and Path(fifa_exe).is_file()
+            and not self._is_target_process_running()
+        )
+        button.configure(state="normal" if ready else "disabled")
+
+    def _run_bh_regen_blocking(self) -> tuple[int, int] | None:
+        dll_candidates = (
+            self.resource_dir / "bin" / "FifaLibrary16.dll",
+            self.base_dir / "bin" / "FifaLibrary16.dll",
+        )
+        dll_path = next((path for path in dll_candidates if path.is_file()), None)
+        worker_candidates = (
+            self.resource_dir / "server16_py" / "bh_worker.py",
+            self.base_dir / "server16_py" / "bh_worker.py",
+            Path(__file__).resolve().parent / "bh_worker.py",
+        )
+        worker_path = next((path for path in worker_candidates if path.is_file()), None)
+        python32_candidates = (
+            self.resource_dir / "bin" / "python32" / "python.exe",
+            self.base_dir / "bin" / "python32" / "python.exe",
+        )
+        python32 = next((path for path in python32_candidates if path.is_file()), None)
+        if dll_path is None or worker_path is None or python32 is None:
+            self.log("Regenerate BH unavailable: bundled bridge files are missing")
+            return None
+
+        self.log(f"Regenerating BH for {self.exedir}")
+        self._post_ui(self._set_progress, 0, "Regenerating BH...")
+        worker_env = dict(os.environ)
+        worker_env["PYTHONNOUSERSITE"] = "1"
+        process = subprocess.Popen(
+            [str(python32), str(worker_path), str(dll_path), str(self.exedir)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            env=worker_env,
+        )
+        ok = failed = 0
+        if process.stdout is not None:
+            for raw_line in process.stdout:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    self.log(f"[BH worker] {line}")
+                    continue
+                event_type = event.get("t")
+                if event_type == "progress":
+                    total = max(1, int(event.get("total", 1)))
+                    current = int(event.get("i", 0))
+                    value = current / total * 100
+                    status = "ok" if event.get("ok") else f"failed: {event.get('error', '')}"
+                    self.log(f"BH {event.get('file', '?')} -> {status}")
+                    self._post_ui(self._set_progress,value,f"Regenerating BH ({current}/{total})")
+                elif event_type == "done":
+                    ok = int(event.get("ok", 0))
+                    failed = int(event.get("failed", 0))
+                    self.log(f"BH regeneration complete: {ok} ok, {failed} failed")
+                elif event_type == "error":
+                    self.log(f"BH regeneration failed: {event.get('msg', 'unknown error')}")
+        process.wait()
+        return ok, failed
+
+    def _run_regen_bh(self) -> None:
+        if getattr(self, "_bh_regen_running", False):
+            return
+        if getattr(self, "fifaEXE", "default") == "default" or not Path(self.fifaEXE).is_file():
+            self.log("Regenerate BH skipped: FIFA 16 EXE is not linked")
+            return
+        if self._is_target_process_running():
+            self.log("Regenerate BH skipped while FIFA 16 is running")
+            return
+        self._bh_regen_running = True
+        self._refresh_bh_button_state()
+
+        def finish() -> None:
+            self._bh_regen_running = False
+            self._set_progress(0, self.display_value("idle"))
+            self._refresh_bh_button_state()
+
+        def work() -> None:
+            try:
+                self._run_bh_regen_blocking()
+            except Exception as exc:
+                self.log(f"BH regeneration failed: {exc}")
+            finally:
+                self._post_ui(finish)
+
+        threading.Thread(target=work, name="bh-regenerator", daemon=True).start()
+
     def _build_audio_card(self) -> None:
         card = self._card(self.audio_tab, "card.chants.title", "card.chants.subtitle")
         card.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1580,7 +1927,138 @@ class Server16App(tk.Tk):
         self._build_stat(body, 4, 1, "stat.next_behavior", "audio_next", "-")
         self._build_stat(body, 5, 0, "stat.home_goals", "home_goals", "0")
         self._build_stat(body, 5, 1, "stat.away_goals", "away_goals", "0")
-        ttk.Button(card, text=self.tr("button.edit_chants_settings"), command=self.open_audio_settings_editor).pack(fill="x", padx=12, pady=(0, 12))
+        button_row = tk.Frame(card, bg=self.card)
+        button_row.pack(fill="x", padx=12, pady=(0, 12))
+        self._chants_fix_button = ttk.Button(
+            button_row,
+            text=self.tr("button.fix_chants_audio"),
+            command=self._run_fix_chants_audio,
+        )
+        self._chants_fix_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self._chants_settings_button = ttk.Button(
+            button_row,
+            text=self.tr("button.edit_chants_settings"),
+            command=self.open_audio_settings_editor,
+        )
+        self._chants_settings_button.pack(side="left", fill="x", expand=True)
+
+    def _set_chants_fix_buttons_enabled(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        for name in ("_chants_fix_button", "_chants_settings_button"):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.configure(state=state)
+
+    def _run_fix_chants_audio(self) -> None:
+        self._set_chants_fix_buttons_enabled(False)
+
+        def scan() -> None:
+            try:
+                paths = self.chants_runtime.scan_chants_audio_files()
+            except Exception as exc:
+                self.log(f"Scan chants audio failed: {exc}")
+                paths = None
+            self._post_ui(after_scan,paths)
+
+        def after_scan(paths: list[Path] | None) -> None:
+            self._set_chants_fix_buttons_enabled(True)
+            if paths is None:
+                messagebox.showerror(self.tr("message.chants"), self.tr("message.chants_fix_error"))
+            elif not paths:
+                messagebox.showinfo(self.tr("message.chants"), self.tr("message.chants_fix_none"))
+            else:
+                self._open_chants_fix_dialog(paths)
+
+        threading.Thread(target=scan, daemon=True).start()
+
+    def _open_chants_fix_dialog(self, paths: list[Path]) -> None:
+        root_dir = self.exedir / "FSW" / "Chants"
+        win = tk.Toplevel(self._window())
+        win.title(self.tr("dialog.chants_fix.title"))
+        win.configure(bg=self.card)
+        win.geometry("560x460")
+        win.transient(self._window())
+        win.grab_set()
+        tk.Label(
+            win,
+            text=self.tr("dialog.chants_fix.hint", count=len(paths)),
+            bg=self.card,
+            fg=self.muted,
+            justify="left",
+            anchor="w",
+            wraplength=520,
+        ).pack(fill="x", padx=12, pady=(12, 6))
+        keep_backup_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            win,
+            text=self.tr("dialog.chants_fix.keep_backup"),
+            variable=keep_backup_var,
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+        listbox = tk.Listbox(
+            win,
+            selectmode="extended",
+            exportselection=False,
+            bg=self.panel_alt,
+            fg=self.fg,
+            selectbackground="#1b3453",
+            selectforeground=self.fg,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        listbox.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        for path in paths:
+            try:
+                label = str(path.relative_to(root_dir))
+            except ValueError:
+                label = str(path)
+            listbox.insert("end", label)
+        listbox.selection_set(0, "end")
+
+        button_row = tk.Frame(win, bg=self.card)
+        button_row.pack(fill="x", padx=12, pady=(0, 12))
+
+        def select_all() -> None:
+            listbox.selection_set(0, "end")
+
+        def do_fix() -> None:
+            selection = listbox.curselection()
+            if not selection:
+                return
+            selected_paths = [paths[index] for index in selection]
+            win.destroy()
+            self._run_fix_chants_audio_confirmed(selected_paths, keep_backup_var.get())
+
+        ttk.Button(button_row, text=self.tr("dialog.chants_fix.select_all"), command=select_all).pack(side="left")
+        ttk.Button(button_row, text=self.tr("button.fix_chants_audio"), command=do_fix).pack(side="right")
+
+    def _run_fix_chants_audio_confirmed(self, paths: list[Path], keep_backup: bool) -> None:
+        self._set_chants_fix_buttons_enabled(False)
+
+        def work() -> None:
+            try:
+                counts = self.chants_runtime.fix_chants_audio_files(paths, keep_backup=keep_backup)
+            except Exception as exc:
+                self.log(f"Fix chants audio failed: {exc}")
+                counts = None
+            self._post_ui(done,counts)
+
+        def done(counts: dict[str, int] | None) -> None:
+            self._set_chants_fix_buttons_enabled(True)
+            if counts is None:
+                messagebox.showerror(self.tr("message.chants"), self.tr("message.chants_fix_error"))
+                return
+            messagebox.showinfo(
+                self.tr("message.chants"),
+                self.tr(
+                    "message.chants_fix_result",
+                    fixed=counts["fixed"],
+                    clean=counts["already_clean"],
+                    errors=counts["errors"],
+                ),
+            )
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _build_camera_tab(self) -> None:
         card_host = tk.Frame(self.camera_tab, bg=self.bg)
@@ -1976,38 +2454,47 @@ class Server16App(tk.Tk):
         key = "button.checking_update" if self._update_check_in_progress else "button.check_update"
         return self.tr(key)
 
-    def check_updates(self) -> None:
+    def _set_update_badge_visible(self, visible: bool) -> None:
+        self._update_available = visible
+        if self.check_update_badge is None:
+            return
+        if visible:
+            self.check_update_badge.pack(side="right", padx=(0, 6))
+        else:
+            self.check_update_badge.pack_forget()
+
+    def check_updates(self, *, silent: bool = False) -> None:
         if self._update_check_in_progress:
             return
         self._update_check_in_progress = True
-        if self.check_update_button is not None:
+        if not silent and self.check_update_button is not None:
             self.check_update_button.configure(state="disabled", text=self._check_update_button_text())
-        self.log("Checking for updates on GitHub releases")
-        threading.Thread(target=self._run_check_updates_worker, daemon=True).start()
+        self.log("Checking for updates on GitHub releases" + (" (background)" if silent else ""))
+        threading.Thread(target=self._run_check_updates_worker, args=(silent,), daemon=True).start()
 
-    def _run_check_updates_worker(self) -> None:
+    def _run_check_updates_worker(self, silent: bool = False) -> None:
         result = self._update_checker.check_latest_release(self.app_version)
-        window = self._window()
-        try:
-            window.after(0, lambda: self._handle_check_updates_result(result))
-        except Exception:
-            pass
+        self._post_ui(self._handle_check_updates_result,result,silent)
 
-    def _handle_check_updates_result(self, result: UpdateCheckResult) -> None:
+    def _handle_check_updates_result(self, result: UpdateCheckResult, silent: bool = False) -> None:
         self._update_check_in_progress = False
         if self.check_update_button is not None:
             self.check_update_button.configure(state="normal", text=self._check_update_button_text())
 
         if not result.ok:
             self.log(f"Update check failed: {result.error}")
-            messagebox.showerror(
-                self.tr("message.update_check_title"),
-                self.tr("message.update_check_error", error=result.error),
-            )
+            if not silent:
+                messagebox.showerror(
+                    self.tr("message.update_check_title"),
+                    self.tr("message.update_check_error", error=result.error),
+                )
             return
 
+        self._set_update_badge_visible(result.update_available)
         if result.update_available:
             self.log(f"Update available: v{result.latest_version} (current v{result.current_version})")
+            if silent:
+                return
             should_open = messagebox.askyesno(
                 self.tr("message.update_check_title"),
                 self.tr(
@@ -2024,10 +2511,11 @@ class Server16App(tk.Tk):
             return
 
         self.log(f"No updates found. Current version is v{result.current_version}")
-        messagebox.showinfo(
-            self.tr("message.update_check_title"),
-            self.tr("message.update_none", current=result.current_version),
-        )
+        if not silent:
+            messagebox.showinfo(
+                self.tr("message.update_check_title"),
+                self.tr("message.update_none", current=result.current_version),
+            )
 
     def _set_progress(self, value: float, text: str) -> None:
         if self.progress_value is not None:
@@ -2036,7 +2524,10 @@ class Server16App(tk.Tk):
             self.progress_text_label.configure(text=text)
         self._set_display("status", text)
         if self._stadium_task_running:
-            self._update_stadium_loading_modal(value, text)
+            try:
+                self._update_stadium_loading_modal(value, text)
+            except Exception as exc:
+                self.log("Stadium loading notification update failed", exc)
         self.update_idletasks()
 
     def _set_process_status(self, text: str, color: str | None = None) -> None:
@@ -2066,9 +2557,16 @@ class Server16App(tk.Tk):
                 self._set_progress(value, text)
             elif kind == "done":
                 _, payload = event
-                self._finish_stadium_apply(payload)
+                try:
+                    self._finish_stadium_apply(payload)
+                except Exception as exc:
+                    self.stadium_runtime.cancel_pending_selection()
+                    self._set_progress(100, f'Failed to apply stadium: {exc}')
+                    self._set_process_status(self.status_text('stadium_error'), self.error)
+                    self.log('Failed to finish stadium application', exc, exc_info=sys.exc_info())
             elif kind == "error":
                 _, message = event
+                self.stadium_runtime.cancel_pending_selection()
                 short_message = str(message).splitlines()[0] if message else self.status_text("stadium_error")
                 self._set_progress(100, short_message)
                 self._stadium_task_running = False
@@ -2099,7 +2597,10 @@ class Server16App(tk.Tk):
         self.Ndest = self.exedir / "data" / "sceneassets" / "goalnet"
         self.PitchMowdest = self.exedir / "data" / "sceneassets" / "pitch"
         self.settings_ini = SessionIniFile(self.exedir / "FSW" / "settings.ini")
+        self.audio_profiles.bind(self.exedir if self.fifaEXE != 'default' else None)
+        self.audio_profiles.sync(force=True)
         self._load_module_states()
+        self._refresh_bh_button_state()
         self._update_audio_overview()
         if load_team_database:
             self._load_team_database()
@@ -2111,7 +2612,7 @@ class Server16App(tk.Tk):
         return paths[0]
 
     def _load_module_states(self) -> None:
-        module_names = ["Stadium", "TvLogo", "ScoreBoard", "Movies", "Autorun", "StadiumNet", "Chants", "StadiumName", "AwayChants", "AwayClubSong"]
+        module_names = ["Stadium", "TvLogo", "ScoreBoard", "Movies", "Autorun", "StadiumNet", "Chants", "StadiumName", "AwayChants", "AwayClubSong", "TeamEntrance"]
         self.module_states = {name: self.settings_ini.read(name, "Modules") == "1" for name in module_names}
         previous_rpc_state = self._discord_rpc_enabled
         discord_ini_value = self.settings_ini.read("DiscordRPC", "Modules")
@@ -2170,6 +2671,102 @@ class Server16App(tk.Tk):
     def open_audio_settings_editor(self) -> None:
         self._open_settings_editor("audio", "dialog.editor.section.chants_settings", audio_specs())
 
+    def get_imgbb_api_key(self) -> str:
+        discord_config = self.settings.data.get("discord_rpc", {})
+        return (discord_config.get("stadium_preview_imgbb_api_key", "") or "").strip()
+
+    def set_imgbb_api_key(self, key: str) -> None:
+        discord_config = dict(self.settings.data.get("discord_rpc", {}))
+        discord_config["stadium_preview_imgbb_api_key"] = (key or "").strip()
+        self.settings.data["discord_rpc"] = discord_config
+        self.settings.save()
+
+    def _rebuild_stadium_preview_uploader(self) -> None:
+        discord_config = self.settings.data.get("discord_rpc", {})
+        provider = (discord_config.get("stadium_preview_provider", "discord_webhook") or "discord_webhook").strip().lower()
+        webhook_url = discord_config.get("stadium_preview_webhook", "")
+        imgur_client_id = (discord_config.get("stadium_preview_imgur_client_id", "") or "").strip()
+        imgbb_api_key = self.get_imgbb_api_key()
+        enabled = (
+            bool(webhook_url)
+            or (provider == "imgur" and bool(imgur_client_id))
+            or (provider == "imgbb" and bool(imgbb_api_key))
+        )
+        if not enabled:
+            self._stadium_preview_uploader = None
+            return
+        uploader = StadiumPreviewUploader(
+            webhook_url,
+            provider=provider,
+            imgur_client_id=imgur_client_id,
+            imgbb_api_key=imgbb_api_key,
+        )
+        uploader.add_upload_callback(self._on_stadium_preview_uploaded)
+        self._stadium_preview_uploader = uploader
+
+    def _change_imgbb_api_key(self) -> None:
+        dialog = ImgbbApiKeyDialog(self, self.get_imgbb_api_key())
+        self.wait_window(dialog)
+        new_key = dialog.result
+        if new_key is None:
+            return
+        self.set_imgbb_api_key(new_key)
+        self._rebuild_stadium_preview_uploader()
+        self._discord_rpc_last_presence = None
+        self.log("ImgBB API key updated")
+        messagebox.showinfo(self.tr("dialog.imgbb_key.title"), self.tr("message.imgbb_key_saved"))
+
+    def _clean_generated_cache(self) -> None:
+        if not messagebox.askyesno(
+            self.tr("message.clean_cache_title"),
+            self.tr("message.clean_cache_confirm"),
+        ):
+            return
+        try:
+            bytes_freed, folders_removed = clear_generated_cache(self.base_dir)
+        except Exception as exc:
+            self.log("Error clearing generated cache", exc, exc_info=sys.exc_info())
+            messagebox.showerror(
+                self.tr("message.clean_cache_title"),
+                self.tr("message.clean_cache_error", error=exc),
+            )
+            return
+        if folders_removed == 0:
+            self.log("Clean cache: nothing to clean")
+            messagebox.showinfo(self.tr("message.clean_cache_title"), self.tr("message.clean_cache_empty"))
+            return
+        size_mb = bytes_freed / (1024 * 1024)
+        size_text = f"{size_mb:.1f} MB" if size_mb >= 0.1 else f"{bytes_freed} B"
+        self.log(f"Clean cache: removed {folders_removed} folder(s), freed {size_text}")
+        messagebox.showinfo(
+            self.tr("message.clean_cache_title"),
+            self.tr("message.clean_cache_done", size=size_text, count=folders_removed),
+        )
+
+    def _check_fifa_location(self) -> bool:
+        if self.fifaEXE == "default":
+            return True
+        try:
+            fifa_dir = self.exedir.resolve()
+            app_dir = self.base_dir.resolve()
+        except Exception:
+            return True
+        if fifa_dir == app_dir:
+            return True
+        self.log(
+            "CGFS16 is not in the same folder as the linked FIFA 16 executable "
+            f"(app: {app_dir}, FIFA: {fifa_dir}) -- Launch FIFA and file operations may not work correctly"
+        )
+        self._dismiss_launch_splash()
+        dialog = FifaLocationWarningDialog(self, fifa_dir, app_dir)
+        self.wait_window(dialog)
+        if dialog.result:
+            self.log("User chose to continue despite the FIFA location mismatch (unstable mode)")
+            return True
+        self.log("Closing application: user chose to close after the FIFA location mismatch warning")
+        self.on_close()
+        return False
+
     def select_fifa_exe(self) -> None:
         filename = filedialog.askopenfilename(filetypes=[("Executable", "*.exe")], title=self.tr("filedialog.select_fifa_exe"))
         if not filename:
@@ -2183,6 +2780,8 @@ class Server16App(tk.Tk):
             self.settings.fifa_exe = filename
             self._set_progress(24, self.progress_text("configuring_paths"))
             self.setuppaths(load_team_database=False)
+            if not self._check_fifa_location():
+                return
             self._load_team_database(lambda value, text: self._set_progress(value, text))
             self._set_progress(82, self.progress_text("applying_bootstrap"))
             self.apply_bootstrap_files()
@@ -2196,8 +2795,11 @@ class Server16App(tk.Tk):
             self.log("Failed while loading FIFA data after selecting executable", exc, exc_info=sys.exc_info())
             messagebox.showerror(self.tr("message.fifa16"), self.tr("message.error.load_fifa_data"))
         finally:
-            window.configure(cursor="")
-            window.update_idletasks()
+            try:
+                window.configure(cursor="")
+                window.update_idletasks()
+            except Exception:
+                pass
 
     def _auto_detect_fifa_exe(self) -> Path | None:
         for name in ("fifa16.exe", "FIFA16.exe", "FIFA 16.exe", "fifa 16.exe"):
@@ -2267,16 +2869,16 @@ class Server16App(tk.Tk):
         def _worker() -> None:
             try:
                 db = FifaDatabase(fifa_root)
-                self.after(0, lambda: _report_progress(40, self.progress_text("connecting_database")))
+                self._post_ui(_report_progress,40,self.progress_text("connecting_database"))
                 if not db.connect():
                     reason = db.last_error or "unknown reason"
-                    self.after(0, lambda: _apply_failure(reason))
+                    self._post_ui(_apply_failure,reason)
                     return
-                self.after(0, lambda: _report_progress(80, self.progress_text("loading_teams")))
+                self._post_ui(_report_progress,80,self.progress_text("loading_teams"))
                 team_count = db.load_all_teams()
-                self.after(0, lambda: _apply_success(db, team_count))
+                self._post_ui(_apply_success,db,team_count)
             except Exception as exc:
-                self.after(0, lambda: _apply_error(str(exc)))
+                self._post_ui(_apply_error,str(exc))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -2300,6 +2902,9 @@ class Server16App(tk.Tk):
 
     def _has_active_custom_stadium_assignment(self) -> bool:
         """Return True when current context resolves to a custom stadium assignment in settings.ini."""
+        manual = getattr(self,'_manual_stadium_override',None)
+        if manual and manual[0] == (self._kickoff_generation,self.HID,self.AID,self.TOURNAME,self.TOURROUNDID):
+            return True
         if not hasattr(self, "settings_ini") or self.settings_ini is None:
             return False
         try:
@@ -2359,7 +2964,13 @@ class Server16App(tk.Tk):
         if self._closing:
             return
         try:
+            if self._stadium_selector is not None:
+                self._stadium_selector.tick()
+                if self._stadium_selector.opened:
+                    self._overlay_job=self.after(40,self.overlay_loop)
+                    return
             self._sync_overlay_hotkey()
+            self._sync_crowd_volume_controller()
             if self._overlay_visible:
                 self._position_overlay()
         except Exception as exc:
@@ -2387,6 +2998,213 @@ class Server16App(tk.Tk):
         self._overlay_space_down = key_down
         if self._overlay_visible and not self._fifa_hwnd:
             self._hide_overlay()
+
+    def _build_crowd_volume_window(self) -> None:
+        """Create the non-activating floating crowd-volume control."""
+        window = tk.Toplevel(self._window())
+        window.withdraw()
+        window.overrideredirect(True)
+        window.attributes("-topmost", True)
+        window.configure(bg=self.card)
+        window.protocol("WM_DELETE_WINDOW", self._hide_crowd_volume_popup)
+
+        frame = tk.Frame(window, bg=self.card, highlightthickness=1, highlightbackground=self.gold)
+        frame.pack(fill="both", expand=True, padx=1, pady=1)
+        tk.Label(
+            frame,
+            text="VOLUME DA TORCIDA",
+            bg=self.card,
+            fg=self.gold,
+            font=("Bahnschrift", 11, "bold"),
+        ).pack(anchor="w", padx=14, pady=(10, 0))
+        self._crowd_volume_value_label = tk.Label(
+            frame,
+            text="100%",
+            bg=self.card,
+            fg=self.fg,
+            font=("Bahnschrift", 14, "bold"),
+        )
+        self._crowd_volume_value_label.pack(anchor="e", padx=14, pady=(0, 2))
+        self._crowd_volume_canvas = tk.Canvas(
+            frame,
+            width=330,
+            height=24,
+            bg=self.panel,
+            highlightthickness=0,
+        )
+        self._crowd_volume_canvas.pack(fill="x", padx=14, pady=(0, 2))
+        tk.Label(
+            frame,
+            text="Select + Start  •  D-pad / analógico esquerdo para ajustar",
+            bg=self.card,
+            fg=self.muted,
+            font=("Bahnschrift", 8),
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+        self._update_crowd_volume_popup()
+        self._crowd_volume_window = window
+
+    def _update_crowd_volume_popup(self) -> None:
+        value = self.settings.crowd_master_volume
+        percent = round(value * 100)
+        if self._crowd_volume_value_label is not None:
+            self._crowd_volume_value_label.configure(text=f"{percent}%")
+        canvas = self._crowd_volume_canvas
+        if canvas is None:
+            return
+        canvas.delete("all")
+        width = max(1, int(canvas.winfo_width() or 330))
+        height = max(1, int(canvas.winfo_height() or 24))
+        left = 2
+        top = 5
+        right = width - 2
+        bottom = height - 5
+        canvas.create_rectangle(left, top, right, bottom, fill="#15243a", outline="#314b6d")
+        fill_right = left + int((right - left) * (value / 2.0))
+        if fill_right > left:
+            canvas.create_rectangle(left, top, fill_right, bottom, fill=self.accent, outline="")
+        for mark in range(1, 10):
+            x = left + int((right - left) * mark / 10)
+            canvas.create_line(x, top + 2, x, bottom - 2, fill="#476080")
+
+    def _position_crowd_volume_window(self) -> None:
+        window = self._crowd_volume_window
+        if window is None:
+            return
+        window.update_idletasks()
+        width = max(360, int(window.winfo_reqwidth()))
+        height = max(108, int(window.winfo_reqheight()))
+        rect = RECT()
+        if self._fifa_hwnd and self.user32.GetWindowRect(self._fifa_hwnd, ctypes.byref(rect)):
+            game_width = max(1, rect.right - rect.left)
+            game_height = max(1, rect.bottom - rect.top)
+            x = rect.left + max(0, (game_width - width) // 2)
+            y = rect.top + max(8, game_height - height - 70)
+        else:
+            root = self._window()
+            x = root.winfo_rootx() + max(0, (root.winfo_width() - width) // 2)
+            y = root.winfo_rooty() + max(0, (root.winfo_height() - height) // 2)
+        window.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _show_crowd_volume_popup(self) -> None:
+        window = self._crowd_volume_window
+        if window is None:
+            return
+        self._update_crowd_volume_popup()
+        self._position_crowd_volume_window()
+        window.deiconify()
+        window.update_idletasks()
+        self._crowd_volume_hwnd = int(window.winfo_id())
+        self._apply_noactivate_window_style(self._crowd_volume_hwnd)
+        try:
+            self.user32.ShowWindow(self._crowd_volume_hwnd, SW_SHOWNOACTIVATE)
+        except Exception:
+            pass
+        self._crowd_volume_visible = True
+        self._crowd_volume_hide_at = perf_counter() + 3.0
+
+    def _hide_crowd_volume_popup(self) -> None:
+        if self._crowd_master_volume_dirty:
+            try:
+                self.settings.save()
+            except Exception as exc:
+                self.log("Failed to save crowd master volume", exc)
+            self._crowd_master_volume_dirty = False
+        window = self._crowd_volume_window
+        if window is not None:
+            try:
+                window.withdraw()
+            except Exception:
+                pass
+        self._crowd_volume_visible = False
+        self._crowd_volume_hide_at = 0.0
+
+    def _set_crowd_master_volume(self, value: float) -> None:
+        value = max(0.0, min(2.0, round(float(value), 2)))
+        if abs(value - self.settings.crowd_master_volume) < 0.0001:
+            return
+        self.settings.data["CROWD_MASTER_VOLUME"] = value
+        self._crowd_master_volume_dirty = True
+        self.audio_profiles.sync(force=True)
+        self._update_crowd_volume_popup()
+
+    def _adjust_crowd_master_volume(self, direction: int) -> None:
+        self._set_crowd_master_volume(self.settings.crowd_master_volume + (0.05 * direction))
+        self._show_crowd_volume_popup()
+
+    def _sync_crowd_volume_controller(self) -> None:
+        """Read Start+Select and adjust only the crowd audio multiplier."""
+        selector = self._stadium_selector
+        if selector is not None and selector.shared.enabled == 2:
+            self._crowd_volume_previous_buttons = 0
+            self._crowd_volume_combo_latched = False
+            if self._crowd_volume_visible:
+                self._hide_crowd_volume_popup()
+            return
+        if not self._overlay_enabled:
+            self._crowd_volume_previous_buttons = 0
+            self._crowd_volume_start_pressed_at = 0.0
+            self._crowd_volume_back_pressed_at = 0.0
+            if self._crowd_volume_visible:
+                self._hide_crowd_volume_popup()
+            return
+
+        if not self._fifa_hwnd:
+            self._crowd_volume_previous_buttons = 0
+            self._crowd_volume_combo_latched = False
+            if self._crowd_volume_visible:
+                self._hide_crowd_volume_popup()
+            return
+
+        sample = self._crowd_volume_gamepad.poll()
+        now = perf_counter()
+        buttons = sample.buttons if sample is not None else 0
+        previous = self._crowd_volume_previous_buttons
+        start_down = bool(buttons & XINPUT_GAMEPAD_START)
+        back_down = bool(buttons & XINPUT_GAMEPAD_BACK)
+        start_edge = start_down and not bool(previous & XINPUT_GAMEPAD_START)
+        back_edge = back_down and not bool(previous & XINPUT_GAMEPAD_BACK)
+        if start_edge:
+            self._crowd_volume_start_pressed_at = now
+        if back_edge:
+            self._crowd_volume_back_pressed_at = now
+
+        combo_edge = (
+            (start_down and back_down and not self._crowd_volume_combo_latched)
+            or (start_edge and now - self._crowd_volume_back_pressed_at <= 0.35)
+            or (back_edge and now - self._crowd_volume_start_pressed_at <= 0.35)
+        )
+        if combo_edge:
+            self._crowd_volume_combo_latched = True
+            if self._crowd_volume_visible:
+                self._hide_crowd_volume_popup()
+            else:
+                self._show_crowd_volume_popup()
+        if not start_down and not back_down:
+            self._crowd_volume_combo_latched = False
+
+        direction = 0
+        if buttons & XINPUT_GAMEPAD_DPAD_LEFT:
+            direction = -1
+        elif buttons & XINPUT_GAMEPAD_DPAD_RIGHT:
+            direction = 1
+        elif sample is not None and sample.left_x <= -16000:
+            direction = -1
+        elif sample is not None and sample.left_x >= 16000:
+            direction = 1
+
+        if self._crowd_volume_visible and direction:
+            if direction != self._crowd_volume_last_direction:
+                self._crowd_volume_next_adjust_at = now
+            if now >= self._crowd_volume_next_adjust_at:
+                self._adjust_crowd_master_volume(direction)
+                self._crowd_volume_next_adjust_at = now + 0.12
+        else:
+            self._crowd_volume_last_direction = 0
+        self._crowd_volume_last_direction = direction
+        self._crowd_volume_previous_buttons = buttons
+
+        if self._crowd_volume_visible and now >= self._crowd_volume_hide_at:
+            self._hide_crowd_volume_popup()
 
     def _apply_noactivate_window_style(self, hwnd: int) -> None:
         if not hwnd:
@@ -2610,6 +3428,8 @@ class Server16App(tk.Tk):
         self.settings_ini.write(name, "1" if enabled else "0", "Modules")
         self.settings_ini.save()
         self.module_states[name] = enabled
+        if name == "TeamEntrance" and not enabled:
+            self.entrance_runtime.reset()
         self.log(f"Module '{name}' {'enabled' if enabled else 'disabled'} by user")
 
     def poll_process(self) -> None:
@@ -2631,9 +3451,22 @@ class Server16App(tk.Tk):
                 self._sync_page_banner("Process not running")
                 self._set_process_status(self.status_text("waiting_fifa"), self.accent)
                 if self._attached_once:
-                    self.log("Game process ended; closing server automatically")
-                    self.on_close()
-                    return
+                    self._match_audio_ended = True
+                    self._reset_team_entrance()
+                    self._reset_chants_state()
+                    if self.settings.keep_open_on_game_close:
+                        self.log("Game process ended; keeping server open")
+                        self._restore_native_runtime_assets()
+                        self.memory.close()
+                        self._attached_once = False
+                        self._clear_live_context()
+                        self._reset_team_entrance()
+                        self._reset_chants_state()
+                    else:
+                        self.log("Game process ended; closing server automatically")
+                        self.on_close()
+                        return
+                self._reset_team_entrance()
                 self._reset_chants_state()
         except Exception as exc:
             self._sync_page_banner(f"Polling error: {exc}")
@@ -2680,9 +3513,32 @@ class Server16App(tk.Tk):
     def _handle_page_transition(self, page_name: str) -> None:
         if page_name == self.lastpagename:
             return
+        previous_page = self.lastpagename
+        self.log(f"Page transition: {previous_page or '<startup>'} -> {page_name}")
         self.lastpagename = page_name
+        had_match_context = bool(self.HID or self.AID or self._last_runtime_signature is not None or self.matchstarted)
+        if outside_match_page(page_name):
+            self._match_audio_ended = True
+            # Request audio teardown BEFORE potentially slow asset restoration.
+            self._reset_chants_state()
+            self._reset_team_entrance()
+        if self._is_post_match_page(page_name) and not self._native_assets_restored_for_match:
+            if had_match_context:
+                self._restore_native_runtime_assets()
+                self._native_assets_restored_for_match = True
         if page_name == "game/screens/playNow/KickOffHub":
+            if (self.stadium_runtime.keep_manual_selection_on_setup_return(previous_page) or
+                (getattr(self,'_stadium_selector',None) is not None and
+                 self._stadium_selector.keep_crowd_on_setup_return(previous_page))):
+                self.pagechange = True
+                self.skillgamechange = self.bumperpagechange = False
+                self.log('Returned to pre-match setup; keeping manual stadium for the same fixture')
+                return
+            self._match_audio_ended = False
+            self._stadium_fixture_entered = False
+            self._manual_stadium_override = None
             self._kickoff_generation += 1
+            self._native_assets_restored_for_match = False
             self._last_stadium_applied_signature = None
             self.pagechange = True
             self.skillgamechange = False
@@ -2691,15 +3547,30 @@ class Server16App(tk.Tk):
             self._kickoff_retry_remaining = 12
             self._schedule_kickoff_retry()
             # Stop any audio still playing from the previous match
+            self._reset_team_entrance()
             self._reset_chants_state()
             return
         if "training/SkillGame" in page_name:
             self.skillgamechange = True
             return
-        if not page_name.strip() and not self.matchstarted and not self.skillgamechange:
+        if not page_name.strip() and not self.matchstarted and not self.skillgamechange and not self._match_audio_ended:
             self._start_chants_runtime()
+            # The FIFA "started" flag becomes true during the walkout, before
+            # the real kick-off.  Arm the crowd guard only when an entrance
+            # worker was actually scheduled; otherwise normal crowd audio
+            # must remain available when the feature is disabled or unmapped.
+            self._entrance_armed = False
+            self._entrance_pre_match_guard = False
+            self._entrance_pre_match_guard_set_at = 0.0
+            if self.module_enabled("TeamEntrance") and self._start_team_entrance():
+                self._entrance_armed = True
+                self._entrance_pre_match_guard = True
+                self._entrance_pre_match_guard_set_at = time.time()
             return
         if "TV/bumper" in page_name or "skillGames/SkillGa" in page_name:
+            if "TV/bumper" in page_name:
+                self._match_audio_ended = False
+                self._stadium_fixture_entered = True
             if not self.bumperpagechange and not self.skillgamechange:
                 self.pagechange = False
                 self.bumperpagechange = True
@@ -2719,9 +3590,14 @@ class Server16App(tk.Tk):
         self.bumperpagechange = False
         self.skillgamechange = False
 
+    @staticmethod
+    def _is_post_match_page(page_name: str) -> bool:
+        return post_match_page(page_name)
+
     def _clear_live_context(self) -> None:
         self.HID = ""
         self.AID = ""
+        self.audio_profiles.sync()
         self.STADID = ""
         self.TOURNAME = ""
         self.TOURROUNDID = ""
@@ -2856,6 +3732,7 @@ class Server16App(tk.Tk):
             self.HID = hid
         if aid not in {None, "0"}:
             self.AID = aid
+        self.audio_profiles.sync()
         if stadid not in {None, "0"}:
             self.STADID = stadid
         if tour not in {None, "0"}:
@@ -2863,6 +3740,7 @@ class Server16App(tk.Tk):
         if round_id not in {None, "0"}:
             self.TOURROUNDID = round_id
         if not any(value for value in (self.HID, self.AID, self.STADID, self.TOURNAME, self.TOURROUNDID)):
+            return
             return
         self.derby = f"{self.HID}vs{self.AID}"
         self._set_display("hid", self.HID or "-")
@@ -2924,18 +3802,15 @@ class Server16App(tk.Tk):
         return self._try_read_optional_int(static_ptr, offsets)
 
     def _is_game_running(self) -> bool:
-        try:
-            started = self.memory.get_int(self.offsets.GAMESTARTEDBINARYBASE, self.offsets.GAMESTARTEDBINARY)
-            ran_time = self.memory.get_int(self.offsets.GAMESTATSBASE, self.offsets.GAMERANTIME)
-            return started == 1 and ran_time >= 1 and "training/SkillGame" not in self.lastpagename
-        except Exception:
-            return False
+        return self._is_game_running_with(self.memory)
 
     def _is_game_running_with(self, memory: Memory) -> bool:
+        if self._match_audio_ended or outside_match_page(self.lastpagename) or pause_page(self.lastpagename):
+            return False
         try:
             started = memory.get_int(self.offsets.GAMESTARTEDBINARYBASE, self.offsets.GAMESTARTEDBINARY)
             ran_time = memory.get_int(self.offsets.GAMESTATSBASE, self.offsets.GAMERANTIME)
-            return started == 1 and ran_time >= 1 and "training/SkillGame" not in self.lastpagename
+            return started == 1 and ran_time >= 1
         except Exception:
             return False
 
@@ -2979,7 +3854,7 @@ class Server16App(tk.Tk):
         """Called after a stadium preview is uploaded to Discord webhook.
         Forces a DiscordRPC refresh so the new image URL is applied immediately."""
         self.log(f"Discord stadium preview uploaded: {stadium_name} -> {url}")
-        self._discord_rpc_last_presence = None
+        self._post_ui(setattr,self,'_discord_rpc_last_presence',None)
 
     def _update_discord_presence(self) -> None:
         """Update Discord Rich Presence with current match state."""
@@ -3175,8 +4050,21 @@ class Server16App(tk.Tk):
     def _start_chants_runtime(self) -> None:
         self.chants_runtime.start_chants_runtime()
 
+    def _start_team_entrance(self) -> bool:
+        return self.entrance_runtime.start_for_match()
+
+    def _restore_native_runtime_assets(self) -> None:
+        try:
+            restored = restore_native_assets(self)
+            self.log(f"Native runtime assets restored from FSW ({restored} files updated)")
+        except Exception as exc:
+            self.log("Failed to restore native runtime assets", exc, exc_info=sys.exc_info())
+
     def _reset_chants_state(self) -> None:
         self.chants_runtime.reset_chants_state()
+
+    def _reset_team_entrance(self) -> None:
+        self.entrance_runtime.reset()
 
     def _fade_player(self, player: MciAudioPlayer, start: float, end: float, duration_ms: int) -> None:
         self.chants_runtime.fade_player(player, start, end, duration_ms)
@@ -3233,10 +4121,48 @@ class Server16App(tk.Tk):
     def _assign_with_delete(self, comp: str, key: str, value: str, default_value: str, success_message: str) -> None:
         self.assignment_runtime.assign_with_delete(comp, key, value, default_value, success_message)
 
+    def _dismiss_launch_splash(self) -> None:
+        splash, self._launch_splash = self._launch_splash, None
+        if splash is not None:
+            try:
+                splash.close(wait=False)
+            except Exception:
+                pass
+
+    def _show_closing_splash(self):
+        try:
+            from .splash import SplashScreen
+
+        except Exception:
+            return None
+        for child in list(self.winfo_children()):
+            if isinstance(child, tk.Toplevel):
+                try:
+                    child.withdraw()
+                except Exception:
+                    pass
+        try:
+            return SplashScreen(self.tr("splash.closing"),master=self)
+        except Exception:
+            return None
+
     def on_close(self) -> None:
+        if self._closing:
+            return
         self._closing = True
+        if self._stadium_selector is not None:
+            self._stadium_selector.shutdown()
+            self._stadium_selector = None
+        if self._ui_event_job is not None:
+            self.after_cancel(self._ui_event_job)
+        self._dismiss_launch_splash()
+        closing_splash = self._show_closing_splash()
+        self._hide_crowd_volume_popup()
         self._chants_stop.set()
+        self._reset_team_entrance()
         self._reset_chants_state()
+        if not self._is_target_process_running():
+            self._restore_native_runtime_assets()
         # Disconnect DiscordRPC and clear presence
         try:
             self.discord_rpc.disconnect()
@@ -3284,6 +4210,11 @@ class Server16App(tk.Tk):
             self.memory.close()
         except Exception:
             pass
+        if closing_splash is not None:
+            try:
+                closing_splash.close(min_visible=0.7)
+            except Exception:
+                pass
         try:
             self.quit()
         except Exception:
@@ -3291,6 +4222,18 @@ class Server16App(tk.Tk):
         self.destroy()
 
 
-def main() -> None:
-    app = Server16App()
+def main(splash=None) -> None:
+    if os.name == "nt":
+        try:
+            shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+            set_app_id = shell32.SetCurrentProcessExplicitAppUserModelID
+            set_app_id.argtypes = [wintypes.LPCWSTR]
+            set_app_id.restype = ctypes.c_long
+            set_app_id("Igor1043.CGFS16.Server16Python")
+        except Exception:
+            pass
+    app = Server16App(splash=splash)
+    if app._closing:
+        return
+    app.after(150, app._dismiss_launch_splash)
     app.mainloop()
