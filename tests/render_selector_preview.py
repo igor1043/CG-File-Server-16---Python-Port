@@ -30,6 +30,14 @@ def main():
         selector.prematch_panel=PrematchPanel(selector)
         selector.render()
         copyfile(selector.shared.image_path,root/'prematch-menu-preview.png')
+        selector.controller_connected=True
+        selector.render()
+        copyfile(selector.shared.image_path,root/'prematch-menu-xbox-preview.png')
+        from server16_py.match_settings_panel import MatchSettingsPanel
+        selector.prematch_panel=MatchSettingsPanel(selector)
+        selector.render()
+        copyfile(selector.shared.image_path,root/'match-settings-preview.png')
+        selector.controller_connected=False
         selector.crowd_control.shared.current_percent=65
         selector.crowd_control.shared.automatic_percent=65
         selector.crowd_control.shared.ack=selector.crowd_control.shared.command
@@ -66,6 +74,10 @@ def main():
         selector.render()
         audio=root/'match-audio-preview.png'
         copyfile(selector.shared.image_path,audio)
+        selector.controller_connected=True
+        selector.render()
+        copyfile(selector.shared.image_path,root/'match-audio-xbox-preview.png')
+        selector.controller_connected=False
         print(audio)
         selector.audio_panel.runtime.save_match((.75,.5))
         selector.audio_panel=MatchAudioPanel(selector)

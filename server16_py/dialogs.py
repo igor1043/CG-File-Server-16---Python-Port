@@ -802,7 +802,7 @@ class FifaLocationWarningDialog(BaseDialog):
     """Warn when the app and the linked FIFA executable are not co-located."""
 
     def __init__(self, master: tk.Misc, fifa_dir: Path, app_dir: Path) -> None:
-        super().__init__(master, self.tr("dialog.fifa_location.title"))
+        super().__init__(master, master.tr("dialog.fifa_location.title"))
         self.geometry("520x300")
         self.resizable(False, False)
         self.protocol("WM_DELETE_WINDOW", lambda: self.close_ok(False))

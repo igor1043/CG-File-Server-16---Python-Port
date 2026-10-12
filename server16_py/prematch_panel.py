@@ -3,17 +3,24 @@ from __future__ import annotations
 import time
 from PIL import Image
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
+from .input_hints import action_label, navigation_hint, controller_connected, footer_y
+from .match_settings_panel import MatchSettingsPanel
+from .narration_panel import NarrationPanel
+from .panel_navigation import move_focus
 
 
 class PrematchPanel:
-    WIDTH, HEIGHT = 600, 350
-    CARDS = ((24, 91, 292, 256), (308, 91, 576, 256))
+    WIDTH, HEIGHT = 600, 390
+    CARDS = ((24,91,291,205),(309,91,576,205),(24,220,291,334),(309,220,576,334))
     BACK = (24, 278, 576, 320)
 
     def __init__(self, selector, crowd=False):
         self.selector = selector
         self.crowd = crowd
+        self.HEIGHT = 390 if crowd else 460
+        self.BACK = (24,278,576,320) if crowd else (24,350,576,392)
         self.focus = 0
+        self.column = 0
         self.message = ''
         self.command = None
         self.deadline = 0
@@ -55,6 +62,12 @@ class PrematchPanel:
                     return
                 selector.open()
                 selector.return_to_menu = True
+            elif focus == 2:
+                selector.prematch_panel = MatchSettingsPanel(selector)
+                selector.render()
+            elif focus == 3:
+                selector.prematch_panel = NarrationPanel(selector)
+                selector.render()
             else:
                 selector.close()
         elif focus == 1:
@@ -76,7 +89,7 @@ class PrematchPanel:
         if kind == 11:
             selector.close()
             return
-        if kind == 7 or (kind == 16 and value == 3):
+        if kind == 7 or (kind == 16 and value == (3 if self.crowd else 5)):
             selector.show_menu() if self.crowd else selector.close()
             return
         if kind == 16:
@@ -87,7 +100,7 @@ class PrematchPanel:
             elif value == 2:
                 self.activate(1)
             return
-        targets = [(0, (40, 148, 560, 190)), (1, (24, 278, 292, 320)), (2, (308, 278, 576, 320))] if self.crowd else [(i, rect) for i, rect in enumerate(self.CARDS)]+[(2,self.BACK)]
+        targets = [(0, (40, 148, 560, 190)), (1, (24, 278, 292, 320)), (2, (308, 278, 576, 320))] if self.crowd else [(i, rect) for i, rect in enumerate(self.CARDS)]+[(4,self.BACK)]
         if kind in (8, 12, 15):
             x, y = value & 65535, (value >> 16) & 65535
             target = next((focus for focus, rect in targets if rect[0]<=x<=rect[2] and rect[1]<=y<=rect[3]), None)
@@ -103,7 +116,7 @@ class PrematchPanel:
                 self.activate(target)
                 return
         elif kind in (4, 5, 9):
-            self.focus = (self.focus+(-1 if kind==4 else 1)) % 3
+            self.focus = move_focus(self.focus,kind,targets,2+self.column if not self.crowd else 2)
         elif kind in (2, 3):
             direction = -1 if kind==2 else 1
             if self.crowd and self.focus==0 and self.value is not None and self.command is None:
@@ -111,47 +124,58 @@ class PrematchPanel:
             elif self.crowd and self.focus>0:
                 self.focus = 1 if direction<0 else 2
             else:
-                self.focus=(self.focus+direction)%3
+                self.focus=move_focus(self.focus,kind,targets)
         elif kind == 6:
             self.activate(self.focus)
             return
+        if not self.crowd and self.focus<4:self.column=self.focus%2
         selector.render()
 
     def render(self):
         image=Image.new('RGBA',(self.WIDTH*2,self.HEIGHT*2))
         draw=OverlayDraw(image)
         blue, ink, muted = '#0968f8', '#344651', '#8797ab'
-        draw.rounded_rectangle((0,0,599,349),18,fill='white',outline='#e0e6ee')
+        draw.rounded_rectangle((0,0,599,self.HEIGHT-1),18,fill='white',outline='#e0e6ee')
         def text(x,y,label,size=17,color=ink,bold=False):
             font=self.selector.font(size,bold)
             while label and draw.textlength(label,font=font)>576-x:
                 label=label[:-2].rstrip('…')+'…'
             draw.text((x,y),label,font=font,fill=color)
-        def button(rect,label,focus,primary=False):
+        def button(rect,label,focus,key,pad_button,primary=False):
             selected=self.focus==focus
             draw.rounded_rectangle(rect,10,fill=FOCUSED_PRIMARY if primary and selected else blue if primary else 'white',outline=blue if selected else '#c9d3df')
             if selected: draw_focus_ring(draw,rect)
-            font=self.selector.font(16)
-            draw.text(((rect[0]+rect[2]-draw.textlength(label,font=font))/2,rect[1]+11),label,font=font,fill='white' if primary else ink)
+            action_label(draw,self.selector,rect,label,key,pad_button,'white' if primary else ink,show_icon=self.crowd)
         text(24,22,'Público da partida' if self.crowd else 'Prepare sua partida',23,bold=True)
         text(24,59,'Uma alteração manual vale somente para esta partida.' if self.crowd else 'Escolha o que deseja ajustar antes de entrar em campo.',15,muted)
         if not self.crowd:
-            for i,(rect,label) in enumerate(zip(self.CARDS,('Controle de público','Escolha seu estádio'))):
+            for i,(rect,labels) in enumerate(zip(self.CARDS,(('Controle de','público'),('Escolha seu','estádio'),('Configurações','da partida'),('Escolha os','narradores')))):
                 draw.rounded_rectangle(rect,14,fill='#f5f8fc',outline='#dce5ee')
                 if self.focus==i: draw_focus_ring(draw,rect,14)
-                cx=(rect[0]+rect[2])/2
+                cx=rect[0]+53
+                top=rect[1]-91
                 if i==0:
                     for dx,dy in ((-27,8),(0,0),(27,8)):
-                        draw.ellipse((cx+dx-8,123+dy,cx+dx+8,139+dy),outline=blue,width=2)
-                        draw.arc((cx+dx-15,143+dy,cx+dx+15,173+dy),180,360,fill=blue,width=3)
+                        draw.ellipse((cx+dx-8,123+dy+top,cx+dx+8,139+dy+top),outline=blue,width=2)
+                        draw.arc((cx+dx-15,143+dy+top,cx+dx+15,173+dy+top),180,360,fill=blue,width=3)
+                elif i==1:
+                    draw.ellipse((cx-35,128+top,cx+35,157+top),outline=blue,width=3)
+                    draw.ellipse((cx-24,135+top,cx+24,148+top),outline=blue,width=2)
+                    draw.arc((cx-35,140+top,cx+35,170+top),0,180,fill=blue,width=3)
+                elif i==2:
+                    for dy,dx in ((0,-15),(15,13),(30,-3)):
+                        draw.line((cx-30,129+dy+top,cx+30,129+dy+top),fill=blue,width=3)
+                        draw.ellipse((cx+dx-6,123+dy+top,cx+dx+6,135+dy+top),fill='white',outline=blue,width=2)
                 else:
-                    draw.ellipse((cx-35,128,cx+35,157),outline=blue,width=3)
-                    draw.ellipse((cx-24,135,cx+24,148),outline=blue,width=2)
-                    draw.arc((cx-35,140,cx+35,170),0,180,fill=blue,width=3)
-                font=self.selector.font(18,True)
-                draw.text((cx-draw.textlength(label,font=font)/2,191),label,font=font,fill=ink)
-                text(cx-12,225,f'F{i+1}',13,muted)
-            button(self.BACK,'Fechar · F3 / B',2)
+                    draw.rounded_rectangle((cx-11,120+top,cx+11,156+top),11,outline=blue,width=3)
+                    draw.arc((cx-22,139+top,cx+22,171+top),0,180,fill=blue,width=3)
+                    draw.line((cx,172+top,cx,183+top),fill=blue,width=3)
+                font=self.selector.font(16,True)
+                for row,label in enumerate(labels):
+                    draw.text((rect[0]+108,rect[1]+29+row*22),label,font=font,fill=ink)
+                if not controller_connected(self.selector):
+                    text(rect[0]+108,rect[1]+80,f'F{i+1}',13,muted)
+            button(self.BACK,'Fechar',4,'F5','B')
         else:
             shared=self.selector.crowd_control.shared
             text(40,104,'Ocupação do estádio',19,bold=True)
@@ -165,8 +189,10 @@ class PrematchPanel:
             text(40,205,'0%',12,muted); text(524,205,'100%',12,muted)
             automatic=f'Regra atual do mod: {shared.automatic_percent}%' if shared.automatic_percent>=0 else 'Aguardando o valor atual do mod de torcida...'
             text(40,230,automatic,14,muted)
-            button((24,278,292,320),'Voltar · F2 / B',1)
-            button((308,278,576,320),'Aplicar · F1',2,True)
-        status = self.message or ('← → Ajustar · Enter / A Confirmar · B Voltar' if self.crowd else 'Setas Selecionar · Enter / A Abrir · B Fechar')
-        text(24,330,status,11,muted)
+            button((24,278,292,320),'Voltar',1,'F2','B')
+            button((308,278,576,320),'Aplicar',2,'F1','A',True)
+        if self.message:
+            text(24,footer_y(self.HEIGHT),self.message,11,muted)
+        else:
+            navigation_hint(draw,self.selector,footer_y(self.HEIGHT),'Confirmar' if self.crowd else 'Abrir','Voltar' if self.crowd else 'Fechar')
         return image

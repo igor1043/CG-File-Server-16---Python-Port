@@ -9,7 +9,7 @@ void selector_initialize(void (*)(const char *)) {}
 void selector_tick(HWND,float,float) {}
 bool selector_visible() { return shared.visible!=0; }
 int wmain(int argc,wchar_t **argv) {
-    assert(argc==1 || argc==4);
+    assert(argc==1 || argc==4 || argc==5);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     InitLog(); InitializeCriticalSection(&g_drawCs);
     HWND window=CreateWindowExW(0,L"STATIC",L"",WS_POPUP,0,0,1280,720,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
@@ -42,12 +42,15 @@ int wmain(int argc,wchar_t **argv) {
     wcscpy_s(loading.stadium_name,L"Maracana");
     wcscpy_s(loading.scoreboard_name,L"Caze TV");
     wcscpy_s(loading.movie_name,L"Caze TV");
-    for(int mask=1;mask<8;++mask) {
+    wcscpy_s(loading.narration_name,L"Vilani");
+    if(argc==5)wcscpy_s(loading.narration_image_path,argv[4]);
+    for(int mask=1;mask<16;++mask) {
         loading.visible=mask&1;
         loading.scoreboard_visible=mask&2;
         loading.movie_visible=mask&4;
+        loading.narration_visible=mask&8;
         for(LONG progress:{0L,100L,5500L,10000L}) {
-            loading.progress_x100=loading.scoreboard_progress_x100=loading.movie_progress_x100=progress;
+            loading.progress_x100=loading.scoreboard_progress_x100=loading.movie_progress_x100=loading.narration_progress_x100=progress;
             DrawOverlay11(swap,device,context);
             ID3D11Buffer *restored=nullptr;
             context->IAGetVertexBuffers(0,1,&restored,&stride,&offset);
@@ -55,12 +58,19 @@ int wmain(int argc,wchar_t **argv) {
             restored->Release();
         }
     }
+    if(argc==5) {
+        assert(g_narrationPortraitSRV && g_narrationPortraitW==104 && g_narrationPortraitH==104);
+        assert(!g_previewSRV); // Narrator photo cannot overwrite stadium/selector texture.
+        loading.narration_image_path[0]=0;loading.narration_visible=1;
+        DrawOverlay11(swap,device,context);
+        assert(!g_narrationPortraitSRV);
+    }
     D3D11_BUFFER_DESC overlayBuffer={}; g_vb->GetDesc(&overlayBuffer);
     assert(overlayBuffer.ByteWidth==sizeof(Vtx11)*kColoredVertexCapacity);
     g_data=nullptr;
     puts("All loading-card combinations and buffer boundary protection passed");
-    if(argc==4) {
-    shared.visible=1; shared.render_ready=1; shared.width=600; shared.height=560;
+    if(argc>=4) {
+    shared.visible=1; shared.render_ready=1; shared.width=600; shared.height=600;
     wcscpy_s(shared.image_path,argv[1]);
     DrawOverlay11(swap,device,context);
     assert(g_previewSRV && shared.visible);
@@ -73,9 +83,9 @@ int wmain(int argc,wchar_t **argv) {
     g_photoFadeStarted=GetTickCount()-250;
     DrawOverlay11(swap,device,context);
     assert(!g_previousPhoto);
-    wcscpy_s(shared.image_path,argv[2]); shared.render_ready=3; shared.width=1000; shared.height=790;
+    wcscpy_s(shared.image_path,argv[2]); shared.render_ready=3; shared.width=1000; shared.height=830;
     DrawOverlay11(swap,device,context);
-    assert(g_previewSRV && g_previewNatW==2000 && g_previewNatH==1580 && shared.visible);
+    assert(g_previewSRV && g_previewNatW==2000 && g_previewNatH==1660 && shared.visible);
     shared.render_ready=0;
     DrawOverlay11(swap,device,context);
     assert(shared.visible);

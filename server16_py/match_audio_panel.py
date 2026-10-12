@@ -4,6 +4,7 @@ import math
 from PIL import Image
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
 from .audio_profiles import audio_profiles, match_key
+from .input_hints import action_label, navigation_hint, footer_y
 
 
 def percentage(value, maximum=100):
@@ -15,7 +16,7 @@ def percentage(value, maximum=100):
 
 
 class MatchAudioPanel:
-    WIDTH, HEIGHT = 600, 400
+    WIDTH, HEIGHT = 600, 440
     SLIDERS = ((40, 126, 560, 160), (40, 231, 560, 265))
     CANCEL = (24, 310, 196, 358)
     GENERAL = (214, 310, 386, 358)
@@ -42,10 +43,10 @@ class MatchAudioPanel:
                      for value, initial, original in zip(self.values, self.original_values, self.original_volumes))
 
     def buttons(self):
-        result = [(2, self.CANCEL, 'Cancelar · F3'), (3, self.GENERAL, 'Aplicar geral · F1')]
+        result = [(2, self.CANCEL, 'Cancelar'), (3, self.GENERAL, 'Aplicar geral')]
         app = self.selector.app
         if self.runtime.path is not None and match_key(getattr(app, 'HID', ''), getattr(app, 'AID', '')):
-            result.append((4, self.MATCH, 'Aplicar específico · F2'))
+            result.append((4, self.MATCH, 'Aplicar específico'))
         return result
 
     def apply(self, scope='general'):
@@ -79,6 +80,10 @@ class MatchAudioPanel:
             self.apply({3: 'general', 4: 'match'}[focus])
 
     def handle(self, kind, value):
+        if kind == 18:
+            if value in (1,2):
+                self.activate({1:3,2:4}[value])
+            return
         if kind == 16:
             if value in (1,2,3):
                 self.activate({1:3,2:4,3:2}[value])
@@ -168,7 +173,10 @@ class MatchAudioPanel:
             draw.rounded_rectangle(rect, 10, fill=fill, outline=blue if self.focus == focus else '#c9d3df', width=2)
             if self.focus == focus:
                 draw_focus_ring(draw,rect)
-            font = self.selector.font(14)
-            draw.text(((rect[0]+rect[2]-draw.textlength(label, font=font))/2, rect[1]+(rect[3]-rect[1]-19)/2), label, font=font, fill='white' if primary else ink)
-        text(24, 374, self.message or 'F1 Geral · F2 Específico · F3 / Esc Cancelar · ← → Volume · A Confirmar', 12, muted)
+            key, pad_button = {2:('F3','B'),3:('F1','X'),4:('F2','Y')}[focus]
+            action_label(draw,self.selector,rect,label,key,pad_button,'white' if primary else ink,size=12)
+        if self.message:
+            text(24,footer_y(self.HEIGHT),self.message,12,muted)
+        else:
+            navigation_hint(draw,self.selector,footer_y(self.HEIGHT),'Confirmar','Cancelar')
         return image

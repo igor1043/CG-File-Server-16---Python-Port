@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared memory layout — MUST match OverlayShared in cgfs16_overlay.cpp
 # ─────────────────────────────────────────────────────────────────────────────
-_SHMEM_NAME = "Local\\CGFS16_Overlay_v1"
+_SHMEM_NAME = "Local\\CGFS16_Overlay_v3"
 _MAX_STR    = 256
 _MAX_IMG    = 512
 
@@ -46,6 +46,11 @@ class _OverlayShared(ctypes.Structure):
         ("movie_progress_x100", ctypes.c_long),
         ("movie_name", ctypes.c_wchar * _MAX_STR),
         ("movie_detail", ctypes.c_wchar * _MAX_STR),
+        ("narration_visible", ctypes.c_long),
+        ("narration_progress_x100", ctypes.c_long),
+        ("narration_name", ctypes.c_wchar * _MAX_STR),
+        ("narration_detail", ctypes.c_wchar * _MAX_STR),
+        ("narration_image_path", ctypes.c_wchar * _MAX_IMG),
     ]
 
 
@@ -184,25 +189,26 @@ class D3DOverlayInjector:
             self._shared.detail_text = detail[:_MAX_STR - 1]
         self._shared.progress_x100 = int(max(0.0, min(100.0, progress)) * 100)
 
-    def show_asset(self, kind: str, name: str, detail: str = "", progress: float = 0.0) -> None:
+    def show_asset(self, kind: str, name: str, detail: str = "", progress: float = 0.0, image_path: str = "") -> None:
         if not self._ready or self._shared is None:
             return
-        if kind not in {"scoreboard", "movie"}:
+        if kind not in {"scoreboard", "movie", "narration"}:
             return
         setattr(self._shared, f"{kind}_name", name[:_MAX_STR - 1])
         setattr(self._shared, f"{kind}_detail", detail[:_MAX_STR - 1])
         setattr(self._shared, f"{kind}_progress_x100", int(max(0.0, min(100.0, progress)) * 100))
+        if kind == 'narration': self._shared.narration_image_path = image_path[:_MAX_IMG - 1]
         setattr(self._shared, f"{kind}_visible", 1)
 
     def update_asset(self, kind: str, progress: float, detail: str = "") -> None:
-        if not self._ready or self._shared is None or kind not in {"scoreboard", "movie"}:
+        if not self._ready or self._shared is None or kind not in {"scoreboard", "movie", "narration"}:
             return
         if detail:
             setattr(self._shared, f"{kind}_detail", detail[:_MAX_STR - 1])
         setattr(self._shared, f"{kind}_progress_x100", int(max(0.0, min(100.0, progress)) * 100))
 
     def hide_asset(self, kind: str) -> None:
-        if self._shared is not None and kind in {"scoreboard", "movie"}:
+        if self._shared is not None and kind in {"scoreboard", "movie", "narration"}:
             setattr(self._shared, f"{kind}_visible", 0)
 
     def hide(self) -> None:
@@ -219,6 +225,7 @@ class D3DOverlayInjector:
         if self._shared is not None:
             self._shared.scoreboard_visible = 0
             self._shared.movie_visible = 0
+            self._shared.narration_visible = 0
         if self._shared_ptr:
             try:
                 _k32.UnmapViewOfFile(self._shared_ptr)
@@ -272,6 +279,11 @@ class D3DOverlayInjector:
         self._shared.movie_progress_x100 = 0
         self._shared.movie_name = ""
         self._shared.movie_detail = ""
+        self._shared.narration_visible = 0
+        self._shared.narration_progress_x100 = 0
+        self._shared.narration_name = ""
+        self._shared.narration_detail = ""
+        self._shared.narration_image_path = ""
         self._ready = True
         log.debug("D3DOverlay: shared memory opened at 0x%X, size=%d",
                   ptr, ctypes.sizeof(_OverlayShared))

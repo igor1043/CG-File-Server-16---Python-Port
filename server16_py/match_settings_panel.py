@@ -1,0 +1,115 @@
+from PIL import Image
+
+from .input_hints import action_label, navigation_hint, footer_y
+from .match_presentation import MatchPresentation, PresentationOptions
+from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
+from .panel_navigation import move_focus
+
+
+class MatchSettingsPanel:
+    WIDTH, HEIGHT = 600, 390
+    ROWS = ((24, 85, 576, 123), (24, 130, 576, 168),
+            (48, 175, 576, 213), (48, 220, 576, 258))
+    BACK, APPLY = (24, 278, 292, 320), (308, 278, 576, 320)
+
+    def __init__(self, selector):
+        self.selector = selector
+        self.focus = 0
+        self.message = ''
+        self.load_error = False
+        self.store = MatchPresentation(getattr(selector.app, 'exedir', selector.app.base_dir))
+        try:
+            self.options = self.store.load()
+        except Exception as exc:
+            self.options = PresentationOptions()
+            self.load_error = True
+            self.message = 'Configuração inválida. Corrija o INI antes de aplicar.'
+            selector.app.log('Match presentation config rejected', exc)
+
+    def tick(self):
+        pass
+
+    def enabled(self, focus):
+        return focus not in (2, 3) or self.options.pyrotechnics
+
+    def activate(self, focus):
+        if focus == 4:
+            self.selector.show_menu()
+        elif focus == 5:
+            if self.load_error:
+                return
+            if self.selector.context != self.selector._context():
+                self.selector.close()
+                return
+            try:
+                self.store.save(self.options)
+            except Exception as exc:
+                self.message = 'Não foi possível aplicar. Confira a permissão da pasta.'
+                self.selector.app.log('Match presentation could not be saved', exc)
+                self.selector.render()
+                return
+            self.selector.app.log(f'Match presentation applied: {self.options}')
+            self.selector.show_menu()
+        elif self.enabled(focus):
+            key = self.store.KEYS[focus]
+            setattr(self.options, key, not getattr(self.options, key))
+            self.selector.render()
+
+    def handle(self, kind, value):
+        if kind == 11:
+            self.selector.close()
+            return
+        if kind == 7 or (kind == 16 and value == 2):
+            self.selector.show_menu()
+            return
+        if kind == 16:
+            if value == 1:
+                self.activate(5)
+            return
+        focuses = [i for i in range(6) if self.enabled(i)]
+        if kind in (4, 5, 9, 2, 3):
+            targets=[(i,r) for i,r in enumerate((*self.ROWS,self.BACK,self.APPLY)) if i in focuses]
+            self.focus = move_focus(self.focus,kind,targets,5)
+        elif kind == 6:
+            self.activate(self.focus)
+            return
+        elif kind in (8, 15):
+            x, y = value & 65535, (value >> 16) & 65535
+            for i, rect in enumerate((*self.ROWS, self.BACK, self.APPLY)):
+                if rect[0] <= x <= rect[2] and rect[1] <= y <= rect[3] and self.enabled(i):
+                    self.focus = i
+                    if kind == 8:
+                        self.activate(i)
+                        return
+                    break
+        self.selector.render()
+
+    def render(self):
+        image = Image.new('RGBA', (self.WIDTH*2, self.HEIGHT*2))
+        draw = OverlayDraw(image)
+        ink, muted, blue = '#344651', '#8797ab', '#0968f8'
+        draw.rounded_rectangle((0, 0, self.WIDTH-1, self.HEIGHT-1), 18, fill='white', outline='#e0e6ee')
+        draw.text((24, 22), 'Configurações da partida', font=self.selector.font(23, True), fill=ink)
+        draw.text((24, 58), 'Mascotes e efeitos dos mods instalados.', font=self.selector.font(15), fill=muted)
+        labels = ('Habilitar mascotes', 'Efeitos pirotécnicos', 'Na abertura da partida', 'Após o gol')
+        for i, (key, label, rect) in enumerate(zip(self.store.KEYS, labels, self.ROWS)):
+            active, enabled = getattr(self.options, key), self.enabled(i)
+            if self.focus == i:
+                draw_focus_ring(draw, rect, 8)
+            draw.text((rect[0]+12, rect[1]+8), label, font=self.selector.font(16, i < 2), fill=ink if enabled else muted)
+            cy = (rect[1]+rect[3])/2
+            draw.rounded_rectangle((479, cy-12, 525, cy+12), 12, fill=blue if active and enabled else '#d6dee9')
+            cx = 513 if active else 491
+            draw.ellipse((cx-9, cy-9, cx+9, cy+9), fill='white')
+            draw.text((535, cy-9), 'Sim' if active else 'Não', font=self.selector.font(12), fill=ink if enabled else muted)
+        for focus, rect, label, key, button in ((4, self.BACK, 'Voltar', 'F2', 'B'), (5, self.APPLY, 'Aplicar', 'F1', 'A')):
+            primary = focus == 5
+            draw.rounded_rectangle(rect, 10, fill=FOCUSED_PRIMARY if primary and self.focus == focus else blue if primary else 'white', outline='#c9d3df')
+            if self.focus == focus:
+                draw_focus_ring(draw, rect)
+            action_label(draw, self.selector, rect, label, key, button, 'white' if primary else ink)
+        if self.message:
+            draw.text((24, footer_y(self.HEIGHT)), self.message, font=self.selector.font(11), fill=muted)
+        else:
+            navigation_hint(draw, self.selector, footer_y(self.HEIGHT), 'Alternar / aplicar')
+        return image

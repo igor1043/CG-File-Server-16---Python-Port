@@ -40,7 +40,7 @@
 // ---------------------------------------------------------------------------
 // Shared memory (same layout as Python _OverlayShared)
 // ---------------------------------------------------------------------------
-#define SHMEM_NAME  L"Local\\CGFS16_Overlay_v1"
+#define SHMEM_NAME  L"Local\\CGFS16_Overlay_v3"
 #define MAX_STR     256
 #define MAX_IMG     512
 
@@ -58,6 +58,11 @@ struct OverlayShared {
     volatile LONG movie_progress_x100;
     wchar_t movie_name[MAX_STR];
     wchar_t movie_detail[MAX_STR];
+    volatile LONG narration_visible;
+    volatile LONG narration_progress_x100;
+    wchar_t narration_name[MAX_STR];
+    wchar_t narration_detail[MAX_STR];
+    wchar_t narration_image_path[MAX_IMG];
 };
 
 static HANDLE        g_hMap  = NULL;
@@ -179,6 +184,8 @@ static TextTex g_ttScoreboardName;
 static TextTex g_ttScoreboardDetail;
 static TextTex g_ttMovieName;
 static TextTex g_ttMovieDetail;
+static TextTex g_ttNarrationName;
+static TextTex g_ttNarrationDetail;
 
 // ---------------------------------------------------------------------------
 // Stadium preview image (WIC -> D3D11)
@@ -188,6 +195,10 @@ static ID3D11ShaderResourceView *g_previewSRV          = nullptr;
 static wchar_t                   g_previewLoadedPath[MAX_IMG] = {};
 static int                       g_previewNatW          = 0;
 static int                       g_previewNatH          = 0;
+static ID3D11Texture2D *g_narrationPortraitTex=nullptr;
+static ID3D11ShaderResourceView *g_narrationPortraitSRV=nullptr;
+static wchar_t g_narrationPortraitPath[MAX_IMG]={};
+static int g_narrationPortraitW=0,g_narrationPortraitH=0;
 static ID3D11ShaderResourceView *g_previousPhoto=nullptr;
 static DWORD g_photoFadeStarted;
 static int g_previousWidth,g_previousHeight;
@@ -334,7 +345,7 @@ static bool PushQuad(Vtx11 (&buf)[Capacity], int &n,
 static void UpdateTextTex(ID3D11Device *dev, TextTex &tt,
     const wchar_t *text, int fontPx, bool bold, COLORREF fgColor, int maxPixW)
 {
-    if (tt.width > 0 && wcscmp(tt.content, text) == 0) return; // unchanged
+    if (tt.width == maxPixW && wcscmp(tt.content, text) == 0) return; // unchanged
 
     if (tt.tex) { tt.tex->Release(); tt.tex = nullptr; }
     if (tt.srv) { tt.srv->Release(); tt.srv = nullptr; }
@@ -428,7 +439,8 @@ static void UpdateTextTex(ID3D11Device *dev, TextTex &tt,
 // WIC -> D3D11 texture for stadium preview
 // Returns true if the texture was (re)loaded successfully
 // ---------------------------------------------------------------------------
-static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
+static bool LoadImageWIC(ID3D11Device *dev, const wchar_t *path,
+    ID3D11Texture2D *&texture,ID3D11ShaderResourceView *&view,int &width,int &height)
 {
     IWICImagingFactory *wicF = nullptr;
     HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
@@ -486,13 +498,16 @@ static bool LoadPreviewImageWIC(ID3D11Device *dev, const wchar_t *path)
     if (FAILED(hr)) { Log("[WIC] CreateTexture2D hr=0x%08X", (unsigned)hr); return false; }
     hr=dev->CreateShaderResourceView(replacement,nullptr,&replacementView);
     if (FAILED(hr)) { replacement->Release(); return false; }
-    if (g_previewTex) g_previewTex->Release();
-    if (g_previewSRV) g_previewSRV->Release();
-    g_previewTex=replacement; g_previewSRV=replacementView;
-    g_previewNatW = (int)w;
-    g_previewNatH = (int)h;
+    if (texture) texture->Release();
+    if (view) view->Release();
+    texture=replacement; view=replacementView;
+    width=(int)w; height=(int)h;
     Log("[WIC] loaded '%ls' %dx%d", path, w, h);
     return true;
+}
+
+static bool LoadPreviewImageWIC(ID3D11Device *dev,const wchar_t *path) {
+    return LoadImageWIC(dev,path,g_previewTex,g_previewSRV,g_previewNatW,g_previewNatH);
 }
 
 // Draw a textured quad; requires g_vsT/g_psT/g_ilT/g_vbT/g_samp already bound.
@@ -517,10 +532,11 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     // ── Read shared memory ─────────────────────────────────────────────────
     wchar_t stadium[MAX_STR]={}, detail[MAX_STR]={}, imgPath[MAX_IMG]={};
     float pct=0.f;
-    bool stadiumVisible=false, scoreboardVisible=false, movieVisible=false;
-    float scoreboardPct=0.f, moviePct=0.f;
+    bool stadiumVisible=false, scoreboardVisible=false, movieVisible=false,narrationVisible=false;
+    float scoreboardPct=0.f, moviePct=0.f,narrationPct=0.f;
     wchar_t scoreboardName[MAX_STR]={}, scoreboardDetail[MAX_STR]={};
     wchar_t movieName[MAX_STR]={}, movieDetail[MAX_STR]={};
+    wchar_t narrationName[MAX_STR]={},narrationDetail[MAX_STR]={},narrationImage[MAX_IMG]={};
     if (g_data) {
         stadiumVisible=InterlockedCompareExchange(&g_data->visible,0,0)!=0;
         wcsncpy_s(stadium, g_data->stadium_name, MAX_STR-1);
@@ -535,6 +551,11 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         moviePct=(float)InterlockedCompareExchange(&g_data->movie_progress_x100,0,0)/100.f;
         wcsncpy_s(movieName,g_data->movie_name,MAX_STR-1);
         wcsncpy_s(movieDetail,g_data->movie_detail,MAX_STR-1);
+        narrationVisible=InterlockedCompareExchange(&g_data->narration_visible,0,0)!=0;
+        narrationPct=(float)InterlockedCompareExchange(&g_data->narration_progress_x100,0,0)/100.f;
+        wcsncpy_s(narrationName,g_data->narration_name,MAX_STR-1);
+        wcsncpy_s(narrationDetail,g_data->narration_detail,MAX_STR-1);
+        wcsncpy_s(narrationImage,g_data->narration_image_path,MAX_IMG-1);
     }
     bool selecting=selector_visible() && g_selector;
     LONG revision=selecting ? InterlockedCompareExchange(&g_selector->render_ready,0,0) : 0;
@@ -586,6 +607,11 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     const int kTextMaxW = 312;
     const wchar_t* loadingTitle = L"Carregando est\u00E1dio";
     const wchar_t* loadingName = stadium;
+    const wchar_t* narrationPrefix = L"[Narra\u00E7\u00E3o aplicada] ";
+    if (!selecting && wcsncmp(stadium,narrationPrefix,wcslen(narrationPrefix))==0) {
+        loadingTitle = L"Narra\u00E7\u00E3o aplicada";
+        loadingName = stadium + wcslen(narrationPrefix);
+    }
     if (!selecting && wcsncmp(stadium, L"[Carregando placar] ", 20) == 0) {
         loadingTitle = L"Carregando placar";
         loadingName = stadium + 20;
@@ -593,16 +619,30 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         loadingTitle = L"Carregando v\u00EDdeo pr\u00E9-jogo";
         loadingName = stadium + 28;
     }
-    UpdateTextTex(dev, g_ttTitle,  selecting ? L"Carregando painel" : loadingTitle, 15, false, RGB(0x09,0x68,0xF8), kTextMaxW);
-    UpdateTextTex(dev, g_ttName,   selecting ? (g_selector->enabled==2 ? L"Preparando controles de \u00E1udio" : L"Preparando a lista de est\u00E1dios") : loadingName, 15, true, RGB(0x34,0x46,0x51), kTextMaxW);
-    UpdateTextTex(dev, g_ttDetail, selecting ? L"Aguarde um instante" : detail, 13, false, RGB(0x87,0x97,0xAB), kTextMaxW);
+    const int notificationTextWidth=selecting?252:kTextMaxW;
+    UpdateTextTex(dev, g_ttTitle,loadingTitle,15,false,RGB(0x09,0x68,0xF8),notificationTextWidth);
+    UpdateTextTex(dev, g_ttName,loadingName,15,true,RGB(0x34,0x46,0x51),notificationTextWidth);
+    UpdateTextTex(dev, g_ttDetail,detail,13,false,RGB(0x87,0x97,0xAB),notificationTextWidth);
     wchar_t scoreboardTitle[MAX_STR*2]={}, movieTitle[MAX_STR*2]={};
     swprintf_s(scoreboardTitle,L"Carregando placar - %ls",scoreboardName[0]?scoreboardName:L"Padr\u00E3o");
     swprintf_s(movieTitle,L"Carregando v\u00EDdeo pr\u00E9-jogo - %ls",movieName[0]?movieName:L"Padr\u00E3o");
-    UpdateTextTex(dev,g_ttScoreboardName,scoreboardTitle,13,true,RGB(0x34,0x46,0x51),388);
-    UpdateTextTex(dev,g_ttScoreboardDetail,scoreboardDetail,11,false,RGB(0x87,0x97,0xAB),388);
-    UpdateTextTex(dev,g_ttMovieName,movieTitle,13,true,RGB(0x34,0x46,0x51),388);
-    UpdateTextTex(dev,g_ttMovieDetail,movieDetail,11,false,RGB(0x87,0x97,0xAB),388);
+    int assetTextWidth=selecting?252:388;
+    UpdateTextTex(dev,g_ttScoreboardName,scoreboardTitle,13,true,RGB(0x34,0x46,0x51),assetTextWidth);
+    UpdateTextTex(dev,g_ttScoreboardDetail,scoreboardDetail,11,false,RGB(0x87,0x97,0xAB),assetTextWidth);
+    UpdateTextTex(dev,g_ttMovieName,movieTitle,13,true,RGB(0x34,0x46,0x51),assetTextWidth);
+    UpdateTextTex(dev,g_ttMovieDetail,movieDetail,11,false,RGB(0x87,0x97,0xAB),assetTextWidth);
+    wchar_t narrationTitle[MAX_STR*2]={};
+    swprintf_s(narrationTitle,L"%ls - %ls",narrationPct>=100.f?L"Narra\u00E7\u00E3o aplicada":L"Carregando narra\u00E7\u00E3o",narrationName);
+    if(narrationVisible && wcscmp(narrationImage,g_narrationPortraitPath)!=0) {
+        if(g_narrationPortraitTex) {g_narrationPortraitTex->Release();g_narrationPortraitTex=nullptr;}
+        if(g_narrationPortraitSRV) {g_narrationPortraitSRV->Release();g_narrationPortraitSRV=nullptr;}
+        g_narrationPortraitW=g_narrationPortraitH=0;
+        wcscpy_s(g_narrationPortraitPath,narrationImage);
+        if(narrationImage[0])LoadImageWIC(dev,narrationImage,g_narrationPortraitTex,g_narrationPortraitSRV,g_narrationPortraitW,g_narrationPortraitH);
+    }
+    const int narrationTextWidth=assetTextWidth-(g_narrationPortraitSRV?58:0);
+    UpdateTextTex(dev,g_ttNarrationName,narrationTitle,13,true,RGB(0x34,0x46,0x51),narrationTextWidth);
+    UpdateTextTex(dev,g_ttNarrationDetail,narrationDetail,11,false,RGB(0x87,0x97,0xAB),narrationTextWidth);
 
     // ── Update preview image (WIC) ─────────────────────────────────────────
     bool changed=wcscmp(imgPath,g_previewLoadedPath)!=0 || (selecting && revision!=g_loadedSelectorRevision) || (!selecting && g_selectorTexture);
@@ -667,13 +707,13 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
 
     // ── Layout constants ────────────────────────────────────────────────────
     // Compact loading panel; the blue fill reports actual copy progress.
-    const float PW=420.f, PH=128.f, M=16.f;
-    const float px=selecting ? (vpW-PW)/2.f : vpW-PW-M, py=M;
+    const float PW=selecting?280.f:420.f, PH=128.f, M=16.f;
+    const float px=vpW-PW-M, py=M;
     const float assetBaseY=py+(stadiumVisible?PH+10.f:0.f);
     // Image box: 96 x 76 at (px+12, py+14)
     const float IX=px+12.f, IY=py+14.f, IW=96.f, IH=76.f;
     // Text column start
-    const float TX=px+120.f;
+    const float TX=px+(selecting?14.f:120.f);
 
     // ── Colored quads pass ─────────────────────────────────────────────────
     ctx->VSSetShader(g_vs,nullptr,0);
@@ -683,8 +723,8 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     ctx->IASetVertexBuffers(0,1,&g_vb,&stride,&offset);
 
     Vtx11 verts[kColoredVertexCapacity]; int n=0;
-    const float loadingScale=selecting && !drawSelector ? .6f : 1.f;
-    const float loadingX=selecting ? (vpW-PW*loadingScale)/2.f : px;
+    const float loadingScale=1.f;
+    const float loadingX=px;
     auto DrawTexQuad=[&](ID3D11DeviceContext* context,float x,float y,float w,float h,
         float vw,float vh,ID3D11ShaderResourceView* texture,float alpha=1.f,
         float u0=0.f,float v0=0.f,float u1=1.f,float v1=1.f) {
@@ -706,17 +746,17 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         }
     };
     // Panel background + borders
-    if (!drawSelector && stadiumVisible) {
+    if (stadiumVisible) {
     Round(px,py,PW,PH,12.f,0xFFDFE6EF);
     Round(px+1,py+1,PW-2,PH-2,11.f,0xFFFFFFFF);
-    R(IX,   IY,      IW,  IH,    0xFFF0F4F8);
+    if(!selecting)R(IX,IY,IW,IH,0xFFF0F4F8);
     // Progress track + determinate fill, updated by the stadium-copy worker.
-    float tx2=TX, ty2=py+PH-18.f, tw2=PW-120.f-12.f, th2=8.f;
+    float tx2=TX, ty2=py+PH-18.f, tw2=PW-(selecting?28.f:132.f), th2=8.f;
     Round(tx2,ty2,tw2,th2,4.f,0xFFEDF2F7);
     float progress=std::max(0.f,std::min(100.f,pct))/100.f;
     if (progress>0.f) Round(tx2,ty2,tw2*progress,th2,4.f,0xFF0968F8);
     }
-    if (!drawSelector) {
+    {
         auto drawAssetCard=[&](float y,float assetPct) {
             Round(px,y,PW,66.f,10.f,0xFFDFE6EF);
             Round(px+1.f,y+1.f,PW-2.f,64.f,9.f,0xFFFFFFFF);
@@ -726,6 +766,7 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         };
         if(scoreboardVisible) drawAssetCard(assetBaseY,scoreboardPct);
         if(movieVisible) drawAssetCard(assetBaseY+(scoreboardVisible?76.f:0.f),moviePct);
+        if(narrationVisible) drawAssetCard(assetBaseY+(scoreboardVisible?76.f:0.f)+(movieVisible?76.f:0.f),narrationPct);
     }
 
     D3D11_MAPPED_SUBRESOURCE ms={};
@@ -749,7 +790,7 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
                 vpW,vpH,g_previewSRV,1.f,offset/canvasWidth,0.f,(offset+layout.card_width)/canvasWidth,layout.card_height/canvasHeight);
             if (layout.keyboard) {
                 DrawTexQuad(ctx,layout.keyboard_x,layout.keyboard_y,1000.f*layout.keyboard_scale,230.f*layout.keyboard_scale,
-                    vpW,vpH,g_previewSRV,1.f,0.f,560.f/canvasHeight,1.f,1.f);
+                    vpW,vpH,g_previewSRV,1.f,0.f,600.f/canvasHeight,1.f,1.f);
             }
             if (g_previousPhoto) {
                 float progress=photo_fade((DWORD)(GetTickCount()-g_photoFadeStarted));
@@ -759,7 +800,7 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
                         (offset+24.f)/g_previousWidth,130.f/g_previousHeight,(offset+576.f)/g_previousWidth,362.f/g_previousHeight);
                 } else { g_previousPhoto->Release(); g_previousPhoto=nullptr; }
             }
-        } else {
+        }
 
         // Stadium preview image (aspect-corrected within IW x IH)
         if (!selecting && stadiumVisible && g_previewSRV && g_previewNatW > 0 && g_previewNatH > 0) {
@@ -772,15 +813,15 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         }
 
         // Title "Loading Stadium"
-        if ((selecting || stadiumVisible) && g_ttTitle.srv)
+        if (stadiumVisible && g_ttTitle.srv)
             DrawTexQuad(ctx, TX, py+14.f, (float)g_ttTitle.width, (float)g_ttTitle.height, vpW, vpH, g_ttTitle.srv);
         // Stadium name
-        if (g_ttName.srv && (selecting || (stadiumVisible && stadium[0])))
+        if (g_ttName.srv && stadiumVisible && stadium[0])
             DrawTexQuad(ctx, TX, py+36.f, (float)g_ttName.width, (float)g_ttName.height, vpW, vpH, g_ttName.srv);
         // Detail text
-        if (g_ttDetail.srv && (selecting || (stadiumVisible && detail[0])))
+        if (g_ttDetail.srv && stadiumVisible && detail[0])
             DrawTexQuad(ctx, TX, py+58.f, (float)g_ttDetail.width, (float)g_ttDetail.height, vpW, vpH, g_ttDetail.srv);
-        float assetY=assetBaseY+10.f;
+        float assetY=assetBaseY;
         if(scoreboardVisible) {
             if(g_ttScoreboardName.srv) DrawTexQuad(ctx,px+14.f,assetY+9.f,(float)g_ttScoreboardName.width,(float)g_ttScoreboardName.height,vpW,vpH,g_ttScoreboardName.srv);
             if(g_ttScoreboardDetail.srv) DrawTexQuad(ctx,px+14.f,assetY+27.f,(float)g_ttScoreboardDetail.width,(float)g_ttScoreboardDetail.height,vpW,vpH,g_ttScoreboardDetail.srv);
@@ -790,6 +831,12 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
             if(g_ttMovieName.srv) DrawTexQuad(ctx,px+14.f,movieY+9.f,(float)g_ttMovieName.width,(float)g_ttMovieName.height,vpW,vpH,g_ttMovieName.srv);
             if(g_ttMovieDetail.srv) DrawTexQuad(ctx,px+14.f,movieY+27.f,(float)g_ttMovieDetail.width,(float)g_ttMovieDetail.height,vpW,vpH,g_ttMovieDetail.srv);
         }
+        if(narrationVisible) {
+            float y=assetBaseY+(scoreboardVisible?76.f:0.f)+(movieVisible?76.f:0.f);
+            float textX=px+14.f+(g_narrationPortraitSRV?58.f:0.f);
+            if(g_narrationPortraitSRV)DrawTexQuad(ctx,px+12.f,y+5.f,40.f,40.f,vpW,vpH,g_narrationPortraitSRV);
+            if(g_ttNarrationName.srv)DrawTexQuad(ctx,textX,y+9.f,(float)g_ttNarrationName.width,(float)g_ttNarrationName.height,vpW,vpH,g_ttNarrationName.srv);
+            if(g_ttNarrationDetail.srv)DrawTexQuad(ctx,textX,y+27.f,(float)g_ttNarrationDetail.width,(float)g_ttNarrationDetail.height,vpW,vpH,g_ttNarrationDetail.srv);
         }
     }
 
@@ -857,7 +904,8 @@ static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT 
     selector_tick(selectorDesc.OutputWindow,(float)selectorDesc.BufferDesc.Width,(float)selectorDesc.BufferDesc.Height);
     if ((g_data && (InterlockedCompareExchange(&g_data->visible,0,0) != 0
         || InterlockedCompareExchange(&g_data->scoreboard_visible,0,0) != 0
-        || InterlockedCompareExchange(&g_data->movie_visible,0,0) != 0)) || selector_visible()) {
+        || InterlockedCompareExchange(&g_data->movie_visible,0,0) != 0
+        || InterlockedCompareExchange(&g_data->narration_visible,0,0) != 0)) || selector_visible()) {
         ID3D11Device *dev=nullptr;
         if (SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device),(void**)&dev))) {
             ID3D11DeviceContext *ctx=nullptr;

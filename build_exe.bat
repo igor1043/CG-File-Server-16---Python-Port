@@ -8,6 +8,7 @@ set "DISTPATH=dist"
 set "OVERLAY_DLL=bin\cgfs16_overlay.dll"
 set "INJECTOR_EXE=bin\cgfs16_inject.exe"
 set "FIFA_LIBRARY=bin\FifaLibrary16.dll"
+set "NARRATION_DLL=bin\fifa16_narration.dll"
 
 echo ============================================================
 echo  CGFS16 - Full Build
@@ -30,6 +31,8 @@ if errorlevel 1 exit /b 1
 call :require_file "%INJECTOR_EXE%" "Overlay injector"
 if errorlevel 1 exit /b 1
 call :require_file "%FIFA_LIBRARY%" "FIFA database library"
+if errorlevel 1 exit /b 1
+call :require_file "%NARRATION_DLL%" "Narration DLL"
 if errorlevel 1 exit /b 1
 
 echo [3/4] Setting up 32-bit Python bridge ...
@@ -115,6 +118,18 @@ if errorlevel 1 (
 )
 echo [OK] cgfs16_inject.exe
 echo.
+echo [3/3] Compiling fifa16_narration.dll ...
+cl /nologo /O2 /W3 /LD /EHsc /std:c++17 ^
+  "native_mods\narration\narration_resident.cpp" ^
+  /Fe:"%NARRATION_DLL%" ^
+  /Fd:"bin\fifa16_narration.pdb" ^
+  /link /INCREMENTAL:NO
+if errorlevel 1 (
+  call :fail "fifa16_narration.dll compilation failed."
+  exit /b 1
+)
+echo [OK] fifa16_narration.dll
+echo.
 exit /b 0
 
 :skip_cpp_build
@@ -125,7 +140,7 @@ exit /b 0
 
 :use_prebuilt_helpers
 echo [WARN] %~1
-if exist "%OVERLAY_DLL%" if exist "%INJECTOR_EXE%" (
+if exist "%OVERLAY_DLL%" if exist "%INJECTOR_EXE%" if exist "%NARRATION_DLL%" (
   echo [1/3] Using existing %OVERLAY_DLL%.
   echo [2/3] Using existing %INJECTOR_EXE%.
   echo.

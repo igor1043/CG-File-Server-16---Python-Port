@@ -67,8 +67,28 @@ static bool keyboard_shortcut_edge(const bool *keys,const bool *previous) {
     return keys[VK_F12] && !previous[VK_F12];
 }
 static LONG function_action_edge(const bool *keys,const bool *previous) {
-    for (int key=VK_F1;key<=VK_F3;++key) if (keys[key] && !previous[key]) return key-VK_F1+1;
+    for (int key=VK_F1;key<=VK_F5;++key) if (keys[key] && !previous[key]) return key-VK_F1+1;
     return 0;
+}
+static LONG audio_pad_action(bool audio,WORD pressed) {
+    if (!audio) return 0;
+    if (pressed & XINPUT_GAMEPAD_X) return 1;
+    if (pressed & XINPUT_GAMEPAD_Y) return 2;
+    return 0;
+}
+static int navigation_direction(const bool *keys,WORD buttons,SHORT lx,SHORT ly,int previous) {
+    if (keys[VK_LEFT] || (buttons&XINPUT_GAMEPAD_DPAD_LEFT)) return 2;
+    if (keys[VK_RIGHT] || (buttons&XINPUT_GAMEPAD_DPAD_RIGHT)) return 3;
+    if (keys[VK_UP] || (buttons&XINPUT_GAMEPAD_DPAD_UP)) return 4;
+    if (keys[VK_DOWN] || (buttons&XINPUT_GAMEPAD_DPAD_DOWN)) return 5;
+    int x=abs((int)lx),y=abs((int)ly),threshold=previous?12000:16000;
+    if (std::max(x,y)<threshold) return 0;
+    // Follow the dominant axis, retaining it around diagonals until the
+    // other axis is clearly stronger. This prevents a tilted Up from Left.
+    bool horizontal=x>y;
+    if (previous==2 || previous==3) horizontal=x*12>=y*10;
+    else if (previous==4 || previous==5) horizontal=x*10>y*12;
+    return horizontal ? (lx<0?2:3) : (ly>0?4:5);
 }
 bool selector_visible() { return alive() && g_selector->visible; }
 extern "C" BOOL mod_screen_captures_input(void) {
@@ -225,8 +245,23 @@ void selector_tick(HWND window,float width,float height) {
     previously_shown=shown;
     XINPUT_STATE state={};
     WORD buttons=0; SHORT lx=0,ly=0;
+    bool controller_connected=false;
     for (DWORD i=0;i<4;++i) if (mod_xinput_read_raw(i,&state)==ERROR_SUCCESS) {
+        controller_connected=true;
         buttons=state.Gamepad.wButtons; lx=state.Gamepad.sThumbLX; ly=state.Gamepad.sThumbLY; break;
+    }
+    // No shared-structure ABI change. Report state while closed too, and
+    // periodically repeat for a restarted Python owner / a temporarily full queue.
+    static int previous_connection=-1;
+    static DWORD next_connection_report=0,last_connection_owner=0;
+    const DWORD connection_now=GetTickCount();
+    if (alive() && (previous_connection!=(int)controller_connected ||
+        last_connection_owner!=g_selector->owner_pid ||
+        (LONG)(connection_now-next_connection_report)>=0)) {
+        emit(17,controller_connected?1:0);
+        previous_connection=(int)controller_connected;
+        last_connection_owner=g_selector->owner_pid;
+        next_connection_report=connection_now+1000;
     }
     // Gate installation is required even when no controller is connected.
     static DWORD next_install=0;
@@ -262,16 +297,14 @@ void selector_tick(HWND window,float width,float height) {
             }
             if ((selector_audio_mode() && edge(VK_ESCAPE)) || (pressed & XINPUT_GAMEPAD_B)) { emit(7); g_release_until=now+250; }
             else if (edge(VK_RETURN) || (pressed & XINPUT_GAMEPAD_A)) emit(6);
-            if (edge(VK_TAB) || (pressed & XINPUT_GAMEPAD_Y)) emit(9);
+            if (edge(VK_TAB) || (!selector_audio_mode() && (pressed & XINPUT_GAMEPAD_Y))) emit(9);
+            LONG pad_action=audio_pad_action(selector_audio_mode()!=FALSE,pressed);
+            if (pad_action) emit(18,pad_action);
             LONG function_action=function_action_edge(keys,g_keyboard);
             if (function_action) emit(16,function_action);
-            int direction=0;
-            if (keys[VK_LEFT] || (buttons&XINPUT_GAMEPAD_DPAD_LEFT) || lx<-16000) direction=2;
-            else if (keys[VK_RIGHT] || (buttons&XINPUT_GAMEPAD_DPAD_RIGHT) || lx>16000) direction=3;
-            else if (keys[VK_UP] || (buttons&XINPUT_GAMEPAD_DPAD_UP) || ly>16000) direction=4;
-            else if (keys[VK_DOWN] || (buttons&XINPUT_GAMEPAD_DPAD_DOWN) || ly<-16000) direction=5;
+            int direction=navigation_direction(keys,buttons,lx,ly,g_direction);
             if (direction && (direction!=g_direction || (LONG)(now-g_repeat_at)>=0)) {
-                emit(direction); g_repeat_at=now+(direction!=g_direction?350:130);
+                emit(direction); g_repeat_at=now+(direction!=g_direction?260:110);
             }
             g_direction=direction;
             static DWORD next_drag=0;

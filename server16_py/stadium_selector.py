@@ -20,6 +20,7 @@ from .match_audio_panel import MatchAudioPanel
 from .match_state import pause_page
 from .crowd_control import CrowdControl
 from .prematch_panel import PrematchPanel
+from .narration_runtime import narration_runtime
 
 SELECTOR_MAPPING_NAME = 'Local\\CGFS16_Selector_v1'
 
@@ -37,9 +38,9 @@ class SelectorShared(ctypes.Structure):
 
 class StadiumSelector:
     WIDTH = 600
-    HEIGHT = 560
+    HEIGHT = 600
     KEYBOARD_WIDTH = 1000
-    KEYBOARD_HEIGHT = 790
+    KEYBOARD_HEIGHT = 830
     PHOTO_RECT = (24,130,576,362)
     KEYS = list('QWERTYUIOPASDFGHJKLZXCVBNM0123456789') + ['Espaço','Apagar','Limpar','Buscar']
 
@@ -53,6 +54,7 @@ class StadiumSelector:
         self.applying = False
         self.audio_panel = None
         self.prematch_panel = None
+        self.controller_connected = False
         self.return_to_menu = False
         self.crowd_control = None
         self._match_context = None
@@ -132,6 +134,9 @@ class StadiumSelector:
         shared = self.shared
         shared.heartbeat = ctypes.windll.kernel32.GetTickCount()
         prematch_eligible = app.memory.is_open() and prematch_page(app.lastpagename)
+        runtime=getattr(app,'_narration_runtime',None)
+        if runtime is not None or (Path(getattr(app,'exedir',app.base_dir))/'Narrations').is_dir():
+            narration_runtime(app).tick(prematch_eligible)
         stadium_eligible = prematch_eligible and app.module_enabled('Stadium')
         mode = 1 if prematch_eligible else 2 if self.match_eligible() else 0
         page=(app.lastpagename or '').lower()
@@ -182,7 +187,7 @@ class StadiumSelector:
                 else:
                     app.log(f'Stadium selector shortcut rejected: enabled={shared.enabled} native_ready={shared.ready}/7')
                     self.close()
-            elif self.opened:
+            elif kind==17 or self.opened:
                 self.handle(kind,value)
 
     def _context(self):
@@ -326,6 +331,9 @@ class StadiumSelector:
         self._image_stop.set()
         self.close(); self.shared.enabled=0; self.shared.owner_pid=0
         self.crowd_control.shutdown()
+        runtime=getattr(self.app,'_narration_runtime',None)
+        if runtime is not None:
+            runtime.close();self.app._narration_runtime=None
         self.shared=None
         self.mapping.close()
 
@@ -344,8 +352,6 @@ class StadiumSelector:
         if not self.results or self.context!=self._context() or not prematch_page(self.app.lastpagename):
             self.message='Seleção indisponível nesta tela'; self.render(); return
         entry=self.results[self.index]
-        if self.app._stadium_task_running:
-            self.message='Aguarde o carregamento do estádio'; self.render(); return
         try:
             self.app.stadium_runtime.apply_manual_stadium(entry.name,self.context)
         except Exception as exc:
@@ -415,6 +421,13 @@ class StadiumSelector:
             self.focus=focus; self.render()
 
     def handle(self,kind,value):
+        if kind==17:
+            connected=bool(value)
+            if connected!=self.controller_connected:
+                self.controller_connected=connected
+                if self.opened:
+                    self.render()
+            return
         if self.audio_panel:
             self.audio_panel.handle(kind,value)
             return
@@ -461,7 +474,8 @@ class StadiumSelector:
         elif kind==6:
             self.action({0:'search',1:'country_next',2:'apply',3:'apply',4:'cancel'}[self.focus])
         elif kind in (4,5):
-            self.focus=(self.focus+(1 if kind==5 else -1))%5; self.render()
+            vertical={0:(0,1),1:(0,2),2:(1,3),3:(2,3),4:(2,4)}
+            self.focus=vertical[self.focus][kind==5]; self.render()
         elif kind in (2,3): self.change(1 if kind==3 else -1,self.focus)
 
     @staticmethod
@@ -700,12 +714,12 @@ class StadiumSelector:
         button((24,481,292,529),'Voltar · F2 / B' if self.return_to_menu else 'Cancelar · F2 / B','cancel',self.focus==4)
         button((308,481,576,529),'Aplicar · F1','apply',self.focus==3,primary=True)
         if self.message:
-            text(24,536,self.message,13,color='#8c5b24',max_width=552)
+            text(24,554,self.message,13,color='#8c5b24',max_width=552)
         else:
             hint={0:'Busca selecionada · A / Enter Digitar',1:'País selecionado · ← → Trocar país',
                   2:'Estádio selecionado · ← → Trocar · A / Enter Aplicar',
                   3:'Aplicar selecionado · A / Enter Confirmar',4:'Cancelar selecionado · A / Enter Fechar'}[self.focus]
-            text(24,536,hint,12,color=ink,max_width=552)
+            text(24,554,hint,12,color=ink,max_width=552)
         if self.keyboard:
             # A single transport texture, but two separate screen panels.
             # Native rendering places the card at the top and keyboard below.
@@ -713,14 +727,14 @@ class StadiumSelector:
             combined.alpha_composite(image,(self.KEYBOARD_WIDTH-self.WIDTH,0))
             image=combined; draw=OverlayDraw(image)
             draw.rounded_rectangle((0,self.HEIGHT,self.KEYBOARD_WIDTH-1,height-1),16,fill='#ffffff',outline='#dce5ee')
-            text(20,574,'TECLADO',16,bold=True)
-            text(165,576,'Setas + A para digitar • Buscar confirma • B retorna ao estádio',14,color=muted,max_width=805)
+            text(20,self.HEIGHT+14,'TECLADO',16,bold=True)
+            text(165,self.HEIGHT+16,'Setas + A para digitar • Buscar confirma • B retorna ao estádio',14,color=muted,max_width=805)
             for i,key in enumerate(self.KEYS):
                 # The final row reserves wider keys for the four actions.
                 if i>=36:
-                    x=20+(i-36)*240; y=734
+                    x=20+(i-36)*240; y=self.HEIGHT+174
                     button((x,y,x+232,y+40),key,'key:'+key,i==self.key_index,primary=key=='Buscar')
                 else:
-                    x=20+(i%12)*80; y=608+(i//12)*38
+                    x=20+(i%12)*80; y=self.HEIGHT+48+(i//12)*38
                     button((x,y,x+72,y+32),key,'key:'+key,i==self.key_index)
         self._publish(image,self.KEYBOARD_WIDTH if self.keyboard else self.WIDTH,height)

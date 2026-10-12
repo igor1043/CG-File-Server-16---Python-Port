@@ -68,7 +68,7 @@ class MatchAudioTests(unittest.TestCase):
                 self.assertEqual(selector.shared.enabled, 2)
                 self.assertTrue(selector.audio_panel)
                 with Image.open(selector.shared.image_path) as image:
-                    self.assertEqual(image.size, (1200,800))
+                    self.assertEqual(image.size, (selector.audio_panel.WIDTH*2,selector.audio_panel.HEIGHT*2))
                     self.assertEqual(image.getpixel((600,20))[:3], (255,255,255))
                 original = selector.app.settings.path.read_bytes()
                 selector.handle(2,0)
@@ -265,7 +265,7 @@ class MatchAudioTests(unittest.TestCase):
                 selector.open(audio=True)
                 panel=selector.audio_panel
                 self.assertEqual([label for _,_,label in panel.buttons()],
-                    ['Cancelar · F3','Aplicar geral · F1','Aplicar específico · F2'])
+                ['Cancelar','Aplicar geral','Aplicar específico'])
                 from server16_py.overlay_canvas import OverlayDraw
                 draw=OverlayDraw(panel.render())
                 for _,rect,label in panel.buttons():
@@ -386,7 +386,7 @@ class MatchAudioTests(unittest.TestCase):
                 selector.handle(3,0)
                 self.assertEqual(selector.index,1)
                 selector.apply()
-                selector.app.stadium_runtime.apply_manual_stadium.assert_not_called()
+                selector.app.stadium_runtime.apply_manual_stadium.assert_called_once_with('ESP - B',selector.context)
                 selector.handle(7,0)
                 self.assertFalse(selector.opened)
             finally:

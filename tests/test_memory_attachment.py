@@ -44,3 +44,21 @@ class MemoryAttachmentTests(unittest.TestCase):
             self.assertFalse(memory.attack('fifa16'))
         self.assertFalse(memory.is_open())
         memory.kernel32.CloseHandle.assert_called_once_with(123)
+
+    def test_module_base_is_retried_after_early_startup(self):
+        memory = self.memory()
+        memory.base_module = 0
+        memory._get_base_address.side_effect = [0, 0x140000000]
+        with patch('psutil.process_iter', return_value=[self.process(10)]):
+            self.assertFalse(memory.attack('fifa16'))
+            self.assertFalse(memory.is_open())
+            self.assertTrue(memory.attack('fifa16'))
+            self.assertTrue(memory.is_open())
+        memory.kernel32.CloseHandle.assert_not_called()
+        memory.kernel32.OpenProcess.assert_not_called()
+
+    def test_close_clears_previous_game_address(self):
+        memory = self.memory()
+        memory.close()
+        self.assertEqual(memory.base_module, 0)
+        self.assertEqual(memory.process_id, 0)

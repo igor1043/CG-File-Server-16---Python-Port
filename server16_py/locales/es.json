@@ -217,5 +217,6 @@
   "progress.database_unavailable": "Base no disponible, continuando",
   "progress.database_failed": "Falló la base, continuando",
   "progress.applying_runtime": "Aplicando runtime",
-  "progress.runtime_ready": "Runtime listo"
+  "progress.runtime_ready": "Runtime listo",
+  "message.warning.missing_fifa_settings": "No se encontró la configuración de Server 16:\n\n{path}\n\nMantenga Server16Python.exe junto a fifa16.exe y restaure la carpeta FSW de su instalación. No se creará un INI vacío en lugar del original."
 }

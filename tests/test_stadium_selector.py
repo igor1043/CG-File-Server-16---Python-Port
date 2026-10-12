@@ -315,7 +315,7 @@ class StadiumSelectorTests(unittest.TestCase):
                 self.assertEqual(selector.focus,1)
                 selector.handle(9,0)
                 draft=selector.draft
-                selector.handle(15,(630<<16)|140)
+                selector.handle(15,((selector.HEIGHT+70)<<16)|140)
                 self.assertEqual(selector.key_index,1)
                 self.assertEqual(selector.draft,draft)
                 selector.app.stadium_runtime.apply_manual_stadium.assert_not_called()

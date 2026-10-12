@@ -120,7 +120,7 @@ class Server16App(tk.Tk):
         self.show_stadium_loading_var = tk.BooleanVar(value=self.settings.show_stadium_loading_notification)
         self.keep_open_var = tk.BooleanVar(value=self.settings.keep_open_on_game_close)
         self.random_stadium_selection_var = tk.BooleanVar(value=self.settings.random_stadium_selection)
-        self.localization = LocalizationManager(self.base_dir / "server16_py" / "locales", self.settings.language)
+        self.localization = LocalizationManager(self.resource_dir / "server16_py" / "locales", self.settings.language)
         if self._launch_splash is not None:
             self._launch_splash.set_message(self.tr("splash.starting"))
         self.log_backup_path = self.log_path.with_suffix(".previous.log")
@@ -396,6 +396,8 @@ class Server16App(tk.Tk):
         self.setuppaths()
         if not self._check_fifa_location():
             return
+        if self.fifaEXE != "default":
+            self._check_fifa_settings()
         self.refresh_camera_catalog()
         self.refresh_modules()
         self.log("Bootstrap file writes are deferred until an explicit runtime action")
@@ -1092,7 +1094,7 @@ class Server16App(tk.Tk):
         modal.geometry("340x274")
 
     def _show_stadium_loading_modal(self, stadium_name: str, detail: str = "Preparing stadium assets", progress: float = 0.0, title: str | None = None, use_d3d: bool = True) -> None:
-        if not self.show_stadium_loading_var.get():
+        if not self.show_stadium_loading_var.get() and title != 'Narração aplicada':
             self._stadium_loading_visible = False
             self._stadium_loading_restore_fullscreen = False
             return
@@ -1101,7 +1103,7 @@ class Server16App(tk.Tk):
         if self.stadium_loading_title is not None:
             self.stadium_loading_title.configure(text=title)
         # ── D3D injection overlay (visible in fullscreen) ─────────────────────
-        if use_d3d and self._try_d3d_overlay_show(stadium_name, detail, progress):
+        if use_d3d and self._try_d3d_overlay_show(stadium_name, detail, progress, narration=title=='Narração aplicada'):
             return
         # ── Tkinter modal fallback ────────────────────────────────────────────
         if self.stadium_loading_modal is None:
@@ -1128,7 +1130,24 @@ class Server16App(tk.Tk):
             pass
         self.after(10, self._focus_fifa_window)
 
-    def _try_d3d_overlay_show(self, stadium_name: str, detail: str, progress: float) -> bool:
+    def show_narration_applied(self, name: str) -> None:
+        self.log(f'Narration applied: {name}; selection modal closed')
+        self.show_narration_loading(name,100,'Narração aplicada · Pode iniciar a partida.')
+        self._hide_asset_loading('narration',delay_ms=3500)
+
+    def show_narration_loading(self,name: str,progress: float=5,detail: str='Carregando narração…') -> None:
+        self._ensure_d3d_overlay_injected()
+        image_path=''
+        try:
+            from .narrator_portrait import cached_portrait
+            runtime=getattr(self,'_narration_runtime',None)
+            profile=next((p for p in runtime.profiles() if p['name']==name),None) if runtime else None
+            if profile and profile.get('portrait'):
+                image_path=str(cached_portrait(profile['portrait'],name,Path(self.exedir)/'runtime/narration_portraits'))
+        except (OSError,ValueError) as exc:self.log('Narrator portrait unavailable: '+str(exc))
+        self._show_asset_loading('narration','Narração aplicada' if progress>=100 else 'Carregando narração',name,detail,progress,image_path=image_path)
+
+    def _try_d3d_overlay_show(self, stadium_name: str, detail: str, progress: float, narration: bool = False) -> bool:
         """Inject the D3D overlay DLL and show the notification.
 
         Returns True if the overlay was shown via D3D injection, False if we
@@ -1139,7 +1158,7 @@ class Server16App(tk.Tk):
         inj = self._d3d_injector
         if inj is None:
             return False
-        inj.show(stadium_name, detail or self.tr("stadium_modal.preparing"), progress,
+        inj.show(('[Narração aplicada] '+stadium_name) if narration else stadium_name, detail or self.tr("stadium_modal.preparing"), progress,
                  image_path=str(self._resolve_stadium_preview_path(stadium_name) or ""))
         self._d3d_overlay_shown_at = time.monotonic()
         self._stadium_loading_visible = True
@@ -1266,8 +1285,8 @@ class Server16App(tk.Tk):
             self._position_stadium_loading_modal()
             self.stadium_loading_modal.update_idletasks()
 
-    def _show_asset_loading(self, kind: str, title: str, name: str, detail: str, progress: float) -> None:
-        if not self.show_stadium_loading_var.get():
+    def _show_asset_loading(self, kind: str, title: str, name: str, detail: str, progress: float, image_path: str = '') -> None:
+        if kind != 'narration' and not self.show_stadium_loading_var.get():
             return
         previous = self._asset_loading_hide_jobs.pop(kind, None)
         if previous is not None:
@@ -1278,7 +1297,25 @@ class Server16App(tk.Tk):
         self._asset_loading_started_at[kind] = time.monotonic()
         if self._d3d_injector is not None and self._d3d_injector.is_injected():
             self._asset_loading_fallback.discard(kind)
-            self._d3d_injector.show_asset(kind, name, detail, progress)
+            self._d3d_injector.show_asset(kind, name, detail, progress, image_path=image_path)
+            return
+        if kind=='narration':
+            # Dedicated fallback window; never overwrite an active stadium.
+            modal=getattr(self,'_narration_notice',None)
+            if modal is None:
+                modal=tk.Toplevel(self);modal.withdraw();modal.overrideredirect(True);modal.attributes('-topmost',True)
+                frame=ttk.Frame(modal,padding=14);frame.pack(fill='both',expand=True)
+                photo=ttk.Label(frame);photo.pack(side='left',padx=(0,12));self._narration_notice_photo=photo
+                label=ttk.Label(frame,wraplength=270);label.pack(side='left',fill='both',expand=True);self._narration_notice=modal;self._narration_notice_label=label
+            self._narration_notice_photo.configure(image='');self._narration_notice_photo.image=None
+            if image_path:
+                try:
+                    from PIL import Image,ImageTk
+                    with Image.open(image_path) as source:photo=ImageTk.PhotoImage(source.resize((52,52)),master=modal)
+                    self._narration_notice_photo.configure(image=photo);self._narration_notice_photo.image=photo
+                except (OSError,ValueError):pass
+            self._narration_notice_label.configure(text=f'{title}\n{name}\n{detail}')
+            modal.geometry('400x110+30+340');modal.deiconify()
             return
         self._asset_loading_fallback.add(kind)
         self._show_stadium_loading_modal(name, detail, progress, title=title, use_d3d=False)
@@ -1308,6 +1345,7 @@ class Server16App(tk.Tk):
     def _finish_asset_loading(self, kind: str) -> None:
         self._asset_loading_hide_jobs.pop(kind, None)
         self._asset_loading_started_at.pop(kind, None)
+        if kind=='narration' and getattr(self,'_narration_notice',None) is not None:self._narration_notice.withdraw()
         if kind in self._asset_loading_fallback:
             self._asset_loading_fallback.discard(kind)
             if not self._stadium_task_running and not self._asset_loading_fallback:
@@ -2553,10 +2591,13 @@ class Server16App(tk.Tk):
             event = self._worker_queue.get()
             kind = event[0]
             if kind == "progress":
+                if self.stadium_runtime._replacement is not None:continue
                 _, value, text = event
                 self._set_progress(value, text)
             elif kind == "done":
                 _, payload = event
+                if self.stadium_runtime._replacement is not None:
+                    self.stadium_runtime.restart_replacement();continue
                 try:
                     self._finish_stadium_apply(payload)
                 except Exception as exc:
@@ -2564,7 +2605,11 @@ class Server16App(tk.Tk):
                     self._set_progress(100, f'Failed to apply stadium: {exc}')
                     self._set_process_status(self.status_text('stadium_error'), self.error)
                     self.log('Failed to finish stadium application', exc, exc_info=sys.exc_info())
+            elif kind == 'cancelled':
+                self.stadium_runtime.restart_replacement()
             elif kind == "error":
+                if self.stadium_runtime._replacement is not None:
+                    self.stadium_runtime.restart_replacement();continue
                 _, message = event
                 self.stadium_runtime.cancel_pending_selection()
                 short_message = str(message).splitlines()[0] if message else self.status_text("stadium_error")
@@ -2579,7 +2624,10 @@ class Server16App(tk.Tk):
             self._schedule_worker_poll()
 
     def setuppaths(self, load_team_database: bool = True) -> None:
-        self.fifaEXE = self.settings.fifa_exe
+        detected = self._auto_detect_fifa_exe()
+        self.fifaEXE = str(detected) if detected is not None else "default"
+        if self.settings.fifa_exe != self.fifaEXE:
+            self.settings.fifa_exe = self.fifaEXE
         self.MP = Path(self.fifaEXE).stem if self.fifaEXE != "default" else ""
         self.exedir = Path(self.fifaEXE).parent if self.fifaEXE != "default" else self.base_dir
         self.TVLogo = self.exedir / "TVLogoGBD"
@@ -2619,8 +2667,8 @@ class Server16App(tk.Tk):
         if discord_ini_value in {"0", "1"}:
             self._discord_rpc_enabled = discord_ini_value == "1"
         else:
-            # Avoid creating FSW/settings.ini on first app start when FIFA is not linked yet.
-            if self.fifaEXE != "default" or self.settings_ini.path.exists():
+            # Never fabricate an incomplete game configuration from a Discord default.
+            if self.settings_ini.path.is_file():
                 self.settings_ini.write("DiscordRPC", "1" if self._discord_rpc_enabled else "0", "Modules")
                 self.settings_ini.save()
         self.module_states["DiscordRPC"] = self._discord_rpc_enabled
@@ -2804,13 +2852,25 @@ class Server16App(tk.Tk):
     def _auto_detect_fifa_exe(self) -> Path | None:
         for name in ("fifa16.exe", "FIFA16.exe", "FIFA 16.exe", "fifa 16.exe"):
             candidate = self.base_dir / name
-            if candidate.exists():
+            if candidate.is_file():
                 return candidate
         if self.settings.fifa_exe and self.settings.fifa_exe != "default":
             candidate = Path(self.settings.fifa_exe)
-            if candidate.exists():
+            if candidate.is_file():
                 return candidate
         return None
+
+    def _check_fifa_settings(self) -> bool:
+        path = self.exedir / "FSW" / "settings.ini"
+        if path.is_file():
+            return True
+        self.log(f"FIFA configuration not found: {path}")
+        self._dismiss_launch_splash()
+        messagebox.showwarning(
+            self.tr("message.fifa16"),
+            self.tr("message.warning.missing_fifa_settings", path=str(path)),
+        )
+        return False
 
     def _load_team_database(self, progress_callback=None) -> None:
         """Load FIFA team database for the selected installation"""
@@ -2939,6 +2999,8 @@ class Server16App(tk.Tk):
                 return
         self.settings.fifa_exe = str(fifa_path)
         self.setuppaths()
+        if not self._check_fifa_settings():
+            return
         self.apply_bootstrap_files()
         self.refresh_modules()
         self._overlay_enabled = True

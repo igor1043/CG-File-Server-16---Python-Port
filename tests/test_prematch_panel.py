@@ -108,6 +108,27 @@ class PrematchTests(unittest.TestCase):
                 self.assertEqual(control.shared.requested_percent,-1)
             finally: selector.shutdown()
 
+    def test_career_menu_releases_manual_even_when_next_fixture_has_same_teams(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            selector=self.selector(Path(tmp))
+            try:
+                control=selector.crowd_control
+                control.shared.status=2
+                control.shared.ack=control.shared.command
+                control.apply(56,selector._context())
+                selector.app.lastpagename='game/screens/career/CareerHub'
+                selector.tick()
+                self.assertEqual(control.shared.requested_percent,-1)
+                self.assertEqual(control.shared.phase,0)
+                # Career does not always use the friendly kickoff generation.
+                # Even the same teams must not recover the previous request.
+                selector.app.lastpagename='game/screens/career/PreMatchHub'
+                selector.tick()
+                self.assertEqual(control.shared.phase,1)
+                self.assertEqual(control.shared.requested_percent,-1)
+            finally:
+                selector.shutdown()
+
     def test_stadium_apply_returns_to_menu_and_keyboard_search_does_not_apply(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'BRA - Test.zip').touch()

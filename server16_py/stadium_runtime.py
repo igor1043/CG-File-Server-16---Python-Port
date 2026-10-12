@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from .app import Server16App
 
 
+class StadiumCopyCancelled(RuntimeError):pass
+
 class StadiumRuntime:
     def __init__(self, app: "Server16App") -> None:
         self.app = app
@@ -38,6 +40,8 @@ class StadiumRuntime:
         self._copy_lock = threading.Lock()
         self._applied_slot = None
         self._previous_manual_override = None
+        self._replacement=None
+        self._cancel_copy=threading.Event()
 
     def _context(self) -> tuple:
         app = self.app
@@ -78,6 +82,7 @@ class StadiumRuntime:
         return set_inj_id(str(self.app.CCount))
 
     def _validate_copy_context(self, context: tuple | None, section: str, injid: str) -> None:
+        if self._cancel_copy.is_set():raise StadiumCopyCancelled('A new stadium was selected')
         if str(injid) not in ('176', '261'):
             raise RuntimeError(f'Unsupported stadium injection ID: {injid}')
         if context is None:  # Isolated copy/benchmark without a live FIFA context.
@@ -319,6 +324,7 @@ class StadiumRuntime:
     ) -> None:
         app = self.app
         app._stadium_task_running = True
+        self._cancel_copy.clear()
         app._stadium_task_signature = stadium_signature
         app._stadium_task_request_key = task_request_key
         self.pending_selection = (
@@ -366,6 +372,8 @@ class StadiumRuntime:
                 payload['context'] = task_context
                 payload['stadium_type'] = task_stadium_type
                 app._worker_queue.put(("done", payload))
+            except StadiumCopyCancelled:
+                app._worker_queue.put(('cancelled',None))
             except Exception as exc:
                 app._worker_queue.put(("error", f"Failed to load stadium assets: {exc}\n{traceback.format_exc().strip()}"))
 
@@ -377,7 +385,10 @@ class StadiumRuntime:
         if context != (app._kickoff_generation,app.HID,app.AID,app.TOURNAME,app.TOURROUNDID):
             raise RuntimeError('The match context has changed')
         if app._stadium_task_running:
-            raise RuntimeError('A stadium task is already running')
+            self._resolve_stadium_source(name)
+            self._replacement=(name,context);self._cancel_copy.set()
+            app._show_stadium_loading_modal(name,'Trocando a seleção; preparando novo estádio…',progress=0)
+            return
         self._resolve_stadium_source(name)
         details = ['None', 'None', 'None']
         for key, section in ((app.TOURROUNDID,'comp'), (app.TOURNAME,'comp'), (app.HID,'stadium')):
@@ -396,6 +407,13 @@ class StadiumRuntime:
             self.cancel_pending_selection()
             app._stadium_task_running = False
             raise
+
+    def restart_replacement(self):
+        replacement=self._replacement;self._replacement=None
+        self.cancel_pending_selection();self.app._stadium_task_running=False
+        self.app._stadium_task_signature=None;self.app._stadium_task_request_key=None
+        self._cancel_copy.clear()
+        if replacement:self.apply_manual_stadium(*replacement)
 
     def run_stadium_copy_job(self, hid: str, section: str, injid: str, chosen_stadium: str | None = None,
             assignment_value: str | None = None, expected_context: tuple | None = None) -> dict:

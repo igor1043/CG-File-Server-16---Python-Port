@@ -82,6 +82,8 @@ class Memory:
         if self.process_handle:
             self.kernel32.CloseHandle(self.process_handle)
             self.process_handle = None
+        self.process_id = 0
+        self.base_module = 0
 
     def __del__(self) -> None:
         self.close()
@@ -96,7 +98,12 @@ class Memory:
                 # Closing a live handle on every poll makes their context checks
                 # intermittently report that FIFA has disappeared.
                 if self.process_handle and self.process_id == proc.info["pid"]:
-                    return True
+                    # FIFA can be discovered before Windows finishes loading
+                    # its modules. A zero base must be retried on the next
+                    # poll instead of becoming a permanent attachment.
+                    if not self.base_module:
+                        self.base_module = self._get_base_address(proc.info.get("exe"))
+                    return bool(self.base_module)
                 self.close()
                 self.process_id = proc.info["pid"]
                 self.process_name = process_name
@@ -105,7 +112,7 @@ class Memory:
                 if not self.process_handle:
                     return False
                 self.base_module = self._get_base_address(proc.info.get("exe"))
-                return True
+                return bool(self.base_module)
         self.close()
         return False
 
@@ -132,7 +139,7 @@ class Memory:
         return 0
 
     def is_open(self) -> bool:
-        return bool(self.process_handle)
+        return bool(self.process_handle and self.base_module)
 
     def read_process_memory(self, address: int, size: int) -> bytes:
         if not self.process_handle:

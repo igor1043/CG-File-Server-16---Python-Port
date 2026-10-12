@@ -17,10 +17,14 @@ int main() {
     assert(!audio_combo_edge(combo,combo));
     assert(!audio_combo_edge(XINPUT_GAMEPAD_START,0));
     assert(!audio_combo_edge(XINPUT_GAMEPAD_BACK,0));
+    assert(audio_pad_action(true,XINPUT_GAMEPAD_X)==1);
+    assert(audio_pad_action(true,XINPUT_GAMEPAD_Y)==2);
+    assert(audio_pad_action(true,0)==0);
+    assert(audio_pad_action(false,XINPUT_GAMEPAD_Y)==0);
     bool keys[256]={},old_keys[256]={};
     keys['M']=true;
     assert(!keyboard_shortcut_edge(keys,old_keys));
-    for (int key=VK_F1;key<=VK_F3;++key) {
+    for (int key=VK_F1;key<=VK_F4;++key) {
         memset(keys,0,sizeof(keys)); memset(old_keys,0,sizeof(old_keys));
         keys[key]=true;
         assert(function_action_edge(keys,old_keys)==key-VK_F1+1);
@@ -61,19 +65,26 @@ int main() {
     assert(release_hold_active(30,0xfffffff0));
     assert(!release_hold_active(30,31));
     for (auto size : {std::pair<float,float>(1280,720),{1920,1080},{3440,1440},{800,600}}) {
-        auto layout=selector_layout(size.first,size.second,1000,790);
+        auto layout=selector_layout(size.first,size.second,1000,830);
         assert(layout.keyboard);
-        assert(layout.card_y+560*layout.card_scale<layout.keyboard_y);
+        assert(layout.card_y+600*layout.card_scale<layout.keyboard_y);
         assert(layout.keyboard_y+230*layout.keyboard_scale<size.second);
         LONG x=0,y=0;
         assert(selector_hit(layout,layout.card_x+100*layout.card_scale,layout.card_y+100*layout.card_scale,x,y));
         assert(abs(x-100)<=1 && abs(y-100)<=1);
         assert(selector_hit(layout,layout.keyboard_x+50*layout.keyboard_scale,layout.keyboard_y+80*layout.keyboard_scale,x,y));
-        assert(abs(x-50)<=1 && abs(y-640)<=1);
+        assert(abs(x-50)<=1 && abs(y-680)<=1);
         assert(!selector_hit(layout,0,0,x,y));
     }
     selector_tick(child,1280,720);
     assert(shared->ready==7);
+    bool direction_keys[256]={};
+    assert(navigation_direction(direction_keys,0,-18000,28000,0)==4);
+    assert(navigation_direction(direction_keys,0,18000,20000,4)==4);
+    assert(navigation_direction(direction_keys,0,29000,17000,4)==3);
+    assert(navigation_direction(direction_keys,0,9000,9000,3)==0);
+    assert(shared->events[0].kind==17);
+    assert(shared->events[0].value==0 || shared->events[0].value==1);
     // Exercise the same shortcut dispatcher used by the render tick, with
     // synthetic keyboard/gamepad snapshots (no real key or pad events).
     auto reset_events=[&](LONG mode) {
