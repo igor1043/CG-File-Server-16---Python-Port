@@ -81,7 +81,8 @@ def seed(narrator,threshold=.64):
     spoken=[s for s in sources if s['transcript'] and s['transcript']!='[sem fala detectada]' and (s['confidence'] is None or s['confidence']>-.8)]
     spoken_vectors=encoder.encode([s['transcript'] for s in spoken],normalize_embeddings=True,show_progress_bar=False) if spoken else None
     queries=[r['transcript'] if r['transcript'] and r['transcript']!='[sem fala detectada]' else reference(r['event']) or description(r['event']) for r in originals]
-    unique_queries=list(dict.fromkeys(queries))
+    scene_queries=[reference(r['event']) for r in originals]
+    unique_queries=list(dict.fromkeys(queries+[query for query in scene_queries if query]))
     print('Encoding speech references',narrator,len(unique_queries),'sources',len(spoken),flush=True)
     encoded_queries=encoder.encode(unique_queries,normalize_embeddings=True,batch_size=128,show_progress_bar=False) if spoken else None
     rankings={}
@@ -122,7 +123,12 @@ def seed(narrator,threshold=.64):
             pool=preferred or pool
             if pool:source=next((s for s in pool if s['variant']==c['row']),pool[c['row']%len(pool)])
         if not source and not role and rankings:
-            for j,value in rankings[queries[i]]:
+            # A generic recording can fit the scene even when the original
+            # sentence names a particular team or player. Keep that proposal
+            # slightly below a direct transcript match, with the same guards.
+            candidates=dict(rankings[queries[i]])
+            for j,value in rankings.get(scene_queries[i],[]):candidates[j]=max(candidates.get(j,0),value*.97)
+            for j,value in sorted(candidates.items(),key=lambda item:item[1],reverse=True):
                 candidate=spoken[j]
                 if candidate['confidence'] is None and value<.72:continue
                 if not candidate_allowed(c,candidate):continue

@@ -13,6 +13,14 @@ class GenericPolicyTests(unittest.TestCase):
         self.assertEqual(topic('',transcript='Gol! Gol!'),'Gols')
         self.assertFalse(candidate_allowed(dict(event='bGOAL_SCORED_GEN'),dict(event='',transcript='Almost a goal!')))
         self.assertTrue(blocked_reasons(dict(event='',transcript='She scores a great goal.')))
+        self.assertTrue(blocked_reasons(dict(event='',transcript='She scored a great goal.')))
+        self.assertTrue(blocked_reasons(dict(event='',transcript='Ela pegou a bola e chutou.')))
+
+    def test_generic_scene_proposals_keep_own_goals_and_set_pieces_distinct(self):
+        source=dict(event='',transcript='Que belo gol!')
+        self.assertFalse(candidate_allowed(dict(event='bOWN_GOAL'),source))
+        self.assertFalse(candidate_allowed(dict(event='bOFFSIDE'),dict(event='',transcript='É escanteio.')))
+        self.assertTrue(candidate_allowed(dict(event='bOFFSIDE'),dict(event='',transcript='O assistente marcou impedimento.')))
     def test_specific_matchup_is_rejected_even_before_transcription(self):
         self.assertIn('evento específico',blocked_reasons(dict(event='mINTRO_SEQ1_MATCHUP_SPECIFIC',transcript='')))
 

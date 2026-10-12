@@ -44,6 +44,7 @@ def run():
         name=voice['narrator']
         try:
             command('base_matching.py',name)
+            command('match_club_names.py',name)
             # The CLI accepts every project, with no narrator-name whitelist.
             command('profiles.py',name)
             report.append(dict(narrator=name,state='built',review_required=True))

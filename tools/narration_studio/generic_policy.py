@@ -7,7 +7,8 @@ from core import WORK
 def female_reference(text):
     text=plain(text)
     if re.search(r'\b(jogadora|jogadoras|goleira|goleiras|atacante feminina|juiza|arbitra)\b',text):return True
-    if re.search(r'\b(she (shoots|scores|passes|dribbles|takes|hits|runs|plays|saves)|her (shot|goal|pass|save))\b',text):return True
+    if re.search(r'\b(she (shoots|shot|scores|scored|passes|passed|dribbles|dribbled|takes|hits|runs|plays|saves|saved)|her (shot|goal|pass|save))\b',text):return True
+    if re.search(r'\bela (recuperou|perdeu|ganhou|empatou|driblou|chutou|bateu|finalizou|meteu|recebeu|dominou|pegou|tocou|passou|cruzou|cabeceou|correu|arrancou|marcou|carregou|conseguiu)\b',text):return True
     # 'ela' may refer to the ball. Reject only player actions and possession.
     return bool(re.search(r'\b(ela (recupera|perde|ganha|empata|dribla|chuta|bate|finaliza|faz|mete|recebe|domina|pega|toca|passa|cruza|cabeceia|corre|arranca|marca|carrega|nao conseguiu)|e dela|gol dela|segundo dela|ela era a ultima|elas (jogam|atacam))\b',text))
 
@@ -104,6 +105,10 @@ def candidate_allowed(original,source):
     role=intro_role(source.get('event',''))
     if role or source.get('event','').startswith('GENERIC_'):return False
     e=original['event'].upper();text=plain(source['transcript'])
+    if not source.get('event'):
+        if any(token in e for token in ('OWN_GOAL','OWNGOAL')) and not any(term in text for term in ('gol contra','own goal')):return False
+        for tokens,terms in ((('OFFSIDE','OS_CALL'),('impedimento','offside')), (('CORNER',),('escanteio','corner')), (('THROW_IN','THROWIN'),('lateral','throw in'))):
+            if any(token in e for token in tokens) and not any(term in text for term in terms):return False
     if any(t in e for t in ('GOAL_SCORED','C_GOAL_','REPLAY_GOAL','CONSOLATION_GOAL')):
         if any(t in text for t in ('quase','nao entrou','nao foi gol','nao saindo','se entra','se der o replay','pode entrar','nao sai','pedindo para tomar','pedindo pra tomar','almost','nearly','not a goal','did not score','no goal','would have been')):return False
         if not source.get('event') and not any(t in text for t in ('golaco','gol maravilhoso','belo gol','lindo gol','belissimo gol','fundo da rede','estufar a rede','fez o gol','marcou o gol','faz um gol','gol de centro','what a goal','back of the net','he scores','he scored')) and not re.fullmatch(r'(?:g[o]+a?l+\s*)+',text):return False
