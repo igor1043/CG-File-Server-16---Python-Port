@@ -84,21 +84,27 @@ def extract(root=DEFAULT_ROOT,workers=4):
 
 def publish(root,db):
     lookup={r[0]:r[1:] for r in db.execute('SELECT sha,path,transcript,status FROM assets')}
+    folders={}
     for index in (WORK.parent.parent.parent/'narrações fifa').glob('*/indexes/pes_references.json'):
         refs=json.loads(index.read_text(encoding='utf8'))
         for ref in refs:
             path,text,status=lookup.get(ref['sha256'],('',None,'pending'))
             dest=root/ref['narrator']/'original'/ref['bank']
-            dest.mkdir(parents=True,exist_ok=True)
+            if dest not in folders:
+                dest.mkdir(parents=True,exist_ok=True)
+                with os.scandir(dest) as files:folders[dest]={entry.name for entry in files}
             stem=str(ref['id'])+'_'+str(ref['index'])
             if path:
                 audio=dest/(stem+'.flac')
-                if not audio.exists():os.link(path,audio)
+                if audio.name not in folders[dest]:os.link(path,audio);folders[dest].add(audio.name)
                 ref['audio']=str(audio)
             ref['extraction_status']=status
-            if text is not None:(dest/(stem+'.txt')).write_text(text,encoding='utf8')
+            if text is not None and stem+'.txt' not in folders[dest]:
+                (dest/(stem+'.txt')).write_text(text,encoding='utf8');folders[dest].add(stem+'.txt')
         target=root/refs[0]['narrator']/'index.json' if refs else None
-        if target:target.write_text(json.dumps(refs,ensure_ascii=False,separators=(',',':')),encoding='utf8')
+        if target:
+            target.write_text(json.dumps(refs,ensure_ascii=False,separators=(',',':')),encoding='utf8')
+            print(json.dumps(dict(narrator=refs[0]['narrator'],available=sum('audio' in ref for ref in refs),references=len(refs))),flush=True)
 
 def transcribe(root=DEFAULT_ROOT):
     from transcribe import whisper_model

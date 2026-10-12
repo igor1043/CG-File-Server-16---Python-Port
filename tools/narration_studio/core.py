@@ -201,7 +201,11 @@ def import_sources(narrator, root):
         duration=0
         key=narrator+':'+hashlib.sha256(str(p).encode()).hexdigest()[:20]
         from topics import topic
-        db.execute('INSERT OR IGNORE INTO sources (key,narrator,path,event,variant,duration,topic) VALUES (?,?,?,?,?,?,?)',(key,narrator,str(p),event,variant,duration,topic(event,str(p)))); count+=1
+        transcript=''
+        for text_path in (p.with_suffix(p.suffix+'.txt'),p.with_suffix('.txt')):
+            if text_path.is_file():
+                transcript=text_path.read_text(encoding='utf-8-sig').strip();break
+        db.execute('INSERT OR IGNORE INTO sources (key,narrator,path,event,variant,duration,topic,transcript) VALUES (?,?,?,?,?,?,?,?)',(key,narrator,str(p),event,variant,duration,topic(event,str(p),transcript),transcript)); count+=1
         if count%200==0: db.commit()
     db.commit(); db.close(); print('sources',narrator,count,flush=True)
 
