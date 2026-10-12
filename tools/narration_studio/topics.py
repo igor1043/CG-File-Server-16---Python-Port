@@ -1,4 +1,5 @@
 """Human-readable navigation over the game's commentary event names."""
+import re
 TOPICS=('Abertura e apresentação','Ataque e chances','Defesa e goleiro','Gols','Faltas e cartões','Bola parada e laterais','Comentários de jogadores','Call names de jogadores','Nomes de clubes','Comentários de clubes','Campeonatos e competições','Estádios e cidades','Intervalo e resultado','Outros comentários')
 
 def topic(event, path='', transcript=''):
@@ -24,9 +25,18 @@ def topic(event, path='', transcript=''):
     if any(x in t for x in ('não entrou','na trave','quase entrou','contra-ataque')):return 'Ataque e chances'
     if any(x in t for x in ('você ligado','boa noite','boa tarde','bem-vindo','estamos prontos','decisão de campeonato')):return 'Abertura e apresentação'
     if any(x in t for x in ('goleiro','defendeu','defesa','marcação')):return 'Defesa e goleiro'
-    if any(x in t for x in ('levou o gol','belo gol','golaço','marcou o gol','fez o gol')):return 'Gols'
+    if any(x in t for x in ('levou o gol','belo gol','golaço','marcou o gol','fez o gol')) or re.fullmatch(r'(?:g[o]+a?l+[\s!,.]*)+',t.strip()):return 'Gols'
     if any(x in t for x in ('falta','cartão','pênalti')):return 'Faltas e cartões'
     if any(x in t for x in ('escanteio','lateral','impedimento')):return 'Bola parada e laterais'
+    # The supplied library also contains English commentary. Preserve the
+    # same scene groups before multilingual semantic matching.
+    if any(x in t for x in ('off target','missed the chance','almost a goal','not a goal','wide of','crossbar','counter attack')):return 'Ataque e chances'
+    if any(x in t for x in ('what a goal','back of the net','he scores','he scored')) or t.strip().rstrip('!.')=='goal':return 'Gols'
+    if any(x in t for x in ('goalkeeper','great save','good save','defence','defense','tackle')):return 'Defesa e goleiro'
+    if any(x in t for x in ('yellow card','red card','foul','penalty')):return 'Faltas e cartões'
+    if any(x in t for x in ('corner kick','throw in','throw-in','offside')):return 'Bola parada e laterais'
+    if any(x in t for x in ('welcome','good evening','good afternoon','starting eleven','line-ups','lineups')):return 'Abertura e apresentação'
+    if any(x in t for x in ('full time','half time','final whistle')):return 'Intervalo e resultado'
     return 'Outros comentários'
 
 def update_topics(db):

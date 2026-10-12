@@ -7,6 +7,7 @@ from core import WORK
 def female_reference(text):
     text=plain(text)
     if re.search(r'\b(jogadora|jogadoras|goleira|goleiras|atacante feminina|juiza|arbitra)\b',text):return True
+    if re.search(r'\b(she (shoots|scores|passes|dribbles|takes|hits|runs|plays|saves)|her (shot|goal|pass|save))\b',text):return True
     # 'ela' may refer to the ball. Reject only player actions and possession.
     return bool(re.search(r'\b(ela (recupera|perde|ganha|empata|dribla|chuta|bate|finaliza|faz|mete|recebe|domina|pega|toca|passa|cruza|cabeceia|corre|arranca|marca|carrega|nao conseguiu)|e dela|gol dela|segundo dela|ela era a ultima|elas (jogam|atacam))\b',text))
 
@@ -64,7 +65,8 @@ def _blocked_reasons(event,transcript,require_text):
         'cartola','hashtag','você comenta','QR Code','votação','novela','Fantástico',
         'tela quente','domingo maior','filme','meme','grande família','craque do jogo',
         'árbitro de vídeo','hábito de vídeo','VAR','27 graus','199 passes','164 certos',
-        'Domingão','Luciano Huck','Vivo Fibra','oferecimento','patrocínio','Itaú','Brahma')):
+        'Domingão','Luciano Huck','Vivo Fibra','oferecimento','patrocínio','Itaú','Brahma',
+        'brought to you by','sponsored by','commercial break')):
         reasons.append('publicidade, conversa externa ou informação fixa')
     return tuple(reasons)
 
@@ -89,9 +91,9 @@ def approved_pool(narrator,role,sources):
 def proposed_opening_pool(role,sources):
     """Conservative text proposals for new libraries, always marked for review."""
     patterns={
-        'welcome':r'\b(bem vind[oa]s?|boa (tarde|noite)|alo (voce|publico)|comeca (a nossa|mais uma) transmissao)\b',
-        'lineup':r'\b(escalacao|escalacoes|formacao (das|da|dos)|equipes na (sua )?tela)\b',
-        'expectation':r'\b(bom jogo|grande jogo|boa partida|partida emocionante|jogo emocionante)\b'}
+        'welcome':r'\b(bem vind[oa]s?|boa (tarde|noite)|alo (voce|publico)|comeca (a nossa|mais uma) transmissao|welcome|good (afternoon|evening)|hello everyone)\b',
+        'lineup':r'\b(escalacao|escalacoes|formacao (das|da|dos)|equipes na (sua )?tela|line ?ups|starting eleven|formations)\b',
+        'expectation':r'\b(bom jogo|grande jogo|boa partida|partida emocionante|jogo emocionante|great match|good game|exciting match)\b'}
     return [s for s in sources if not blocked_reasons(s) and re.search(patterns[role],plain(s['transcript']))]
 
 def candidate_allowed(original,source):
@@ -103,8 +105,8 @@ def candidate_allowed(original,source):
     if role or source.get('event','').startswith('GENERIC_'):return False
     e=original['event'].upper();text=plain(source['transcript'])
     if any(t in e for t in ('GOAL_SCORED','C_GOAL_','REPLAY_GOAL','CONSOLATION_GOAL')):
-        if any(t in text for t in ('quase','nao entrou','nao foi gol','nao saindo','se entra','se der o replay','pode entrar','nao sai','pedindo para tomar','pedindo pra tomar')):return False
-        if not source.get('event') and not any(t in text for t in ('golaco','gol maravilhoso','belo gol','lindo gol','belissimo gol','fundo da rede','estufar a rede','fez o gol','marcou o gol','faz um gol','gol de centro')):return False
+        if any(t in text for t in ('quase','nao entrou','nao foi gol','nao saindo','se entra','se der o replay','pode entrar','nao sai','pedindo para tomar','pedindo pra tomar','almost','nearly','not a goal','did not score','no goal','would have been')):return False
+        if not source.get('event') and not any(t in text for t in ('golaco','gol maravilhoso','belo gol','lindo gol','belissimo gol','fundo da rede','estufar a rede','fez o gol','marcou o gol','faz um gol','gol de centro','what a goal','back of the net','he scores','he scored')) and not re.fullmatch(r'(?:g[o]+a?l+\s*)+',text):return False
     # Neutral replacements must not assert a fixed score, time or earlier
     # result that the target does not provide.
     if not source.get('event'):

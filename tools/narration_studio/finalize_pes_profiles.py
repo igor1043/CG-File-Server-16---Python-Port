@@ -5,6 +5,7 @@ preserved. Each narrator has independent progress and a restartable build.
 """
 from pathlib import Path
 import os,json,sqlite3,time,subprocess,sys
+import psutil
 ROOT=Path(__file__).parent
 RAW=Path(r'J:\mods\fifa 16\audios narradores')
 GAME=Path(r'U:\fifa 16')
@@ -15,7 +16,11 @@ def run():
             state=json.loads((RAW/'progress.json').read_text(encoding='utf8'))
             db=sqlite3.connect(RAW/'library.sqlite',timeout=60)
             pending=db.execute("SELECT count(*) FROM assets WHERE status='decoded' AND transcript IS NULL").fetchone()[0];db.close()
-            if state.get('state')=='complete' and not pending:break
+            active_asr=False
+            for process in psutil.process_iter(['cmdline']):
+                args=process.info['cmdline'] or []
+                if any(Path(arg).name=='pes_extract_library.py' for arg in args) and 'transcribe' in args:active_asr=True;break
+            if state.get('state')=='complete' and not pending and not active_asr:break
         except (OSError,ValueError,sqlite3.Error):pass
         time.sleep(20)
     while not (GAME/'Narrations/.studio/catalog_ready.json').exists():

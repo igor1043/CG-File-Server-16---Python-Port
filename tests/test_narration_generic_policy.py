@@ -4,6 +4,15 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools/narration_studi
 from generic_policy import blocked_reasons,candidate_allowed,intro_role,reference
 
 class GenericPolicyTests(unittest.TestCase):
+    def test_english_goal_proposals_preserve_scene_and_gender(self):
+        from topics import topic
+        self.assertEqual(topic('',transcript='What a goal!'),'Gols')
+        self.assertEqual(topic('',transcript='That was almost a goal.'),'Ataque e chances')
+        self.assertTrue(candidate_allowed(dict(event='bGOAL_SCORED_GEN'),dict(event='',transcript='What a goal!')))
+        self.assertTrue(candidate_allowed(dict(event='bGOAL_SCORED_GEN'),dict(event='',transcript='Gooooool! Gol!')))
+        self.assertEqual(topic('',transcript='Gol! Gol!'),'Gols')
+        self.assertFalse(candidate_allowed(dict(event='bGOAL_SCORED_GEN'),dict(event='',transcript='Almost a goal!')))
+        self.assertTrue(blocked_reasons(dict(event='',transcript='She scores a great goal.')))
     def test_specific_matchup_is_rejected_even_before_transcription(self):
         self.assertIn('evento específico',blocked_reasons(dict(event='mINTRO_SEQ1_MATCHUP_SPECIFIC',transcript='')))
 

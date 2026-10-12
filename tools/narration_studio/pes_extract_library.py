@@ -96,7 +96,10 @@ def publish(root,db):
             stem=str(ref['id'])+'_'+str(ref['index'])
             if path:
                 audio=dest/(stem+'.flac')
-                if audio.name not in folders[dest]:os.link(path,audio);folders[dest].add(audio.name)
+                if audio.name not in folders[dest]:
+                    try:os.link(path,audio)
+                    except FileExistsError:pass
+                    folders[dest].add(audio.name)
                 ref['audio']=str(audio)
             ref['extraction_status']=status
             if text is not None and stem+'.txt' not in folders[dest]:
