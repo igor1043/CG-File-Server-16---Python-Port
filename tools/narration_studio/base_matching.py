@@ -5,6 +5,7 @@ from core import connect,WORK
 from matching import model
 from topics import topic as classify
 from generic_policy import approved_pool,proposed_opening_pool,blocked_reasons,candidate_allowed,intro_role,reference
+MAX_SOURCE_REUSE=8
 
 EXCLUDED=('Call names de jogadores','Nomes de clubes')
 def eligible(row):
@@ -97,7 +98,7 @@ def seed(narrator,threshold=.64):
                 rankings[query]=[(int(j),float(similarities[j])) for j in indices if similarities[j]>=.60]
     print('Selecting compatible recordings',narrator,flush=True)
     preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','boundary_cleanup','gender_review')",(narrator,))}
-    seen=set();report=[];updates=[]
+    seen=set();report=[];updates=[];source_uses=collections.Counter()
     for i,c in enumerate(originals):
         identity=(c['bank'],c['offset'])
         if identity in seen:continue
@@ -115,13 +116,19 @@ def seed(narrator,threshold=.64):
             elif narrator=='Vilani' and role=='expectation':
                 preferred=[s for s in pool if s['event']==('bINTRO_SEQ2_GENERIC' if 'CNOTES' in event.upper() else 'bINTRO_SEQ1_GENERIC')]
                 pool=preferred or pool
-            source=pool[c['row']%len(pool)];method='speech_intro_suggestion' if role in proposed_roles else 'generic_intro'
+            available=[s for s in pool if source_uses[s['key']]<MAX_SOURCE_REUSE]
+            if available:
+                source=min(available,key=lambda s:(source_uses[s['key']],s['path']))
+                method='speech_intro_suggestion' if role in proposed_roles else 'generic_intro'
         elif target:
             pool=[s for s in by_event[target] if candidate_allowed(c,s)]
             demo='demo' in c['bank_name'].lower()
             preferred=[s for s in pool if ('por_br_DEMO' in s['path'])==demo]
             pool=preferred or pool
-            if pool:source=next((s for s in pool if s['variant']==c['row']),pool[c['row']%len(pool)])
+            available=[s for s in pool if source_uses[s['key']]<MAX_SOURCE_REUSE]
+            if available:
+                source=next((s for s in available if s['variant']==c['row']),None)
+                if source is None:source=min(available,key=lambda s:(source_uses[s['key']],s['path']))
         if not source and not role and rankings:
             # A generic recording can fit the scene even when the original
             # sentence names a particular team or player. Keep that proposal
@@ -130,6 +137,7 @@ def seed(narrator,threshold=.64):
             for j,value in rankings.get(scene_queries[i],[]):candidates[j]=max(candidates.get(j,0),value*.97)
             for j,value in sorted(candidates.items(),key=lambda item:item[1],reverse=True):
                 candidate=spoken[j]
+                if source_uses[candidate['key']]>=MAX_SOURCE_REUSE:continue
                 if candidate['confidence'] is None and value<.72:continue
                 if not candidate_allowed(c,candidate):continue
                 if candidate['topic']!=c['topic'] and not (candidate['topic']=='Outros comentários' and c['topic'] in ('Abertura e apresentação','Intervalo e resultado','Outros comentários')):continue
@@ -137,6 +145,7 @@ def seed(narrator,threshold=.64):
                 if c['topic']=='Gols' and any(t in lower for t in ('não entrou','quase entrou','não foi gol')):continue
                 source=candidate;score=value;method='speech_semantic';break
         if not source:continue
+        source_uses[source['key']]+=1
         updates.extend((narrator,a['key'],source['key'],method,score) for a in aliases)
         report.append(dict(clip=c['key'],event=event,reference=reference(event),original=c['transcript'],replacement=source['transcript'],source_event=source['event'],source=source['path'],method=method,score=score,review=method not in ('event_variation','generic_intro')))
     # Keep the previous usable project available during model inference.
@@ -145,7 +154,7 @@ def seed(narrator,threshold=.64):
         db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('event_semantic','event_variation','speech_semantic','speech_intro_suggestion','event_variant','intro_test','curated_test','semantic_test','generic_intro')",(narrator,))
         db.executemany('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',updates)
     total=db.execute('SELECT count(*) FROM mappings WHERE profile=?',(narrator,)).fetchone()[0]
-    summary=dict(narrator=narrator,new_physical=len(report),mapped_occurrences=total,eligible_physical=len(seen),generic_intro=sum(r['method']=='generic_intro' for r in report),rejected_sources=len(rejected),review_required=True)
+    summary=dict(narrator=narrator,new_physical=len(report),mapped_occurrences=total,eligible_physical=len(seen),generic_intro=sum(r['method']=='generic_intro' for r in report),rejected_sources=len(rejected),max_source_reuse=MAX_SOURCE_REUSE,review_required=True)
     out=WORK/'transcriptions';out.mkdir(exist_ok=True)
     (out/(narrator+'_base_associations.json')).write_text(json.dumps(dict(summary=summary,associations=report,rejected_sources=rejected),ensure_ascii=False,indent=2),encoding='utf8')
     db.close();blas_limit.restore_original_limits();print(json.dumps(summary,ensure_ascii=False),flush=True);return summary

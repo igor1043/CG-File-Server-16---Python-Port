@@ -95,7 +95,16 @@ def proposed_opening_pool(role,sources):
         'welcome':r'\b(bem vind[oa]s?|boa (tarde|noite)|alo (voce|publico)|comeca (a nossa|mais uma) transmissao|welcome|good (afternoon|evening)|hello everyone)\b',
         'lineup':r'\b(escalacao|escalacoes|formacao (das|da|dos)|equipes na (sua )?tela|line ?ups|starting eleven|formations)\b',
         'expectation':r'\b(bom jogo|grande jogo|boa partida|partida emocionante|jogo emocionante|great match|good game|exciting match)\b'}
-    return [s for s in sources if not blocked_reasons(s) and re.search(patterns[role],plain(s['transcript']))]
+    # A keyword can occur inside an unrelated long call (for example, a goal
+    # recap that also says "escalação"). Don't use that as a lineup.
+    match_cues=re.compile(r'\b(gol|gols|empata|empatou|chute|chutou|finaliza|finalizou|goleiro|defendeu|defesa|escanteio|impedimento|cartao|falta|penalti|rebote|trave|placar|vitoria|derrota|contra ataque|drible|cruzamento|marcou|bateu|rede)\b')
+    result=[]
+    for source in sources:
+        text=plain(source['transcript'])
+        if blocked_reasons(source) or not re.search(patterns[role],text):continue
+        if match_cues.search(text):continue
+        result.append(source)
+    return result
 
 def candidate_allowed(original,source):
     if blocked_reasons(source):return False

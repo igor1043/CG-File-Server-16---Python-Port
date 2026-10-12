@@ -108,7 +108,7 @@ def compile_profile(name, limit=0, destination=None):
     if len(out)>512*1024*1024:raise ValueError('Pacote excede o limite de memória de 512 MiB')
     package=dest/'profile.npack';temp=package.with_suffix('.tmp');temp.write_bytes(out);temp.replace(package)
     applied=sum('error' not in r for r in report)
-    commentator='Caio Ribeiro'
+    commentator=''
     meta=dest/'profile.json'
     if meta.exists():commentator=json.loads(meta.read_text(encoding='utf8')).get('commentator',commentator)
     text_meta=dest/'narrator.txt'
