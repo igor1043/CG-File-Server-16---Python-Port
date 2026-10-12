@@ -4,7 +4,7 @@ Encoded duplicates share a physical FLAC through NTFS hard links. Source IDs
 are provenance only: they are never interpreted as FIFA event IDs.
 """
 from pathlib import Path
-import argparse, json, sqlite3, hashlib, os, time,subprocess,tempfile
+import argparse, json, sqlite3, hashlib, os, time,subprocess,tempfile,shutil
 from concurrent.futures import ThreadPoolExecutor
 from pes_archives import decode_frames,audio_header
 
@@ -99,6 +99,16 @@ def publish(root,db):
                 if audio.name not in folders[dest]:
                     try:os.link(path,audio)
                     except FileExistsError:pass
+                    except OSError as exc:
+                        if getattr(exc,'winerror',None)!=1142:raise
+                        # NTFS limits links per file. Repeated fillers/call
+                        # names can exceed that limit across all narrators.
+                        # Keep the published recording available with a copy.
+                        temporary=audio.with_suffix('.copying')
+                        try:
+                            shutil.copyfile(path,temporary)
+                            temporary.replace(audio)
+                        finally:temporary.unlink(missing_ok=True)
                     folders[dest].add(audio.name)
                 ref['audio']=str(audio)
             ref['extraction_status']=status
