@@ -1,8 +1,8 @@
 """Exhaustive base-event matching, with physical aliases and names kept safe."""
 from pathlib import Path
-import collections,json,re
+import collections,hashlib,json,re
 from core import connect,WORK
-from matching import model
+from matching import model,MODEL as MATCHING_MODEL
 from topics import topic as classify
 from generic_policy import approved_pool,proposed_opening_pool,blocked_reasons,candidate_allowed,intro_role,reference
 MAX_SOURCE_REUSE=8
@@ -85,7 +85,35 @@ def seed(narrator,threshold=.64):
     scene_queries=[reference(r['event']) for r in originals]
     unique_queries=list(dict.fromkeys(queries+[query for query in scene_queries if query]))
     print('Encoding speech references',narrator,len(unique_queries),'sources',len(spoken),flush=True)
-    encoded_queries=encoder.encode(unique_queries,normalize_embeddings=True,batch_size=128,show_progress_bar=False) if spoken else None
+    encoded_queries=None
+    if spoken:
+        # FIFA-side references are shared by every narrator. Cache their
+        # normalized vectors so a batch build encodes the 20k+ queries once.
+        cache_dir=WORK/'embedding_cache';cache_dir.mkdir(parents=True,exist_ok=True)
+        cache_path=cache_dir/(hashlib.sha1(MATCHING_MODEL.encode('utf8')).hexdigest()[:12]+'.npz')
+        cached_queries=[];cached_vectors=np.empty((0,0),dtype='float32')
+        if cache_path.is_file():
+            try:
+                with np.load(cache_path,allow_pickle=False) as cache:
+                    cached_queries=cache['queries'].astype(str).tolist()
+                    cached_vectors=cache['vectors'].astype('float32',copy=False)
+            except (OSError,ValueError,KeyError):
+                cached_queries=[];cached_vectors=np.empty((0,0),dtype='float32')
+        cached={query:index for index,query in enumerate(cached_queries)}
+        missing=[query for query in unique_queries if query not in cached]
+        if missing:
+            new_vectors=encoder.encode(missing,normalize_embeddings=True,batch_size=128,show_progress_bar=False)
+            if cached_vectors.size:
+                cached_vectors=np.vstack((cached_vectors,new_vectors))
+            else:
+                cached_vectors=new_vectors
+            cached_queries.extend(missing)
+            cached={query:index for index,query in enumerate(cached_queries)}
+            temporary=cache_path.with_suffix('.tmp')
+            with temporary.open('wb') as stream:
+                np.savez(stream,queries=np.asarray(cached_queries,dtype=str),vectors=cached_vectors)
+            temporary.replace(cache_path)
+        encoded_queries=np.stack([cached_vectors[cached[query]] for query in unique_queries])
     rankings={}
     if encoded_queries is not None:
         # Rank each distinct reference once, in bounded matrix batches.
@@ -97,8 +125,14 @@ def seed(narrator,threshold=.64):
                 indices=np.argsort(similarities)[::-1][:30]
                 rankings[query]=[(int(j),float(similarities[j])) for j in indices if similarities[j]>=.60]
     print('Selecting compatible recordings',narrator,flush=True)
-    preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','boundary_cleanup','gender_review')",(narrator,))}
-    seen=set();report=[];updates=[];source_uses=collections.Counter()
+    preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
+    source_uses=collections.Counter()
+    for row in db.execute('''SELECT m.source,COUNT(DISTINCT c.bank||':'||c.offset) AS uses
+        FROM mappings m JOIN clips c ON c.key=m.clip
+        WHERE m.profile=? AND m.method IN ('manual','gender_review')
+        GROUP BY m.source''',(narrator,)):
+        source_uses[row['source']]=row['uses']
+    seen=set();report=[];updates=[]
     for i,c in enumerate(originals):
         identity=(c['bank'],c['offset'])
         if identity in seen:continue
@@ -151,7 +185,7 @@ def seed(narrator,threshold=.64):
     # Keep the previous usable project available during model inference.
     # Replace automatic associations together, preserving manual edits.
     with db:
-        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('event_semantic','event_variation','speech_semantic','speech_intro_suggestion','event_variant','intro_test','curated_test','semantic_test','generic_intro')",(narrator,))
+        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('boundary_cleanup','event_semantic','event_variation','speech_semantic','speech_intro_suggestion','event_variant','intro_test','curated_test','semantic_test','generic_intro')",(narrator,))
         db.executemany('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',updates)
     total=db.execute('SELECT count(*) FROM mappings WHERE profile=?',(narrator,)).fetchone()[0]
     summary=dict(narrator=narrator,new_physical=len(report),mapped_occurrences=total,eligible_physical=len(seen),generic_intro=sum(r['method']=='generic_intro' for r in report),rejected_sources=len(rejected),max_source_reuse=MAX_SOURCE_REUSE,review_required=True)
