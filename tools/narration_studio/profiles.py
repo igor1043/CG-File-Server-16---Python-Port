@@ -132,5 +132,6 @@ def compile_profile(name, limit=0, destination=None):
 
 if __name__=='__main__':
     import argparse
-    p=argparse.ArgumentParser();p.add_argument('name',choices=['Tiago Leifert','Vilani','Luiz Roberto']);p.add_argument('--limit',type=int,default=0);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('name');p.add_argument('--limit',type=int,default=0);a=p.parse_args()
+    if not a.name.strip() or Path(a.name).name!=a.name or any(c in a.name for c in '\\/:*?"<>|'):raise ValueError('Nome de narrador inválido')
     compile_profile(a.name,a.limit)

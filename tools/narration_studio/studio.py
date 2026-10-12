@@ -408,9 +408,12 @@ class Studio(tk.Tk):
     def clear_link(self):
         row=self.originals.get(self.current_key)
         if not row or self.profile.get()=='Tiago Leifert': return
-        name=self.profile.get(); db=connect()
-        db.execute('DELETE FROM mappings WHERE profile=? AND clip IN (SELECT key FROM clips WHERE bank=? AND offset=?)',(name,row['bank'],row['offset'])); db.commit(); db.close()
-        self.job(lambda:projects.save(name))
+        name=self.profile.get();self.save_visible_texts()
+        def task():
+            db=connect()
+            db.execute('DELETE FROM mappings WHERE profile=? AND clip IN (SELECT key FROM clips WHERE bank=? AND offset=?)',(name,row['bank'],row['offset']));db.commit();db.close()
+            projects.save(name);return 'Esta fala voltou a usar o áudio original.'
+        self.job(task)
 
     def import_audio(self):
         original=self.originals.get(self.current_key)

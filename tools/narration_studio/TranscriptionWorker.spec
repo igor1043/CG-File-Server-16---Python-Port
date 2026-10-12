@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
+from pathlib import Path
 
 datas = []
 binaries = []
@@ -12,7 +13,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['transcription_worker.py'],
-    pathex=['tools\\narration_studio'],
+    pathex=[SPECPATH,str(Path(SPECPATH).resolve().parents[1])],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

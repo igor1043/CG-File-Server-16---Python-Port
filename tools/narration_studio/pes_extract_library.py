@@ -4,9 +4,9 @@ Encoded duplicates share a physical FLAC through NTFS hard links. Source IDs
 are provenance only: they are never interpreted as FIFA event IDs.
 """
 from pathlib import Path
-import argparse, json, sqlite3, hashlib, os, time
+import argparse, json, sqlite3, hashlib, os, time,subprocess,tempfile
 from concurrent.futures import ThreadPoolExecutor
-from pes_archives import decode_frames
+from pes_archives import decode_frames,audio_header
 
 DEFAULT_ROOT=Path(r'J:\mods\fifa 16\audios narradores')
 WORK=Path(__file__).parent
@@ -38,7 +38,21 @@ def extract(root=DEFAULT_ROOT,workers=4):
             with Path(ref['archive']).open('rb') as inp:
                 inp.seek(ref['offset']);data=inp.read(ref['size'])
             if hashlib.sha256(data).hexdigest()!=token:raise ValueError('Arquivo de origem mudou')
-            frames,header=decode_frames(data)
+            try:frames,header=decode_frames(data)
+            except Exception:
+                # vgmstream handles game-specific ADX/HCA variants which the
+                # general decoder rejects; retain the same duration check.
+                from core import VGM
+                with tempfile.TemporaryDirectory(prefix='f16_pes_') as temporary:
+                    directory=Path(temporary);header=audio_header(data)
+                    raw=directory/('source.'+('hca' if header['codec']=='hca' else 'adx'))
+                    raw.write_bytes(data);wav=directory/'decoded.wav'
+                    result=subprocess.run([str(VGM),'-i','-o',str(wav),str(raw)],capture_output=True,timeout=120,creationflags=0x08000000)
+                    if result.returncode or not wav.exists():raise ValueError('vgmstream não conseguiu decodificar: '+result.stderr.decode(errors='replace')[-300:])
+                    with av.open(str(wav)) as inp:frames=list(inp.decode(audio=0))
+                    actual=sum(f.samples for f in frames);rate=frames[0].sample_rate
+                    if header['duration'] is not None and abs(actual/rate-header['duration'])>.05:raise ValueError('Duração divergente no decoder alternativo')
+                    header.update(decoded_samples=actual,rate=rate,duration=actual/rate)
             frames=[frame for frame in frames if frame.samples]
             if not frames:return (token,'',0,0,'empty','')
             peak=max(float(np.max(np.abs(f.to_ndarray().astype('float64')))) for f in frames)
