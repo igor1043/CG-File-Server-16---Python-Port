@@ -512,7 +512,9 @@ def match_weather(db,narrator):
             if not pool or any(a['key'] in preserved for a in aliases):
                 unmatched.append(dict(event=c['event'],condition=kind,original=c['transcript'],reason='no_source_with_same_weather_scene' if not pool else 'manual_mapping_preserved'))
                 continue
-            pool.sort(key=lambda s:(0 if target_intensity and rain_intensity(s['transcript'])==target_intensity else 1,-overlap(c['transcript'],s['transcript']),used[s['key']],s['path']))
+            pool.sort(key=lambda s:(
+                0 if rain_intensity(s['transcript'])==target_intensity else 1,
+                -overlap(c['transcript'],s['transcript']),used[s['key']],s['path']))
             source=pool[0];used[source['key']]+=1
             mapped+=put_aliases(db,narrator,c,source['key'],'weather_same_condition',.95)
             report.append(dict(event=c['event'],condition=kind,intensity=target_intensity or rain_intensity(source['transcript']),original=c['transcript'],replacement=source['transcript'],source=source['path']))
