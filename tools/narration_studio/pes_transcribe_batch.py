@@ -16,21 +16,25 @@ SEPARATOR_SAMPLES = SAMPLE_RATE // 10
 CHUNK_SECONDS = 29
 
 
-def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=None):
+def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=None, shard_index=0, shard_count=1):
     from faster_whisper import BatchedInferencePipeline
     from faster_whisper.audio import decode_audio
 
     root = Path(root)
+    if shard_count < 1 or not 0 <= shard_index < shard_count:
+        raise ValueError('shard-index precisa estar entre 0 e shard-count-1.')
+    shard_sql = '' if shard_count == 1 else " AND ((instr('0123456789abcdef', lower(substr(sha,1,1)))-1) % ? = ?)"
+    shard_params = () if shard_count == 1 else (shard_count, shard_index)
     db = open_index(root)
     db.row_factory = sqlite3.Row
     pending = db.execute(
-        "SELECT count(*) FROM assets WHERE status='decoded' AND transcript IS NULL"
+        "SELECT count(*) FROM assets WHERE status='decoded' AND transcript IS NULL" + shard_sql, shard_params
     ).fetchone()[0]
     overall_total = db.execute(
-        "SELECT count(*) FROM assets WHERE status IN ('decoded','transcription_failed')"
+        "SELECT count(*) FROM assets WHERE status IN ('decoded','transcription_failed')" + shard_sql, shard_params
     ).fetchone()[0]
-    previous_done = db.execute('SELECT count(*) FROM assets WHERE transcript IS NOT NULL').fetchone()[0]
-    previous_failed = db.execute("SELECT count(*) FROM assets WHERE status='transcription_failed'").fetchone()[0]
+    previous_done = db.execute('SELECT count(*) FROM assets WHERE transcript IS NOT NULL' + shard_sql, shard_params).fetchone()[0]
+    previous_failed = db.execute("SELECT count(*) FROM assets WHERE status='transcription_failed'" + shard_sql, shard_params).fetchone()[0]
     if limit:
         pending = min(pending, limit)
 
@@ -135,8 +139,8 @@ def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=No
         while not limit or processed < limit:
             take = min(batch_size, limit - processed) if limit else batch_size
             rows = db.execute(
-                f"SELECT sha,path,duration,peak FROM assets WHERE status='decoded' AND transcript IS NULL "
-                f'ORDER BY duration {order_sql} LIMIT ?', (take,)
+                f"SELECT sha,path,duration,peak FROM assets WHERE status='decoded' AND transcript IS NULL"
+                f"{shard_sql} ORDER BY duration {order_sql} LIMIT ?", (*shard_params, take)
             ).fetchall()
             if not rows:
                 break
@@ -185,7 +189,11 @@ if __name__ == '__main__':
     parser.add_argument('--limit', type=int, default=0, help='Transcribe at most this many pending unique assets.')
     parser.add_argument('--order', choices=('asc', 'desc'), default='asc')
     parser.add_argument('--progress-file', type=Path, help='Write progress to a separate JSON file for parallel workers.')
+    parser.add_argument('--shard-index', type=int, default=0)
+    parser.add_argument('--shard-count', type=int, default=1, help='Split assets into deterministic non-overlapping workers.')
     args = parser.parse_args()
     if not 1 <= args.batch_size <= 64:
         parser.error('--batch-size precisa ficar entre 1 e 64.')
-    run(args.root, args.batch_size, args.limit, args.order, args.progress_file)
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error('--shard-index precisa estar entre 0 e --shard-count-1.')
+    run(args.root, args.batch_size, args.limit, args.order, args.progress_file, args.shard_index, args.shard_count)
