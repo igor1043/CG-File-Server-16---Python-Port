@@ -222,6 +222,64 @@ def match_debut_milestones(db,narrator):
         report.append(dict(event=event,position=debut_position('',clip['transcript']),method=method,original=clip['transcript'],replacement=source['transcript'],source=source['path']))
     return dict(occurrences=mapped,physical=len(report),methods={method:sum(1 for row in report if row['method']==method) for method in ('debut_position_exact','debut_intro_generic','debut_dual_intro','debut_positive_result','debut_negative_result')},unmatched_physical=len(unmatched),unmatched=unmatched,report=report)
 
+TACTIC_EVENT_THEMES={
+    'COUNTER_ATTACK':'counter_attack','HIGH_PRESS':'high_press','LONG_BALL':'long_ball',
+    'PARK_THE_BUS':'park_bus','TIKI_TAKA':'tiki_taka','USING_WIDTH_OF_PITCH':'width'
+}
+
+def tactic_themes(text):
+    value=plain(text or '');themes=set()
+    patterns={
+        'counter_attack':r'\bcontra[\s-]?ataques?\b|\bcontragolpes?\b',
+        'high_press':r'\bmarq\w*\s+(?:mais\s+)?a\s+saida\s+de\s+bola\b|\badiantar\s+a\s+marcacao\b|\bmarcacao\s+alta\b|\bpressao\s+alta\b|\bpressionar\s+(?:alto|a\s+saida)\b',
+        'long_ball':r'\bbola\s+longa\b|\bligacao\s+direta\b|\blancamento\s+longo\b|\bpasse\s+longo\b',
+        'park_bus':r'\b(?:estacionar\s+o\s+onibus|park\s+the\s+bus|bloco\s+baixo|linhas\s+baixas|retrancad[oa]s?)\b',
+        'tiki_taka':r'\btiki[\s-]?taka\b|\bposse\s+de\s+bola\b|\btroca\s+de\s+passes\b|\btoque\s+de\s+bola\b',
+        'width':r'\b(?:usar|explorar|aproveitar)\s+(?:bem\s+)?(?:a\s+)?(?:largura|amplitude|laterais)\b|\babrir\s+o\s+campo\b|\bjogar\s+pelos\s+lados\b',
+        'offside_line':r'\blinha\s+(?:burra|de\s+impedimento)\b|\bforcar\s+o\s+impedimento\b',
+        'winger_switch':r'\b(?:pontas?|pontos?)\b.{0,60}\binvert\w*\b|\binvert\w*.{0,60}\b(?:pontas?|pontos?)\b',
+        'defender_forward':r'\bzagueir\w*.{0,80}\b(?:area|ataque|frente)\b|\b(?:sobe|subir|avancar|avanca)\w*.{0,50}\bzagueir\w*\b'
+    }
+    for theme,pattern in patterns.items():
+        if re.search(pattern,value):themes.add(theme)
+    return themes
+
+def source_tactic_themes(source):
+    event=source['event'].upper()
+    for marker,theme in TACTIC_EVENT_THEMES.items():
+        if marker in event:return {theme}
+    return tactic_themes(source['transcript'])
+
+def match_tactics(db,narrator):
+    targets=list(physical_clips(db,"c.event='bKINECT_TACTICS_GEN'"))
+    rows=db.execute("SELECT * FROM sources WHERE narrator=? AND event LIKE 'bTACTICS_CHANGED%' AND transcript!='' AND error=''",(narrator,)).fetchall()
+    sources=[]
+    for row in rows:
+        source=dict(row)
+        if blocked_reasons(source):continue
+        themes=source_tactic_themes(source)
+        if themes:source['themes']=themes;sources.append(source)
+    with db:
+        db.execute("DELETE FROM mappings WHERE profile=? AND method NOT IN ('manual','gender_review') AND clip IN (SELECT c.key FROM clips c JOIN banks b ON b.key=c.bank WHERE b.active=1 AND c.event='bKINECT_TACTICS_GEN')",(narrator,))
+    report=[];unmatched=[];used=collections.Counter();mapped=0
+    preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
+    for clip in targets:
+        themes=tactic_themes(clip['transcript'])
+        pool=[source for source in sources if source['themes'] and source['themes'].issubset(themes)]
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(clip['bank'],clip['offset'])).fetchall()
+        if not pool or any(alias['key'] in preserved for alias in aliases):
+            unmatched.append(dict(event=clip['event'],themes=sorted(themes),original=clip['transcript'],reason='no_exact_tactic_source' if not pool else 'manual_mapping_preserved'))
+            continue
+        available=[source for source in pool if used[source['key']]<8]
+        if not available:
+            unmatched.append(dict(event=clip['event'],themes=sorted(themes),original=clip['transcript'],reason='source_reuse_limit'))
+            continue
+        available.sort(key=lambda source:(source['themes']!=themes,-overlap(clip['transcript'],source['transcript']),used[source['key']],source['path']))
+        source=available[0];used[source['key']]+=1
+        with db:mapped+=put_aliases(db,narrator,clip,source['key'],'tactic_same_strategy',.95)
+        report.append(dict(event=clip['event'],themes=sorted(themes),match_level='exact' if source['themes']==themes else 'same_theme_subset',original=clip['transcript'],replacement=source['transcript'],source=source['path']))
+    return dict(occurrences=mapped,physical=len(report),themes=dict(collections.Counter(theme for row in report for theme in row['themes'])),unmatched_physical=len(unmatched),unmatched=unmatched,report=report)
+
 FORMATION_EVENTS=('bTS_FORMATION','bTS_FORMATION_REPEAT','bTS_FORMATION_FRONT')
 
 def match_formations(db,narrator):
@@ -374,7 +432,7 @@ def match_weather(db,narrator):
 
 def run(narrator):
     db=connect()
-    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),entity_mentions=match_entity_mentions(db,narrator),debut_milestones=match_debut_milestones(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
+    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),entity_mentions=match_entity_mentions(db,narrator),debut_milestones=match_debut_milestones(db,narrator),tactics=match_tactics(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
     dest=WORK/'transcriptions';dest.mkdir(exist_ok=True)
     (dest/(narrator+'_contextual_associations.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf8')
     db.close();print(json.dumps({k:(v if k=='narrator' else {key:val for key,val in v.items() if key not in ('report','unmatched')}) for k,v in result.items()},ensure_ascii=False),flush=True)
