@@ -404,7 +404,7 @@ class Server16App(tk.Tk):
         self.log("Application started")
         self._poll_job = self.after(500, self.poll_process)
         self._stats_job = self.after(250, self.stats_loop)
-        self._overlay_job = self.after(80, self.overlay_loop)
+        self._overlay_job = self.after(40, self.overlay_loop)
         self.after(3000, lambda: self.check_updates(silent=True))
         if self.module_enabled("Chants"):
             self._start_chants_runtime()
@@ -1132,7 +1132,7 @@ class Server16App(tk.Tk):
 
     def show_narration_applied(self, name: str) -> None:
         self.log(f'Narration applied: {name}; selection modal closed')
-        self.show_narration_loading(name,100,'Narração aplicada · Pode iniciar a partida.')
+        self.show_narration_loading(name,100,'Narração aplicada')
         self._hide_asset_loading('narration',delay_ms=3500)
 
     def show_narration_loading(self,name: str,progress: float=5,detail: str='Carregando narração…') -> None:
@@ -3038,7 +3038,7 @@ class Server16App(tk.Tk):
         except Exception as exc:
             self.log("Overlay loop error", exc, exc_info=sys.exc_info())
         if not self._closing:
-            self._overlay_job = self.after(80, self.overlay_loop)
+            self._overlay_job = self.after(40, self.overlay_loop)
 
     def _sync_overlay_hotkey(self) -> None:
         if not self._overlay_enabled:

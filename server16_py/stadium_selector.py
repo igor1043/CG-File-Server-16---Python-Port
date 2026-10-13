@@ -161,7 +161,8 @@ class StadiumSelector:
             self.render()
         if self.applying and not app._stadium_task_running:
             self.applying=False
-            self.close()
+            if self.opened and not self.prematch_panel and not self.audio_panel:
+                self.back()
         shared.enabled = mode if not app._overlay_visible else 0
         if mode:
             pid = app._resolve_fifa_pid()

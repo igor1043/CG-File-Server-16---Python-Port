@@ -1,6 +1,6 @@
 """Narration DLL channel, acknowledged profile changes and pre-match gating."""
 from __future__ import annotations
-import ctypes, mmap, os, json, subprocess, time
+import ctypes, mmap, os, json, subprocess, time, threading, queue
 from pathlib import Path
 from .narration_competitions import choose_profile
 MAPPING_NAME='Local\\FIFA16_Narration_v1'
@@ -51,10 +51,14 @@ class NarrationRuntime:
         self.shared.version=1;self.shared.owner=os.getpid();self.shared.phase=0
         self.shared.ack=self.shared.command;self.shared.status=0;self.shared.error=0
         self.current='Tiago Leifert';self.pending=None;self.deadline=0;self.next_inject=0;self.pid=0;self.game_pid=0;self.error=''
+        self._inject_results=queue.Queue();self._injecting=False
+        self._profiles_cache=None;self._profiles_until=0
         self._diagnostics=None
         self._auto_context=None;self._seen_context=None;self._context_since=0;self._manual_context=None;self._previous_auto=None
 
     def profiles(self):
+        if self._profiles_cache is not None and time.monotonic()<self._profiles_until:
+            return self._profiles_cache
         result=[]
         if self.root.is_dir():
             for folder in self.root.iterdir():
@@ -70,7 +74,9 @@ class NarrationRuntime:
                     portrait=(folder/meta.get('portrait','portrait.png')).resolve()
                     result.append(dict(name=meta['name'],commentator=meta.get('commentator',''),path=package,mapped=meta.get('mapped',0),competitions=meta.get('competitions',[]),portrait=str(portrait) if portrait.parent==folder.resolve() and portrait.is_file() else ''))
                 except (OSError,ValueError,KeyError):continue
-        return sorted(result,key=lambda r:({'Tiago Leifert':0,'Vilani':1,'Luiz Roberto':2}.get(r['name'],3),r['name']))
+        self._profiles_until=time.monotonic()+2
+        self._profiles_cache=sorted(result,key=lambda r:({'Tiago Leifert':0,'Vilani':1,'Luiz Roberto':2}.get(r['name'],3),r['name']))
+        return self._profiles_cache
 
     def tick(self,prematch=False):
         self.shared.heartbeat=ctypes.windll.kernel32.GetTickCount()&0xffffffff
@@ -83,20 +89,30 @@ class NarrationRuntime:
             self.shared.ready=0
             self._restoring_default=True
         game_ready=bool(getattr(self.app,'lastpagename','ready'))
-        if pid and game_ready and pid!=self.pid and time.monotonic()>=self.next_inject:
+        while True:
+            try:completed_pid,success,detail=self._inject_results.get_nowait()
+            except queue.Empty:break
+            self._injecting=False
+            if completed_pid==self.game_pid:
+                if success:self.pid=completed_pid
+                elif detail:self.app.log('Narration DLL unavailable: '+detail)
+        if pid and game_ready and pid!=self.pid and not self._injecting and time.monotonic()>=self.next_inject:
             resources=Path(getattr(self.app,'resource_dir',self.app.base_dir))
             dll=resources/'bin/fifa16_narration.dll'
             helper=resources/'bin/cgfs16_inject.exe'
-            if narration_dll_loaded(pid):
-                self.pid=pid
-                self.app.log('Narration DLL: reusing worker in FIFA process '+str(pid))
-            elif dll.exists() and helper.exists():
-                try:
-                    run=subprocess.run([str(helper),str(pid),str(dll)],capture_output=True,timeout=8,creationflags=0x08000000)
-                    if run.returncode==0:self.pid=pid
-                    else:self.app.log('Narration DLL injection failed: '+run.stderr.decode(errors='replace'))
-                except (OSError,subprocess.TimeoutExpired) as exc:self.app.log('Narration DLL unavailable',exc)
+            self._injecting=True
             self.next_inject=time.monotonic()+5
+            def connect(target_pid=pid):
+                success=False;detail=''
+                try:
+                    if narration_dll_loaded(target_pid):success=True
+                    elif dll.exists() and helper.exists():
+                        run=subprocess.run([str(helper),str(target_pid),str(dll)],capture_output=True,timeout=8,creationflags=0x08000000)
+                        success=run.returncode==0
+                        detail=run.stderr.decode(errors='replace')
+                except (OSError,subprocess.TimeoutExpired) as exc:detail=str(exc)
+                finally:self._inject_results.put((target_pid,success,detail))
+            threading.Thread(target=connect,name='narration-connect',daemon=True).start()
         if self.pending is not None and self.shared.ack==self.shared.command:
             if self.shared.status==2:
                 self.current=self.pending;self.error=''

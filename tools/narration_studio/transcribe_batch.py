@@ -10,6 +10,9 @@ def jobs_for(db,scope):
     source_pending="(transcript='' OR (transcript='[sem fala detectada]' AND duration=0)) AND error=''"
     original_pending="transcript='' AND status='decoded'"
     jobs=[]
+    if scope=='Vilani_complete':
+        rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Vilani' ORDER BY event,variant,path").fetchall()
+        jobs.extend(('sources',dict(r)) for r in rows)
     if scope=='generic_sources':
         events=('bINTRO_SEQ1_GENERIC','bINTRO_SEQ2_GENERIC','bINTRO_SEQ1_COMMENTATORS_STITCH','bINTRO_SEQ1_WELCOME_STITCH','bINTRO_SEQ1_WRAP_UP','bTS_TEAM_INTRO')
         rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Vilani' AND event IN ("+','.join('?' for _ in events)+') ORDER BY event,variant,path',events).fetchall()
@@ -31,7 +34,7 @@ def jobs_for(db,scope):
     if scope=='all':
         rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND topic NOT IN ('Call names de jogadores','Nomes de clubes') ORDER BY narrator,event,path").fetchall()
         jobs.extend(('sources',dict(r)) for r in rows)
-    elif scope not in ('original','original_events','Luiz Roberto','Vilani','generic_sources'):
+    elif scope not in ('original','original_events','Luiz Roberto','Vilani','generic_sources','Vilani_complete'):
         rows=db.execute('SELECT * FROM sources WHERE '+source_pending+' AND narrator=? ORDER BY path',(scope,)).fetchall()
         jobs.extend(('sources',dict(r)) for r in rows)
     seen=set();result=[]

@@ -19,7 +19,7 @@ class NarrationPanel:
             if self.runtime.pending is None:
                 self.waiting=False
                 if not self.runtime.error:
-                    self.selector.close()
+                    self.selector.show_menu()
                     # Runtime owns its independent progress and completion card.
                     return
                 self.message=self.runtime.error
@@ -27,6 +27,7 @@ class NarrationPanel:
             elif self.runtime.error and self.message!=self.runtime.error:
                 self.message=self.runtime.error;self.selector.render()
     def activate(self,focus):
+        if self.waiting:return
         if focus==3:self.selector.show_menu()
         elif focus==4:
             if not self.options:return
@@ -35,22 +36,30 @@ class NarrationPanel:
                 self.runtime.apply(self.options[self.index]['name']);self.waiting=True;self.message='Aplicando narração…'
             except Exception as exc:self.message=str(exc)
             self.selector.render()
-        elif focus<3 and self.offset+focus<len(self.options):self.index=self.offset+focus;self.selector.render()
+        elif 0<=focus<3 and self.offset+focus<len(self.options):
+            self.index=self.offset+focus
+            self.activate(4)
     def handle(self,kind,value):
         if kind==11:self.selector.close();return
         if kind==7:self.selector.show_menu();return
         if kind==16:
-            if value in (1,2):self.activate(4 if value==1 else 3)
+            if value in (1,2):self.activate(self.focus if value==1 else 3)
             return
         visible=self.options[self.offset:self.offset+3]
         targets=[(i,r) for i,r in enumerate(self.ROWS[:len(visible)])]+[(3,self.BACK),(4,self.APPLY)]
         focuses=[f for f,r in targets]
-        if kind==5 and self.focus==len(visible)-1 and self.offset+3<len(self.options):self.offset+=1
+        if kind in (13,14):
+            self.offset=max(0,min(max(0,len(self.options)-3),self.offset+(-3 if kind==13 else 3)))
+            self.focus=min(self.focus,len(self.options[self.offset:self.offset+3])-1) if self.options else 3
+        elif kind==5 and self.focus==len(visible)-1 and self.offset+3<len(self.options):self.offset+=1
         elif kind==4 and self.focus==0 and self.offset>0:self.offset-=1
         elif kind in (2,3,4,5,9):self.focus=move_focus(self.focus,kind,targets,4)
         elif kind==6:self.activate(self.focus);return
         elif kind in (8,15):
             x,y=value&65535,(value>>16)&65535
+            if kind==8 and len(self.options)>3 and 578<=x<=592 and 91<=y<=251:
+                self.offset=min(len(self.options)-3,max(0,round((y-91)*(len(self.options)-3)/160)))
+                self.focus=0;self.index=self.offset;self.selector.render();return
             for f,r in targets:
                 if r[0]<=x<=r[2] and r[1]<=y<=r[3]:
                     self.focus=f
@@ -65,6 +74,11 @@ class NarrationPanel:
         def text(x,y,label,size=16,color=ink,bold=False):draw.text((x,y),label,font=self.selector.font(size,bold),fill=color)
         text(24,22,'Narração da partida',23,bold=True);text(24,58,'Escolha antes de entrar em campo.',15,muted)
         if len(self.options)>3:text(470,58,f'{self.offset+1}–{min(self.offset+3,len(self.options))} / {len(self.options)}',13,muted)
+        if len(self.options)>3:
+            draw.rounded_rectangle((581,91,587,251),3,fill='#e4ecf7')
+            thumb=160*3/len(self.options)
+            top=91+160*self.offset/len(self.options)
+            draw.rounded_rectangle((581,top,587,top+thumb),3,fill=blue)
         for i,(p,r) in enumerate(zip(self.options[self.offset:self.offset+3],self.ROWS)):
             draw.rounded_rectangle(r,9,fill='#f5f8fc',outline='#dce5ee')
             if self.focus==i:draw_focus_ring(draw,r,9)
@@ -85,5 +99,5 @@ class NarrationPanel:
             if self.focus==f:draw_focus_ring(draw,r)
             action_label(draw,self.selector,r,label,key,pad,'white' if f==4 else ink)
         if self.message:text(24,footer_y(self.HEIGHT),self.message[:84],11,muted)
-        else:navigation_hint(draw,self.selector,footer_y(self.HEIGHT),'Selecionar','Voltar')
+        else:navigation_hint(draw,self.selector,footer_y(self.HEIGHT),'Aplicar','Voltar')
         return image
