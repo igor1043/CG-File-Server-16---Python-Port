@@ -86,14 +86,18 @@ def weather_kind(event,text):
     dry_patterns=(
         r'\bsem\s+(?:chuva|precipitacao|vento)\b',r'\bnada\s+de\s+(?:chuva|vento)\b',r'\bnao\s+(?:vai\s+)?chover\b',
         r'\bnao\s+(?:esta\s+)?chovendo(?!\s+(?:tanto|muito|pouco))\b',r'\bnao\s+chove\b',
-        r'\btempo\s+(?:seco|aberto|bom)\b',r'\bceu\s+(?:aberto|limpo)\b',
-        r'\bclima\s+(?:perfeito|agradavel)\b',r'\bgram(?:ado|a)\s+seco\b',
+        r'\btempo\s+(?:(?:esta|ta|tava|estava)\s+)?(?:seco|aberto|bom)\b',r'\bceu\s+(?:aberto|limpo)\b',
+        r'\bclima\s+(?:perfeito|agradavel)\b',r'\btemperatura\s+agradavel\b',
+        r'\b(?:nao\s+(?:esta|ta)\s+ventando|sem\s+vento)\b',
+        r'\bdia\s+de\s+(?:muito\s+)?sol\b',r'\bmuito\s+sol\b',
+        r'\bsol\s+(?:forte|intenso|d[aá])\b',r'\bnoite\s+estrelada\b',
+        r'\bgram(?:ado|a)\s+seco\b',
         r'\bno\s+rain\b',r'\bnot\s+raining\b'
     )
     dry=any(re.search(pattern,t) for pattern in dry_patterns)
     rain_text=t
     for pattern in negative_rain:rain_text=re.sub(pattern,' ',rain_text)
-    snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\bgeada\b',t))
+    snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\b(?:gramado|campo|grama|tapete\s+verde)\b.{0,35}\bbranquinh[oa]\b|\bgeada\b',t))
     cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',t))
     wet_pitch=bool(re.search(r'\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',t))
     # General remarks such as “rain affects ball control” do not change a
