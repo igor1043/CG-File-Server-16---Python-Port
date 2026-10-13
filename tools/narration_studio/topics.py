@@ -1,6 +1,6 @@
 """Human-readable navigation over the game's commentary event names."""
 import re
-TOPICS=('Abertura e apresentação','Ataque e chances','Defesa e goleiro','Gols','Faltas e cartões','Bola parada e laterais','Comentários de jogadores','Call names de jogadores','Nomes de clubes','Comentários de clubes','Campeonatos e competições','Estádios e cidades','Intervalo e resultado','Outros comentários')
+TOPICS=('Abertura e apresentação','Ataque e chances','Defesa e goleiro','Gols','Faltas e cartões','Bola parada e laterais','Formações e táticas','Comentários de jogadores','Call names de jogadores','Nomes de clubes','Comentários de clubes','Campeonatos e competições','Estádios e cidades','Intervalo e resultado','Outros comentários')
 
 def topic(event, path='', transcript=''):
     e=event.upper();p=path.upper();t=transcript.casefold()
@@ -12,6 +12,7 @@ def topic(event, path='', transcript=''):
         return 'Campeonatos e competições' if 'CUP' in e and 'TEAM' not in e else 'Comentários de clubes'
     if event.startswith('t') or '00_TEAM' in p:return 'Nomes de clubes'
     if e.startswith(('TINTRO','TTEAM','TTR_','TCLUB')) or any(x in e for x in ('TEAM_NAME','CLUB_NAME')) or '00_TEAM' in p:return 'Nomes de clubes'
+    if 'FORMATION' in e or 'TACTIC' in e:return 'Formações e táticas'
     if any(x in e for x in ('GOAL_SCORED','C_GOAL_','REPLAY_GOAL','CONSOLATION_GOAL','GOLDEN_GOAL')):return 'Gols'
     if any(x in e for x in ('SAVE','BLOCK','KEEPER','CLEAN_SHEET','CLEARED','CLEARANCE','INTERCEPT','DEFEND','DEFENCE','DEFENSE','GOALKICK','GOAL_KICK')):return 'Defesa e goleiro'
     if any(x in e for x in ('MISS','SHOTWIDE','WOODWORK','NO_GOAL')):return 'Ataque e chances'
@@ -42,7 +43,7 @@ def topic(event, path='', transcript=''):
 def update_topics(db):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='topic_metadata'").fetchone():
         db.execute('CREATE TABLE topic_metadata (version INTEGER PRIMARY KEY)')
-    rebuild=not db.execute('SELECT 1 FROM topic_metadata WHERE version=2').fetchone()
+    rebuild=not db.execute('SELECT 1 FROM topic_metadata WHERE version=3').fetchone()
     for table in ('clips','sources'):
         columns={r[1] for r in db.execute('PRAGMA table_info('+table+')')}
         if 'topic' not in columns:db.execute('ALTER TABLE '+table+" ADD COLUMN topic TEXT DEFAULT ''")
@@ -50,5 +51,5 @@ def update_topics(db):
         db.executemany('UPDATE '+table+' SET topic=? WHERE key=?',[(topic(r['event'],r['path'],r['transcript']),r['key']) for r in rows])
         if not db.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",(table+'_topic',)).fetchone():
             db.execute('CREATE INDEX '+table+'_topic ON '+table+'(topic)')
-    if rebuild:db.execute('INSERT OR IGNORE INTO topic_metadata VALUES (2)')
+    if rebuild:db.execute('INSERT OR IGNORE INTO topic_metadata VALUES (3)')
     db.commit()

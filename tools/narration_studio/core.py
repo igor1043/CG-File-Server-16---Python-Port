@@ -43,7 +43,7 @@ def connect(path=DB):
     CREATE INDEX IF NOT EXISTS sources_event ON sources(narrator,event,variant);
     ''')
     from topics import update_topics
-    ready=('topic_metadata' in tables and db.execute('SELECT 1 FROM topic_metadata WHERE version=2').fetchone()
+    ready=('topic_metadata' in tables and db.execute('SELECT 1 FROM topic_metadata WHERE version=3').fetchone()
            and all('topic' in {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table in ('clips','sources')))
     if not ready:update_topics(db)
     return db
