@@ -7,6 +7,7 @@ from generic_policy import plain,blocked_reasons,female_reference
 
 NUMBER_WORDS={'um':'1','uma':'1','dois':'2','duas':'2','tres':'3','quatro':'4','cinco':'5','seis':'6'}
 NUMBER_VALUES={**{word:int(value) for word,value in NUMBER_WORDS.items()},**{str(n):n for n in range(1,6)}}
+FORMATION_PLAYER_COUNTS={9,10}
 STOP=set('o a os as um uma de do da dos das que e e no na nos nas para por como mais menos esse essa esta este time equipe vai jogar jogo hoje esquema tatica formacao tecnico treinador campo meio defesa ataque ofensivo ofensiva defensivo defensiva com jogadores jogador ali bem muito'.split())
 
 def formations(text):
@@ -14,18 +15,38 @@ def formations(text):
     found=set()
     for m in re.finditer(r'(?<!\d)(\d{3,5})(?!\d)',value):
         raw=m.group(1);nums=tuple(int(c) for c in raw)
-        if len(nums) in (3,4,5) and sum(nums)==10 and 3<=nums[0]<=5 and all(0<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
+        if len(nums) in (3,4,5) and sum(nums) in FORMATION_PLAYER_COUNTS and 3<=nums[0]<=5 and all(0<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
     for m in re.finditer(r'(?<!\d)([3-5])\s*[x/-]\s*([0-5])\s*[x/-]\s*([0-5])(?:\s*[x/-]\s*([0-5]))?(?:\s*[x/-]\s*([0-5]))?(?!\d)',value):
         nums=tuple(int(n) for n in m.groups() if n)
-        if len(nums) in (3,4,5) and sum(nums)==10 and all(0<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
-    tokens=re.findall(r'\d+|[a-z]+',value)
-    nums=[NUMBER_WORDS.get(t,t if t.isdigit() else '') for t in tokens]
-    for width in (3,4,5):
-        for i in range(len(nums)-width+1):
-            seq=nums[i:i+width]
-            if not all(seq):continue
-            values=tuple(int(n) for n in seq)
-            if sum(values)==10 and 3<=values[0]<=5 and all(0<=n<=5 for n in values[1:]):found.add('-'.join(map(str,values)))
+        if len(nums) in (3,4,5) and sum(nums) in FORMATION_PLAYER_COUNTS and all(0<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
+    raw=''.join(c for c in unicodedata.normalize('NFKD',(text or '').casefold()) if not unicodedata.combining(c))
+    numeric=[];previous_end=None
+    for match in re.finditer(r'\d+|[a-z]+',raw):
+        token=match.group()
+        number_value=NUMBER_WORDS.get(token,token if token.isdigit() else None)
+        gap=raw[previous_end:match.start()] if previous_end is not None else ''
+        if number_value is None:
+            if not numeric or numeric[-1] is not None:numeric.append(None)
+        else:
+            if numeric and numeric[-1] is not None and not re.fullmatch(r'[\s,;:/\\x-]*',gap):numeric.append(None)
+            numeric.append(int(number_value))
+        previous_end=match.end()
+    # Read contiguous spoken digits as one formation expression. Prefer the
+    # longest valid shape at each point: “quatro quatro um um” means 4-4-1-1,
+    # not the overlapping 4-4-1. A full stop or a word breaks the expression,
+    # while spaces and common number separators (4-4-2, 4x4x2, 4, 4, 2) do not.
+    i=0
+    while i<len(numeric):
+        if numeric[i] is None:
+            i+=1;continue
+        matched=False
+        for width in range(min(5,len(numeric)-i),2,-1):
+            seq=numeric[i:i+width]
+            if any(n is None for n in seq):continue
+            values=tuple(seq)
+            if sum(values) in FORMATION_PLAYER_COUNTS and 3<=values[0]<=5 and all(0<=n<=5 for n in values[1:]):
+                found.add('-'.join(map(str,values)));i+=width;matched=True;break
+        if not matched:i+=1
     if re.search(r'\bdiamante\b|\blosangos?\b|\blos\s+(?:angus|angulo|angulos)\b|\bdiamond\b',value):found.add('diamond')
     if re.search(r'\bfalso\s+(?:9|nove)\b|\bfalse\s+9\b',value):found.add('false-9')
     if re.search(r'\b(ofensiv[oa]s?|vai\s+(?:para|pra)\s+cima|promete\s+(?:para|pra)\s+cima)\b',value):found.add('offensive')
@@ -65,16 +86,23 @@ def canon_name(text):
 def weather_kind(event,text):
     e=(event or '').upper()
     t=plain(text or '')
+    if 'RAINBOW' in e:return ''
+    weather_event=any(token in e for token in ('WEATHER','RAIN','SNOW','COLD','DRY','SUNNY','CLEAR_SKY'))
     # Ignore common football idioms so “chuva de gols” or “banho de água fria”
     # cannot masquerade as weather and leak into condition-specific scenes.
     figurative=(
         r'\bchuva\s+de\s+(?:gol\w*|cart(?:ao|oes)|faltas|escanteios|aplausos|criticas|comentarios|elogios|ofertas|propostas|assistencias|papel(?:\s+picado)?)\b',
         r'\b(?:vai\s+)?chover\s+bola(?:s)?(?:\s+na\s+area)?\b',
         r'\bchuva\s+de\s+bola(?:s)?(?:\s+na\s+area)?\b',
+        r'\b(?:so\s+)?faltou\s+(?:ele\s+)?fazer\s+chover\b',
+        r'\bfazer\s+chover(?:\s+(?:hoje|no\s+ataque|em\s+campo))?\b',
+        r'\b(?:vai\s+)?chover\s+(?:levantamentos?|cruzamentos?|chutes?|passes?|escanteios?|cartoes|faltas|comentarios?)\b',
         r'\b(?:vai\s+)?chover\s+(?:comentari\w*|critica\w*|elogio\w*|aplausos)\b',
-        r'\bchover\s+no\s+molhado\b',r'\b(?:faca\s+)?chuva\s+ou\s+(?:faca\s+)?sol\b',
+        r'\bchover\s+no\s+molhado\b',r'\bchovendo\s+molhado\b',r'\b(?:faca\s+)?chuva\s+ou\s+(?:faca\s+)?sol\b',
         r'\b(?:balde|banho|ducha)\s+de\s+agua\s+(?:fria|gelada)\b',
         r'\bfrio\s+na\s+barriga\b',r'\b(?:cabeca|sangue)\s+fria\b',
+        r'\b(?:ta|esta)\s+com\s+frio\s*,?\s*goleir\w*\b',
+        r'\b(?:goleir\w*\s+)?ta\s+com\s+frio\b.{0,45}\b(?:cavadinha|lencol|golaco)\b',
         r'\bfri[oa]\s+(?:na\s+hora\s+de|e\s+calculad[oa])\b',r'\bbola\s+de\s+neve\b'
     )
     for pattern in figurative:t=re.sub(pattern,' ',t)
@@ -83,6 +111,7 @@ def weather_kind(event,text):
     negative_rain=(
         r'\bsem\s+chuva\b',r'\bnada\s+de\s+chuva\b',r'\bnao\s+(?:vai\s+)?chover\b',
         r'\bnao\s+(?:esta\s+)?chovendo(?!\s+(?:tanto|muito|pouco))\b',r'\bnao\s+chove\b',
+        r'\bem\s+vez\s+de\s+chuva\b',r'\bno\s+lugar\s+da\s+chuva\b',
         r'\bno\s+rain\b',r'\bnot\s+raining\b'
     )
     dry_patterns=(
@@ -101,14 +130,19 @@ def weather_kind(event,text):
     rain_text=t
     for pattern in negative_rain:rain_text=re.sub(pattern,' ',rain_text)
     snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\b(?:gramado|campo|grama|tapete\s+verde)\b.{0,35}\bbranquinh[oa]\b|\bgeada\b',t))
-    cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',t))
-    wet_pitch=bool(re.search(r'\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',t))
+    cold_words=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',t))
+    cold_context=weather_event or bool(re.search(r'\b(?:tempo|clima|temperatura|noite|manha|ar|gramado|grama|campo|neve|geada|inverno)\b',t))
+    cold=cold_words and cold_context
+    wet_pitch=bool(re.search(r'\b(?:gramado|grama|campo|tapete)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia|liso|lisa|alagado|alagada|ensopado|ensopada)\b|\b(?:agua|chuva)\s+(?:no|sobre\s+o)\s+(?:campo|gramado)\b',t))
     # General remarks such as “rain affects ball control” do not change a
     # sunny/no-rain scene into a rainy scene. Require a direct, present-tense
     # rain cue when the same transcript also explicitly says it is dry.
-    direct_rain=bool(re.search(r'\b(chovendo|chove|choveu|chovia|chover|chuvisco|temporal|chuvoso|chuvosa|rainy)\b|\bque\s+chuva\b|\bcair\s+o\s+mundo\b|\bgalochas\b|\braios\s+e\s+trovoes\b|\bchuva\b.{0,20}\b(forte|caindo|caiu|cai|intensa|desse\s+jeito|assim)\b',rain_text))
+    direct_rain=bool(re.search(r'\b(chovendo|chove|choveu|chovia|chover|chuvinha|chovinha|chuvisco|chuvisca|garoa|garoando|temporal|chuvoso|chuvosa|rainy|raining)\b|\bque\s+chuva\b|\bcair\s+o\s+mundo\b|\bgalochas\b|\braios\s+e\s+trovoes\b|\b(?:com|debaixo\s+de)\s+(?:a\s+)?chuva\b|\bchuva\b.{0,48}\b(caindo|caiu|cai|forte|fraca|leve|intensa|desse\s+jeito|assim|nao\s+para|continua|atrapalh|gramado|campo|tempo|clima|jogo)\b',rain_text))
     general_rain=bool(re.search(r'\b(chuva|rain)\b',rain_text))
-    rain=direct_rain or (general_rain and not dry)
+    # A lone “chuva” in an unrelated match line (or an idiom missed above)
+    # is not evidence of weather. Weather-coded FIFA events provide context;
+    # other source events need a direct meteorological cue.
+    rain=direct_rain or (weather_event and general_rain and not dry)
     if snow and rain:spoken='conflict'
     elif snow:spoken='snow'
     elif dry and (rain or wet_pitch):spoken='conflict'
@@ -121,6 +155,14 @@ def weather_kind(event,text):
     if spoken=='conflict' or (spoken and coded and spoken!=coded and not (spoken=='wet' and coded in ('rain','snow'))):return 'conflict'
     if spoken=='wet' and coded in ('rain','snow'):return coded
     return spoken or coded
+
+def rain_intensity(text):
+    """Return an explicitly spoken rain level; empty means unspecified."""
+    t=plain(text or '')
+    if re.search(r'\b(?:chuvinha|chovinha|chuvisco|garoa|chuva\s+(?:bem\s+)?(?:fraca|leve)|nao\s+(?:(?:esta|ta)\s+)?chovendo\s+tanto|chovendo\s+pouco)\b',t):return 'light'
+    if re.search(r'\b(?:temporal|cair\s+o\s+mundo|chuva\s+(?:muito\s+)?(?:forte|intensa|pesada)|chove\s+(?:muito|forte)|chovendo\s+(?:muito|forte)|(?:chove|chovendo|chuva)\b.{0,20}\bnao\s+e\s+pouco)\b',t):return 'heavy'
+    if re.search(r'\b(?:chuva\s+(?:nao\s+para|continua|constante)|continua\s+chovendo|ainda\s+chove)\b',t):return 'steady'
+    return ''
 
 def physical_clips(db,where,args=()):
     rows=db.execute('SELECT c.*,b.name bank_name FROM clips c JOIN banks b ON b.key=c.bank WHERE b.active=1 AND '+where+' ORDER BY c.bank,c.offset,c.key',args).fetchall()
@@ -136,16 +178,17 @@ def put_aliases(db,narrator,clip,source,method,score):
     return len(aliases)
 
 def match_player_calls(db,narrator):
-    # Rebuild this exact-text layer every run; names without a matching spoken
-    # form remain the FIFA original.
+    # Rebuild the exact-text call-name layer every run. The source banks do not
+    # contain a dedicated surname event, but an identical one-to-one spoken
+    # name can safely fill the game's standalone-surname slot.
     with db:
-        db.execute("DELETE FROM mappings WHERE profile=? AND method='player_call_exact'",(narrator,))
+        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('player_call_exact','player_surname_exact')",(narrator,))
     sources=collections.defaultdict(list)
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND topic='Call names de jogadores' AND transcript!='' AND error='' AND event LIKE 'pPLAYER_NAMES%'",(narrator,)):
         if r['confidence'] is not None and r['confidence'] < -1.0:continue
         key=canon_name(r['transcript'])
         if key:sources[key].append(dict(r))
-    rows=[];mapped=0
+    rows=[];mapped=0;surname_rows=[];surname_mapped=0
     preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
     for c in physical_clips(db,"c.topic='Call names de jogadores' AND c.transcript!='' AND c.event LIKE 'pPLAYER_NAMES%'"):
         key=canon_name(c['transcript']);pool=sources.get(key,[])
@@ -154,7 +197,15 @@ def match_player_calls(db,narrator):
         pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,s['path']))
         source=pool[0];mapped+=put_aliases(db,narrator,c,source['key'],'player_call_exact',1.0)
         rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
-    return dict(occurrences=mapped,physical=len(rows),unique_sources=len(sources),report=rows)
+    for c in physical_clips(db,"c.topic='Call names de jogadores' AND c.transcript!='' AND c.event='pSIMPLE_SURNAME'"):
+        key=canon_name(c['transcript']);pool=sources.get(key,[])
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+        if not pool or any(a['key'] in preserved for a in aliases):continue
+        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,s['path']))
+        source=pool[0];surname_mapped+=put_aliases(db,narrator,c,source['key'],'player_surname_exact',1.0)
+        surname_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
+    return dict(occurrences=mapped+surname_mapped,physical=len(rows)+len(surname_rows),call_name_physical=len(rows),surname_physical=len(surname_rows),
+                unique_sources=len(sources),report=rows+surname_rows)
 
 def match_entity_mentions(db,narrator):
     topics=('Campeonatos e competições','Estádios e cidades','Comentários de clubes')
@@ -420,19 +471,30 @@ def match_weather(db,narrator):
                     source_role=weather_role(current['event'])
                     target_role=weather_role(c['event'])
                     incompatible_role=bool(source_role and target_role and source_role!=target_role)
-                    if spoken=='conflict' or (spoken in ('rain','snow','dry','cold','wet') and spoken!=expected) or (expected=='general' and spoken in ('rain','snow','dry','cold','wet')) or incompatible_role:
+                    if (spoken=='conflict' or (expected in ('rain','snow','dry','cold','wet') and spoken not in (expected,'conflict'))
+                        or (expected=='general' and spoken in ('rain','snow','dry','cold','wet')) or incompatible_role):
                         db.execute('DELETE FROM mappings WHERE profile=? AND clip=?',(narrator,alias['key']))
     sources=collections.defaultdict(list)
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND transcript!='' AND error=''",(narrator,)):
         if 'RAINBOW' in r['event'].upper():continue
+        if blocked_reasons(dict(r)):continue
         kind=weather_kind(r['event'],r['transcript'])
         if kind in ('rain','snow','dry','cold','wet') and weather_role(r['event']):sources[(r['event'],kind)].append(dict(r))
-    report=[];unmatched=[];mapped=0;used=collections.Counter()
+    # A weather source already used by another physical clip stays reserved;
+    # weather overrides below replace only the existing assignments for their
+    # own targets and must not create a new duplicate elsewhere in the profile.
+    weather_ids={(c['bank'],c['offset']) for c in clips}
+    used=collections.Counter()
+    for row in db.execute('''SELECT DISTINCT m.source,c.bank,c.offset FROM mappings m JOIN clips c ON c.key=m.clip
+        WHERE m.profile=?''',(narrator,)):
+        if (row['bank'],row['offset']) not in weather_ids:used[row['source']]+=1
+    report=[];unmatched=[];mapped=0
     with db:
         preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
         for c in clips:
             if not weather_scene(c['event']):continue
             kind=weather_kind(c['event'],c['transcript']) or 'general'
+            target_intensity=rain_intensity(c['transcript']) if kind=='rain' else ''
             if kind=='conflict':
                 unmatched.append(dict(event=c['event'],original=c['transcript'],reason='weather_condition_conflict'))
                 continue
@@ -444,14 +506,16 @@ def match_weather(db,narrator):
             # Weather-specific intro variants outnumber the compatible target
             # slots; keep each selected recording unique across the profile.
             pool=[s for s in pool if used[s['key']]==0]
+            if target_intensity:
+                pool=[s for s in pool if not rain_intensity(s['transcript']) or rain_intensity(s['transcript'])==target_intensity]
             aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
             if not pool or any(a['key'] in preserved for a in aliases):
                 unmatched.append(dict(event=c['event'],condition=kind,original=c['transcript'],reason='no_source_with_same_weather_scene' if not pool else 'manual_mapping_preserved'))
                 continue
-            pool.sort(key=lambda s:(-overlap(c['transcript'],s['transcript']),used[s['key']],s['path']))
+            pool.sort(key=lambda s:(0 if target_intensity and rain_intensity(s['transcript'])==target_intensity else 1,-overlap(c['transcript'],s['transcript']),used[s['key']],s['path']))
             source=pool[0];used[source['key']]+=1
             mapped+=put_aliases(db,narrator,c,source['key'],'weather_same_condition',.95)
-            report.append(dict(event=c['event'],condition=kind,original=c['transcript'],replacement=source['transcript'],source=source['path']))
+            report.append(dict(event=c['event'],condition=kind,intensity=target_intensity or rain_intensity(source['transcript']),original=c['transcript'],replacement=source['transcript'],source=source['path']))
         return dict(occurrences=mapped,physical=len(report),unmatched_physical=len(unmatched),conditions={k:sum(1 for r in report if r['condition']==k) for k in ('rain','snow','dry','cold','wet','general')},unmatched=unmatched,report=report)
 
 def run(narrator):
