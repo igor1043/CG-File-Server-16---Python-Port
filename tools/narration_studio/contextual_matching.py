@@ -65,6 +65,17 @@ def canon_name(text):
 def weather_kind(event,text):
     e=(event or '').upper()
     t=plain(text or '')
+    # Ignore common football idioms so “chuva de gols” or “banho de água fria”
+    # cannot masquerade as weather and leak into condition-specific scenes.
+    figurative=(
+        r'\bchuva\s+de\s+(?:gol\w*|aplausos|criticas|comentarios|elogios|ofertas|propostas)\b',
+        r'\b(?:vai\s+)?chover\s+(?:comentari\w*|critica\w*|elogio\w*|aplausos)\b',
+        r'\bchover\s+no\s+molhado\b',r'\b(?:faca\s+)?chuva\s+ou\s+(?:faca\s+)?sol\b',
+        r'\b(?:balde|banho|ducha)\s+de\s+agua\s+(?:fria|gelada)\b',
+        r'\bfrio\s+na\s+barriga\b',r'\b(?:cabeca|sangue)\s+fria\b',
+        r'\bfri[oa]\s+(?:na\s+hora\s+de|e\s+calculad[oa])\b',r'\bbola\s+de\s+neve\b'
+    )
+    for pattern in figurative:t=re.sub(pattern,' ',t)
     # Remove negated rain wording before detecting positive rain mentions:
     # “não vai chover” is a dry/no-rain line, not a rain line.
     negative_rain=(
@@ -83,8 +94,7 @@ def weather_kind(event,text):
     rain_text=t
     for pattern in negative_rain:rain_text=re.sub(pattern,' ',rain_text)
     snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\bgeada\b',t))
-    cold_text=re.sub(r'\b(?:(?:balde|banho)\s+de\s+agua\s+fria|frio\s+na\s+barriga)\b',' ',t)
-    cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',cold_text))
+    cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',t))
     wet_pitch=bool(re.search(r'\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',t))
     # General remarks such as “rain affects ball control” do not change a
     # sunny/no-rain scene into a rainy scene. Require a direct, present-tense
