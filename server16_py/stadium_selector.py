@@ -21,6 +21,7 @@ from .match_state import pause_page
 from .crowd_control import CrowdControl
 from .prematch_panel import PrematchPanel
 from .narration_runtime import narration_runtime
+from .intro_music_runtime import intro_music_runtime
 
 SELECTOR_MAPPING_NAME = 'Local\\CGFS16_Selector_v1'
 
@@ -135,8 +136,12 @@ class StadiumSelector:
         shared.heartbeat = ctypes.windll.kernel32.GetTickCount()
         prematch_eligible = app.memory.is_open() and prematch_page(app.lastpagename)
         runtime=getattr(app,'_narration_runtime',None)
-        if runtime is not None or (Path(getattr(app,'exedir',app.base_dir))/'Narrations').is_dir():
+        game_root=Path(getattr(app,'exedir',app.base_dir))
+        if runtime is not None or (game_root/'Narrations').is_dir() or (game_root/'IntroMusic').is_dir():
             narration_runtime(app).tick(prematch_eligible)
+        music_runtime=getattr(app,'_intro_music_runtime',None)
+        if music_runtime is not None or (game_root/'IntroMusic').is_dir():
+            intro_music_runtime(app).tick(prematch_eligible)
         stadium_eligible = prematch_eligible and app.module_enabled('Stadium')
         mode = 1 if prematch_eligible else 2 if self.match_eligible() else 0
         page=(app.lastpagename or '').lower()
@@ -335,6 +340,9 @@ class StadiumSelector:
         runtime=getattr(self.app,'_narration_runtime',None)
         if runtime is not None:
             runtime.close();self.app._narration_runtime=None
+        music_runtime=getattr(self.app,'_intro_music_runtime',None)
+        if music_runtime is not None:
+            music_runtime.close();self.app._intro_music_runtime=None
         self.shared=None
         self.mapping.close()
 

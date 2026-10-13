@@ -62,18 +62,30 @@ def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=No
         temporary.replace(progress_path)
         return payload
 
+    pending_updates = []
+
     def save(row, text, duration, error=''):
         nonlocal done, failed
         if error:
-            db.execute("UPDATE assets SET status='transcription_failed',error=? WHERE sha=?", (error, row['sha']))
+            pending_updates.append(('transcription_failed', error, None, duration, row['sha']))
             failed += 1
         else:
-            db.execute('UPDATE assets SET transcript=?,duration=?,error="" WHERE sha=?', (text, duration, row['sha']))
             sidecar = Path(row['path']).with_suffix('.txt')
             temporary = sidecar.with_suffix('.tmp')
             temporary.write_text(text, encoding='utf8')
             temporary.replace(sidecar)
+            pending_updates.append(('decoded', '', text, duration, row['sha']))
             done += 1
+
+    def flush_updates():
+        if not pending_updates:
+            return
+        db.executemany(
+            'UPDATE assets SET status=?,error=?,transcript=?,duration=? WHERE sha=?',
+            pending_updates,
+        )
+        db.commit()
+        pending_updates.clear()
 
     def infer(items):
         """Infer a batch, splitting only if the backend rejects a batch."""
@@ -122,7 +134,6 @@ def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=No
             for i, (_, _, row, duration) in enumerate(intervals):
                 text = ' '.join(part for part in words[i] if part).strip() or '[sem fala detectada]'
                 save(row, text, duration)
-            db.commit()
         except Exception as exc:
             if len(items) > 1:
                 midpoint = len(items) // 2
@@ -131,7 +142,6 @@ def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=No
             else:
                 row, _, duration = items[0]
                 save(row, '', duration, str(exc)[:1000])
-                db.commit()
 
     write_progress('running')
     print(f'PES ASR: {pending:,} pendentes; lotes de {batch_size}.', flush=True)
@@ -160,7 +170,7 @@ def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=No
                     save(row, '', row['duration'] or 0, str(exc)[:1000])
             if items:
                 infer(items)
-            db.commit()
+            flush_updates()
             processed += len(rows)
             if done % 100 < batch_size or not items:
                 payload = write_progress('running')
@@ -175,7 +185,7 @@ def run(root=DEFAULT_ROOT, batch_size=16, limit=0, order='asc', progress_file=No
         payload = write_progress('complete' if complete else 'partial')
         print(json.dumps(payload, ensure_ascii=True), flush=True)
     except KeyboardInterrupt:
-        db.commit()
+        flush_updates()
         write_progress('interrupted')
         raise
     finally:
