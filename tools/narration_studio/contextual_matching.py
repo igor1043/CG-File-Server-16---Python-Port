@@ -3,7 +3,7 @@ from __future__ import annotations
 import collections,json,re,unicodedata
 from pathlib import Path
 from core import connect,WORK
-from generic_policy import plain,blocked_reasons
+from generic_policy import plain,blocked_reasons,female_reference
 
 NUMBER_WORDS={'um':'1','uma':'1','dois':'2','duas':'2','tres':'3','quatro':'4','cinco':'5','seis':'6'}
 NUMBER_VALUES={**{word:int(value) for word,value in NUMBER_WORDS.items()},**{str(n):n for n in range(1,6)}}
@@ -287,13 +287,14 @@ def match_formations(db,narrator):
     clips=list(physical_clips(db,f'c.event IN ({marks})',FORMATION_EVENTS))
     sources=collections.defaultdict(list);front_fallbacks=collections.defaultdict(list)
     for r in db.execute(f"SELECT * FROM sources WHERE narrator=? AND event IN ({marks}) AND transcript!='' AND error=''",(narrator,*FORMATION_EVENTS)):
+        source=dict(r);source['female_reference']=female_reference(source['transcript'])
         if r['event']=='bTS_FORMATION_FRONT':
             count=front_line_count(r['transcript'])
-            if count is None:front_fallbacks[r['event']].append(dict(r))
-            else:sources[r['event']].append((dict(r),{f'front:{count}'}))
+            if count is None:front_fallbacks[r['event']].append(source)
+            else:sources[r['event']].append((source,{f'front:{count}'}))
             continue
         signature=formations(r['transcript'])
-        if signature:sources[r['event']].append((dict(r),signature))
+        if signature:sources[r['event']].append((source,signature))
     prepared=[];unmatched=[]
     for c in clips:
         if c['event']=='bTS_FORMATION_FRONT':
@@ -301,9 +302,11 @@ def match_formations(db,narrator):
             if target_count is None:
                 unmatched.append(dict(event=c['event'],original=c['transcript'],reason='front_line_count_not_clear'))
                 continue
-            exact=[source for source,signature in sources.get(c['event'],[]) if signature=={f'front:{target_count}'}]
+            target_female=female_reference(c['transcript'])
+            exact=[source for source,signature in sources.get(c['event'],[]) if source['female_reference']==target_female and signature=={f'front:{target_count}'}]
             aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
-            prepared.append((len(exact)+len(front_fallbacks.get(c['event'],[])),c,{f'front:{target_count}'},exact,front_fallbacks.get(c['event'],[]),aliases))
+            gender_safe_fallbacks=[source for source in front_fallbacks.get(c['event'],[]) if source['female_reference']==target_female]
+            prepared.append((len(exact)+len(gender_safe_fallbacks),c,{f'front:{target_count}'},exact,gender_safe_fallbacks,aliases))
             continue
         target=formations(c['transcript'])
         if not target:
@@ -311,8 +314,10 @@ def match_formations(db,narrator):
             continue
         target_shapes={x for x in target if '-' in x and x[0].isdigit()}
         target_tags=target-target_shapes
+        target_female=female_reference(c['transcript'])
         exact=[];fallback=[]
         for source,signature in sources.get(c['event'],[]):
+            if source['female_reference']!=target_female:continue
             source_shapes={x for x in signature if '-' in x and x[0].isdigit()}
             source_tags=signature-source_shapes
             if target_shapes and source_shapes!=target_shapes:continue

@@ -9,6 +9,9 @@ def female_reference(text):
     if re.search(r'\b(jogadora|jogadoras|goleira|goleiras|atacante feminina|juiza|arbitra)\b',text):return True
     if re.search(r'\b(she (shoots|shot|scores|scored|passes|passed|dribbles|dribbled|takes|hits|runs|plays|saves|saved)|her (shot|goal|pass|save))\b',text):return True
     if re.search(r'\bela (recuperou|perdeu|ganhou|empatou|driblou|chutou|bateu|finalizou|meteu|recebeu|dominou|pegou|tocou|passou|cruzou|cabeceou|correu|arrancou|marcou|carregou|conseguiu)\b',text):return True
+    if re.search(r'\bela\s+(?:atua|fica|e|vai|joga|tem|forma|faz)\b.{0,72}\b(?:sozinha|referencia|dupla|trio|tridente|ataque|frente|titular|estreia)\b',text):return True
+    if re.search(r'\belas\s+(?:fazem|formam|ficam|atuam|jogam|sao|estao|vao)\b.{0,80}\b(?:dupla|trio|tridente|ataque|frente|titulares|estreia)\b',text):return True
+    if re.search(r'\bas\s+duas\b(?!\s+equipes?)\s+.{0,48}\b(?:ataque|frente|jogadoras?|atacantes?)\b',text):return True
     # 'ela' may refer to the ball. Reject only player actions and possession.
     return bool(re.search(r'\b(ela (recupera|perde|ganha|empata|dribla|chuta|bate|finaliza|faz|mete|recebe|domina|pega|toca|passa|cruza|cabeceia|corre|arranca|marca|carrega|nao conseguiu)|e dela|gol dela|segundo dela|ela era a ultima|elas (jogam|atacam))\b',text))
 
