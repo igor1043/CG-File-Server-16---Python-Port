@@ -103,6 +103,11 @@ def resolve_team(text, aliases):
 
 def team_role(event, bare=False, topic=''):
     value = (event or '').upper()
+    # PES 00_TEAM banks contain standalone club names but no FIFA event key.
+    # They are safe only as bare labels, which compatible_role restricts to
+    # the corresponding home/away introduction slots.
+    if not value and topic == 'Nomes de clubes':
+        return 'team_label'
     if 'TS_TEAM_INTRO_NUM_CHANGES' in value:
         return 'lineup_changes'
     if value == 'TTS_TEAM_INTRO':

@@ -183,32 +183,154 @@ def put_aliases(db,narrator,clip,source,method,score):
 def match_player_calls(db,narrator):
     # Rebuild the exact-text call-name layer every run. The source banks do not
     # contain a dedicated surname event, but an identical one-to-one spoken
-    # name can safely fill the game's standalone-surname slot.
+    # name can safely fill the game's standalone-surname slot. Transfer
+    # confirmations also contain short player-name clips; map those by exact
+    # name, never by a semantically similar gameplay sentence.
     with db:
-        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('player_call_exact','player_surname_exact')",(narrator,))
+        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('player_call_exact','player_surname_exact','player_transfer_name_exact')",(narrator,))
+        for event in ('pTR_M_CONFIRMED','pTR_M_RUMOURED'):
+            for clip in physical_clips(db,"upper(c.event)=?",(event.upper(),)):
+                aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(clip['bank'],clip['offset'])).fetchall()
+                if any(db.execute("SELECT 1 FROM mappings WHERE profile=? AND clip=? AND method IN ('manual','gender_review')",(narrator,a['key'])).fetchone() for a in aliases):
+                    continue
+                # pTR_M_CONFIRMED is a short player-call slot. pTR_M_RUMOURED
+                # is a complete sentence, so a generic transfer or substitution
+                # line cannot safely replace it.
+                db.executemany('DELETE FROM mappings WHERE profile=? AND clip=?',[(narrator,a['key']) for a in aliases])
     sources=collections.defaultdict(list)
-    for r in db.execute("SELECT * FROM sources WHERE narrator=? AND topic='Call names de jogadores' AND transcript!='' AND error='' AND event LIKE 'pPLAYER_NAMES%'",(narrator,)):
+    # FIFA event banks carry explicit pPLAYER_NAMES events. PES libraries do
+    # not: their extracted name calls live in 10_PLAYER.awb and have no event
+    # key. Keep that second path eligible, then require an exact normalized
+    # one-to-one transcript match below so ordinary PES commentary cannot be
+    # mistaken for a player's call name.
+    for r in db.execute("SELECT * FROM sources WHERE narrator=? AND topic='Call names de jogadores' AND transcript!='' AND error=''",(narrator,)):
         if r['confidence'] is not None and r['confidence'] < -1.0:continue
+        if not r['event'].startswith('pPLAYER_NAMES') and '10_PLAYER' not in r['path'].upper():continue
         key=canon_name(r['transcript'])
         if key:sources[key].append(dict(r))
-    rows=[];mapped=0;surname_rows=[];surname_mapped=0
+    rows=[];mapped=0;surname_rows=[];surname_mapped=0;transfer_rows=[];transfer_mapped=0
     preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
     for c in physical_clips(db,"c.topic='Call names de jogadores' AND c.transcript!='' AND c.event LIKE 'pPLAYER_NAMES%'"):
         key=canon_name(c['transcript']);pool=sources.get(key,[])
         aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
         if not pool or any(a['key'] in preserved for a in aliases):continue
-        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,s['path']))
+        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
+                                -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))
         source=pool[0];mapped+=put_aliases(db,narrator,c,source['key'],'player_call_exact',1.0)
         rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
     for c in physical_clips(db,"c.topic='Call names de jogadores' AND c.transcript!='' AND c.event='pSIMPLE_SURNAME'"):
         key=canon_name(c['transcript']);pool=sources.get(key,[])
         aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
         if not pool or any(a['key'] in preserved for a in aliases):continue
-        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,s['path']))
+        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
+                                -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))
         source=pool[0];surname_mapped+=put_aliases(db,narrator,c,source['key'],'player_surname_exact',1.0)
         surname_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
-    return dict(occurrences=mapped+surname_mapped,physical=len(rows)+len(surname_rows),call_name_physical=len(rows),surname_physical=len(surname_rows),
-                unique_sources=len(sources),report=rows+surname_rows)
+    for c in physical_clips(db,"upper(c.event)='PTR_M_CONFIRMED' AND c.transcript!='' AND c.duration<=1.6"):
+        key=canon_name(c['transcript']);pool=sources.get(key,[])
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+        if not pool or any(a['key'] in preserved for a in aliases):continue
+        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
+                                -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))
+        source=pool[0];transfer_mapped+=put_aliases(db,narrator,c,source['key'],'player_transfer_name_exact',1.0)
+        transfer_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
+    return dict(occurrences=mapped+surname_mapped+transfer_mapped,physical=len(rows)+len(surname_rows)+len(transfer_rows),
+                call_name_physical=len(rows),surname_physical=len(surname_rows),transfer_name_physical=len(transfer_rows),
+                unique_sources=len(sources),report=rows+surname_rows+transfer_rows)
+
+def progression_gender(text,bank=''):
+    value=plain(text or '')
+    if 'female' in (bank or '').casefold() or female_reference(text or '') or re.search(r'\b(ela|dela|jogadora|goleira|atacante feminina|she|her)\b',value):
+        return 'female'
+    if re.search(r'\b(ele|dele|nele|jogador|goleiro|atacante|he|him|his)\b',value):
+        return 'male'
+    return ''
+
+def progression_theme(event,text):
+    e=(event or '').upper();t=plain(text or '')
+    if any(x in e for x in ('RETIRE','RETIREMENT')) or re.search(r'\b(aposent\w*|parar de jogar|pendurar a chuteira|ultima temporada|fim da carreira)\b',t):
+        if re.search(r'\b(anunciou|confirmou|vai parar|ultima temporada|aposentadoria confirmada)\b',t):return 'retirement_confirmed'
+        return 'retirement_considering'
+    if re.search(r'\b(lesao|voltou depois|retorno|de volta apos|voltando apos)\b',t):return 'injury_return'
+    if any(x in e for x in ('YOUTH','HIGH_PROFILE')) or re.search(r'\b(jovem promessa|promessa da base|estreia no profissional|estreante profissional|jovem talento)\b',t):return 'youth_debut'
+    if any(x in e for x in ('TRANSFERRED_AS_STARTER_DEBUT','SINGLE_PLAYER_DEBUT','PTW_INTRO_SINGLE_DEBUT')):
+        return 'transfer_debut' if 'TRANSFERRED' in e or re.search(r'\b(contratacao|novo clube|nova camisa|recem contratado|reforco do time)\b',t) else 'debut'
+    if re.search(r'\b(estreia|estreou|estreante|estreando|primeiro jogo|nova camisa|novo clube|contratacao)\b',t):
+        return 'transfer_debut' if re.search(r'\b(contratacao|novo clube|nova camisa|recem contratado|reforco do time)\b',t) else 'debut'
+    return ''
+
+def match_player_progression(db,narrator):
+    """Replace misleading generic matches in player-debut story slots with same-scene sources."""
+    target_events=('pDEBUT_PLAYER_A','pDEBUT_PLAYER_B')
+    target_clips=list(physical_clips(db,"c.event IN ('pDEBUT_PLAYER_A','pDEBUT_PLAYER_B') AND c.transcript!=''"))
+    preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
+    with db:
+        for c in target_clips:
+            aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+            manual=db.execute("SELECT source,method,score FROM mappings WHERE profile=? AND clip IN (%s) AND method IN ('manual','gender_review') LIMIT 1" % ','.join('?' for _ in aliases),
+                              (narrator,*[a['key'] for a in aliases])).fetchone() if aliases else None
+            if manual:
+                db.executemany('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',[(narrator,a['key'],manual['source'],manual['method'],manual['score']) for a in aliases])
+                continue
+            db.executemany('DELETE FROM mappings WHERE profile=? AND clip=?',[(narrator,a['key']) for a in aliases])
+    # These are direct, scene-compatible replacements only. Manager debuts,
+    # post-match ratings and goal calls are deliberately excluded.
+    source_events={
+        'retirement_confirmed':('bPRE_INTRO_SCENE_FOCUS_SINGLE_CONFIRMED_RETIREMENT_STARTER','bPRE_INTRO_SCENE_FOCUS_SIZZLE_FULL_INTRO_PLAYER_PROGRESSION_CONFIRMED_RETIREMENT_STARTER'),
+        'retirement_considering':('bPRE_INTRO_SCENE_FOCUS_SINGLE_CONSIDERING_RETIREMENT_STARTER','bPRE_INTRO_SCENE_FOCUS_SIZZLE_FULL_INTRO_PLAYER_PROGRESSION_CONSIDERING_RETIREMENT_STARTER'),
+        'injury_return':('bPRE_INTRO_SCENE_FOCUS_SIZZLE_FULL_INTRO_CM_PLAYER_PROGRESSION_CRITICAL_PLAYER_INJURY_RETURN',),
+        'youth_debut':('bPRE_INTRO_SCENE_FOCUS_SINGLE_YOUTH_PLAYER_DEBUT_STARTER','bPRE_INTRO_SCENE_FOCUS_SEQ2_SINGLE_YOUTH_PLAYER_DEBUT_STARTER','bPRE_INTRO_SCENE_FOCUS_SIZZLE_FULL_INTRO_YOUTH_PLAYER_DEBUT_STARTER','bCM_PLAYER_PROGRESSION_HIGH_PROFILE_YOUTH_DEBUT_GENERIC','bCM_PLAYER_PROGRESSION_HIGH_PROFILE_YOUTH_DEBUT_AGE_16','bCM_PLAYER_PROGRESSION_HIGH_PROFILE_YOUTH_DEBUT_AGE_17','bCM_PLAYER_PROGRESSION_HIGH_PROFILE_YOUTH_DEBUT_AGE_18','bCM_PLAYER_PROGRESSION_HIGH_PROFILE_YOUTH_DEBUT_AGE_19'),
+        'transfer_debut':('bPRE_INTRO_SCENE_FOCUS_PLAYER_PROGRESSION_TRANSFERRED_AS_STARTER_DEBUT','bPRE_INTRO_SCENE_FOCUS_SEQ2_PLAYER_PROGRESSION_TRANSFERRED_AS_STARTER_DEBUT','bCM_PLAYER_PROGRESSION_TRANSFERRED_AS_STARTER_DEBUT','bPRE_INTRO_SCENE_FOCUS_SINGLE_PLAYER_DEBUT_GEN','bPRE_INTRO_SCENE_FOCUS_SINGLE_PLAYER_DEBUT_STITCH'),
+        'debut':('bPRE_INTRO_SCENE_FOCUS_SINGLE_PLAYER_DEBUT_GEN','bPRE_INTRO_SCENE_FOCUS_SINGLE_PLAYER_DEBUT_STITCH','bPTW_INTRO_SINGLE_DEBUT_GEN')}
+    target_groups={'retirement_confirmed':('retirement_confirmed',),'retirement_considering':('retirement_considering',),
+                   'injury_return':('injury_return',),'youth_debut':('youth_debut','debut'),
+                   'transfer_debut':('transfer_debut','debut'),'debut':('debut','transfer_debut')}
+    sources=[]
+    wanted=tuple(dict.fromkeys(event for events in source_events.values() for event in events))
+    marks=','.join('?' for _ in wanted)
+    for row in db.execute(f"SELECT * FROM sources WHERE narrator=? AND event IN ({marks}) AND transcript!='' AND error=''",(narrator,*wanted)):
+        if row['confidence'] is not None and row['confidence'] < -1.0:continue
+        try:
+            if Path(row['path']).stat().st_size<45:continue
+        except OSError:continue
+        source=dict(row);source['theme']=progression_theme(source['event'],source['transcript'])
+        if source['theme']:sources.append(source)
+    uses=collections.Counter()
+    for row in db.execute('''SELECT m.source,COUNT(DISTINCT c.bank||':'||c.offset) uses
+        FROM mappings m JOIN clips c ON c.key=m.clip WHERE m.profile=? GROUP BY m.source''',(narrator,)):
+        uses[row['source']]=row['uses']
+    max_reuse=16;report=[];unmatched=[];mapped=0
+    for c in target_clips:
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+        if any(a['key'] in preserved for a in aliases):continue
+        theme=progression_theme(c['event'],c['transcript']) or 'debut'
+        target_gender=progression_gender(c['transcript'],c.get('bank_name',''))
+        allowed_themes=target_groups.get(theme,('debut','transfer_debut'))
+        pool=[]
+        target_plain=plain(c['transcript'])
+        for s in sources:
+            if s['theme'] not in allowed_themes or s['event'] not in source_events.get(s['theme'],()):continue
+            if uses[s['key']]>=max_reuse:continue
+            source_gender=progression_gender(s['transcript'],s['path'])
+            if source_gender and target_gender and source_gender!=target_gender:continue
+            if source_gender=='female' and target_gender!='female':continue
+            reasons=blocked_reasons(s)
+            fatal=[]
+            for reason in reasons:
+                if reason=='referência a jogadora em perfil masculino' and target_gender=='female':continue
+                if reason.startswith('referência: ') and plain(reason.split(':',1)[1]) in target_plain:continue
+                fatal.append(reason)
+            if fatal:continue
+            pool.append(s)
+        if not pool:
+            unmatched.append(dict(event=c['event'],theme=theme,original=c['transcript'],reason='no_same_scene_debut_source'))
+            continue
+        pool.sort(key=lambda s:(s['theme'] not in (theme,),-overlap(c['transcript'],s['transcript']),uses[s['key']],
+                                abs((s['duration'] or 0)-(c['duration'] or 0)),s['path']))
+        source=pool[0];uses[source['key']]+=1
+        mapped+=put_aliases(db,narrator,c,source['key'],'player_progression_same_scene',.96)
+        report.append(dict(event=c['event'],theme=theme,original=c['transcript'],replacement=source['transcript'],source_event=source['event'],source=source['path'],reuse=uses[source['key']],score=.96))
+    return dict(occurrences=mapped,physical=len(report),unmatched_physical=len(unmatched),max_source_reuse=max_reuse,report=report,unmatched=unmatched)
 
 def match_entity_mentions(db,narrator):
     topics=('Campeonatos e competições','Estádios e cidades','Comentários de clubes')
@@ -473,9 +595,19 @@ def match_weather(db,narrator):
                     spoken=weather_kind(current['event'],current['transcript'])
                     source_role=weather_role(current['event'])
                     target_role=weather_role(c['event'])
-                    incompatible_role=bool(source_role and target_role and source_role!=target_role)
-                    if (spoken=='conflict' or (expected in ('rain','snow','dry','cold','wet') and spoken not in (expected,'conflict'))
-                        or (expected=='general' and spoken in ('rain','snow','dry','cold','wet')) or incompatible_role):
+                    incompatible_role=source_role!=target_role
+                    # A weather-coded target needs a weather-aware source for
+                    # the same scene role. Generic semantic matches such as a
+                    # title-race line in a weather full-time slot sound wrong,
+                    # even if their embedding score is high. For non-specific
+                    # weather targets, require a weather-coded source in the
+                    # same role that also has no conflicting condition.
+                    specific=expected in ('rain','snow','dry','cold','wet')
+                    source_is_weather=weather_scene(current['event']) or bool(spoken)
+                    valid=(source_is_weather and not incompatible_role and
+                           ((specific and spoken==expected) or
+                            (expected=='general' and spoken in ('','general'))))
+                    if not valid:
                         db.execute('DELETE FROM mappings WHERE profile=? AND clip=?',(narrator,alias['key']))
     sources=collections.defaultdict(list)
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND transcript!='' AND error=''",(narrator,)):
@@ -525,7 +657,12 @@ def match_weather(db,narrator):
 
 def run(narrator):
     db=connect()
-    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),entity_mentions=match_entity_mentions(db,narrator),debut_milestones=match_debut_milestones(db,narrator),tactics=match_tactics(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
+    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),
+                player_progression=match_player_progression(db,narrator),
+                entity_mentions=match_entity_mentions(db,narrator),
+                debut_milestones=match_debut_milestones(db,narrator),
+                tactics=match_tactics(db,narrator),formations=match_formations(db,narrator),
+                weather=match_weather(db,narrator))
     dest=WORK/'transcriptions';dest.mkdir(exist_ok=True)
     (dest/(narrator+'_contextual_associations.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf8')
     db.close();print(json.dumps({k:(v if k=='narrator' else {key:val for key,val in v.items() if key not in ('report','unmatched')}) for k,v in result.items()},ensure_ascii=False),flush=True)
