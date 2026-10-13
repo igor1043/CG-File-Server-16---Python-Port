@@ -6,23 +6,48 @@ from core import connect,WORK
 from generic_policy import plain
 
 NUMBER_WORDS={'um':'1','uma':'1','dois':'2','duas':'2','tres':'3','quatro':'4','cinco':'5','seis':'6'}
+NUMBER_VALUES={**{word:int(value) for word,value in NUMBER_WORDS.items()},**{str(n):n for n in range(1,6)}}
 STOP=set('o a os as um uma de do da dos das que e e no na nos nas para por como mais menos esse essa esta este time equipe vai jogar jogo hoje esquema tatica formacao tecnico treinador campo meio defesa ataque ofensivo ofensiva defensivo defensiva com jogadores jogador ali bem muito'.split())
 
 def formations(text):
     value=plain(text or '')
     found=set()
-    for m in re.finditer(r'(?<!\d)(\d{3,4})(?!\d)',value):
+    for m in re.finditer(r'(?<!\d)(\d{3,5})(?!\d)',value):
         raw=m.group(1);nums=tuple(int(c) for c in raw)
-        if len(nums) in (3,4) and sum(nums)==10 and 3<=nums[0]<=5 and all(1<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
+        if len(nums) in (3,4,5) and sum(nums)==10 and 3<=nums[0]<=5 and all(0<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
+    for m in re.finditer(r'(?<!\d)([3-5])\s*[x/-]\s*([0-5])\s*[x/-]\s*([0-5])(?:\s*[x/-]\s*([0-5]))?(?:\s*[x/-]\s*([0-5]))?(?!\d)',value):
+        nums=tuple(int(n) for n in m.groups() if n)
+        if len(nums) in (3,4,5) and sum(nums)==10 and all(0<=n<=5 for n in nums[1:]):found.add('-'.join(map(str,nums)))
     tokens=re.findall(r'\d+|[a-z]+',value)
     nums=[NUMBER_WORDS.get(t,t if t.isdigit() else '') for t in tokens]
-    for width in (3,4):
+    for width in (3,4,5):
         for i in range(len(nums)-width+1):
             seq=nums[i:i+width]
             if not all(seq):continue
             values=tuple(int(n) for n in seq)
-            if sum(values)==10 and 3<=values[0]<=5 and all(1<=n<=5 for n in values[1:]):found.add('-'.join(map(str,values)))
+            if sum(values)==10 and 3<=values[0]<=5 and all(0<=n<=5 for n in values[1:]):found.add('-'.join(map(str,values)))
+    if re.search(r'\bdiamante\b|\blosangos?\b|\blos\s+(?:angus|angulo|angulos)\b|\bdiamond\b',value):found.add('diamond')
+    if re.search(r'\bfalso\s+(?:9|nove)\b|\bfalse\s+9\b',value):found.add('false-9')
+    if re.search(r'\b(ofensiv[oa]s?|vai\s+(?:para|pra)\s+cima|promete\s+(?:para|pra)\s+cima)\b',value):found.add('offensive')
+    if re.search(r'\b(defensiv[oa]s?|cautelos[oa]s?|conservador[oa]s?|retrancad[oa]s?|recuad[oa]s?)\b',value):found.add('defensive')
     return found
+
+def front_line_count(text):
+    value=plain(text or '')
+    counts=set()
+    count_pattern=r'(um|uma|dois|duas|tres|quatro|1|2|3|4)'
+    player_pattern=r'(?:atacantes?|jogadores?|homens?|pontas?)'
+    for match in re.finditer(r'\b'+count_pattern+r'\s+'+player_pattern+r'\b',value):
+        counts.add(NUMBER_VALUES[match.group(1)])
+    if re.search(r'\bdupla\s+de\s+atacantes?\b',value):counts.add(2)
+    if re.search(r'\b(?:um|uma|1)\s+(?:unico\s+)?atacante\b',value):counts.add(1)
+    if re.search(r'\b(?:um|uma|1)\s+atacante\b.{0,60}\bdois\s+(?:bem\s+)?abertos?\b',value):
+        counts.discard(1);counts.add(3)
+    # These source and FIFA lines describe a lone striker without always
+    # repeating the word “atacante” (e.g. “só um jogador isolado na frente”).
+    if re.search(r'\b(?:so|apenas|unico|isolado)\b.{0,32}\b(?:um|uma|1)\s+(?:jogador|homem|peca)\b.{0,48}\b(?:frente|ataque|isolado|sozinho)\b',value):counts.add(1)
+    if re.search(r'\b(?:dois|duas|2)\b.{0,36}\b(?:na\s+frente|no\s+ataque|linha\s+de\s+frente)\b',value):counts.add(2)
+    return next(iter(counts)) if len(counts)==1 else None
 
 def words(text):
     return {w for w in plain(text or '').split() if len(w)>2 and w not in STOP and not w.isdigit()}
@@ -40,17 +65,38 @@ def canon_name(text):
 def weather_kind(event,text):
     e=(event or '').upper()
     t=plain(text or '')
-    tokens=set(t.split())
-    if any(phrase in t for phrase in ('sem chuva','nao chove','nao vai chover','tempo seco','tempo aberto','tempo bom','ceu aberto','ceu limpo','clima perfeito','clima agradavel','sem vento','gramado seco','grama seca')):
-        spoken='dry'
-    elif tokens & {'neve','nevando','nevar','snow'}:
-        spoken='snow'
-    elif tokens & {'chuva','chuvoso','chovendo','chove','chuvisco','temporal','rain'}:
-        spoken='rain'
-    else:
-        spoken=''
-    coded='rain' if any(x in e for x in ('RAIN','RAINY')) else 'snow' if 'SNOW' in e else 'dry' if any(x in e for x in ('NO_RAIN','DRY','CLEAR_SKY','SUNNY')) else ''
-    if spoken and coded and spoken!=coded:return 'conflict'
+    # Remove negated rain wording before detecting positive rain mentions:
+    # “não vai chover” is a dry/no-rain line, not a rain line.
+    negative_rain=(
+        r'\bsem\s+chuva\b',r'\bnada\s+de\s+chuva\b',r'\bnao\s+(?:vai\s+)?chover\b',
+        r'\bnao\s+(?:esta\s+)?chovendo\b',r'\bnao\s+chove\b',
+        r'\bno\s+rain\b',r'\bnot\s+raining\b'
+    )
+    dry_patterns=(
+        r'\bsem\s+(?:chuva|precipitacao|vento)\b',r'\bnada\s+de\s+(?:chuva|vento)\b',r'\bnao\s+(?:vai\s+)?chover\b',
+        r'\bnao\s+(?:esta\s+)?chovendo\b',r'\bnao\s+chove\b',
+        r'\btempo\s+(?:seco|aberto|bom)\b',r'\bceu\s+(?:aberto|limpo)\b',
+        r'\bclima\s+(?:perfeito|agradavel)\b',r'\bgram(?:ado|a)\s+seco\b',
+        r'\bno\s+rain\b',r'\bnot\s+raining\b'
+    )
+    dry=any(re.search(pattern,t) for pattern in dry_patterns)
+    rain_text=t
+    for pattern in negative_rain:rain_text=re.sub(pattern,' ',rain_text)
+    snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\bgeada\b',t))
+    # General remarks such as “rain affects ball control” do not change a
+    # sunny/no-rain scene into a rainy scene. Require a direct, present-tense
+    # rain cue when the same transcript also explicitly says it is dry.
+    direct_rain=bool(re.search(r'\b(chovendo|chove|choveu|chovia|chover|chuvisco|temporal|chuvoso|chuvosa|rainy)\b|\bque\s+chuva\b|\bcair\s+o\s+mundo\b|\bgalochas\b|\braios\s+e\s+trovoes\b|\bchuva\b.{0,20}\b(forte|caindo|caiu|cai|intensa|desse\s+jeito|assim)\b|\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',rain_text))
+    general_rain=bool(re.search(r'\b(chuva|rain)\b',rain_text))
+    rain=direct_rain or (general_rain and not dry)
+    if snow and rain:spoken='conflict'
+    elif snow:spoken='snow'
+    elif dry and rain:spoken='conflict'
+    elif dry:spoken='dry'
+    elif rain:spoken='rain'
+    else:spoken=''
+    coded='dry' if any(x in e for x in ('NO_RAIN','DRY','CLEAR_SKY','SUNNY')) else 'snow' if 'SNOW' in e else 'rain' if re.search(r'(?:^|_)RAIN(?:_|$)|(?:^|_)RAINY(?:_|$)',e) else ''
+    if spoken=='conflict' or (spoken and coded and spoken!=coded):return 'conflict'
     return spoken or coded
 
 def physical_clips(db,where,args=()):
@@ -87,31 +133,103 @@ def match_player_calls(db,narrator):
         rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
     return dict(occurrences=mapped,physical=len(rows),unique_sources=len(sources),report=rows)
 
-def match_formations(db,narrator):
-    clips=list(physical_clips(db,"c.event IN ('bTS_FORMATION','bTS_FORMATION_REPEAT')"))
-    sources=collections.defaultdict(list)
-    for r in db.execute("SELECT * FROM sources WHERE narrator=? AND event IN ('bTS_FORMATION','bTS_FORMATION_REPEAT') AND transcript!='' AND error=''",(narrator,)):
-        codes=tuple(sorted(formations(r['transcript'])))
-        if 1<=len(codes)<=2:sources[(r['event'],codes)].append(dict(r))
-    report=[];mapped=0
-    # Delete numeric formation proposals first: only an identical spoken
-    # formation set may replace the FIFA recording.
+def match_entity_mentions(db,narrator):
+    topics=('Campeonatos e competições','Estádios e cidades','Comentários de clubes')
+    marks=','.join('?' for _ in topics)
     with db:
-        db.execute("DELETE FROM mappings WHERE profile=? AND method NOT IN ('manual','gender_review') AND clip IN (SELECT c.key FROM clips c JOIN banks b ON b.key=c.bank WHERE b.active=1 AND c.event IN ('bTS_FORMATION','bTS_FORMATION_REPEAT'))",(narrator,))
+        db.execute("DELETE FROM mappings WHERE profile=? AND method='entity_transcript_exact'",(narrator,))
+    sources=collections.defaultdict(list)
+    for r in db.execute(f"SELECT * FROM sources WHERE narrator=? AND topic IN ({marks}) AND transcript!='' AND error=''",(narrator,*topics)):
+        if r['confidence'] is not None and r['confidence'] < -1.0:continue
+        key=canon_name(r['transcript'])
+        if key and len(key.replace(' ',''))>=4:sources[(r['topic'],key)].append(dict(r))
+    preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
+    report=[];mapped=0
+    for c in physical_clips(db,f"c.topic IN ({marks}) AND c.transcript!=''",topics):
+        key=canon_name(c['transcript'])
+        pool=sources.get((c['topic'],key),[])
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+        if not pool or any(a['key'] in preserved for a in aliases):continue
+        pool.sort(key=lambda source:(source['path'],source['key']))
+        source=pool[0]
+        mapped+=put_aliases(db,narrator,c,source['key'],'entity_transcript_exact',1.0)
+        report.append(dict(topic=c['topic'],event=c['event'],text=c['transcript'],source=source['path']))
+    return dict(occurrences=mapped,physical=len(report),report=report)
+
+FORMATION_EVENTS=('bTS_FORMATION','bTS_FORMATION_REPEAT','bTS_FORMATION_FRONT')
+
+def match_formations(db,narrator):
+    marks=','.join('?' for _ in FORMATION_EVENTS)
+    clips=list(physical_clips(db,f'c.event IN ({marks})',FORMATION_EVENTS))
+    sources=collections.defaultdict(list);front_fallbacks=collections.defaultdict(list)
+    for r in db.execute(f"SELECT * FROM sources WHERE narrator=? AND event IN ({marks}) AND transcript!='' AND error=''",(narrator,*FORMATION_EVENTS)):
+        if r['event']=='bTS_FORMATION_FRONT':
+            count=front_line_count(r['transcript'])
+            if count is None:front_fallbacks[r['event']].append(dict(r))
+            else:sources[r['event']].append((dict(r),{f'front:{count}'}))
+            continue
+        signature=formations(r['transcript'])
+        if signature:sources[r['event']].append((dict(r),signature))
+    prepared=[];unmatched=[]
+    for c in clips:
+        if c['event']=='bTS_FORMATION_FRONT':
+            target_count=front_line_count(c['transcript'])
+            if target_count is None:
+                unmatched.append(dict(event=c['event'],original=c['transcript'],reason='front_line_count_not_clear'))
+                continue
+            exact=[source for source,signature in sources.get(c['event'],[]) if signature=={f'front:{target_count}'}]
+            aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+            prepared.append((len(exact)+len(front_fallbacks.get(c['event'],[])),c,{f'front:{target_count}'},exact,front_fallbacks.get(c['event'],[]),aliases))
+            continue
+        target=formations(c['transcript'])
+        if not target:
+            unmatched.append(dict(event=c['event'],original=c['transcript'],reason='formation_signature_not_recognized'))
+            continue
+        target_shapes={x for x in target if '-' in x and x[0].isdigit()}
+        target_tags=target-target_shapes
+        exact=[];fallback=[]
+        for source,signature in sources.get(c['event'],[]):
+            source_shapes={x for x in signature if '-' in x and x[0].isdigit()}
+            source_tags=signature-source_shapes
+            if target_shapes and source_shapes!=target_shapes:continue
+            if not target_shapes and source_shapes and not (target_tags & {'diamond','false-9'}):continue
+            target_special=target_tags & {'diamond','false-9'}
+            source_special=source_tags & {'diamond','false-9'}
+            target_styles=target_tags & {'offensive','defensive'}
+            source_styles=source_tags & {'offensive','defensive'}
+            if target_shapes==source_shapes and target_special==source_special and target_styles==source_styles:
+                exact.append(source)
+            elif source_special.issubset(target_special) and source_styles.issubset(target_styles):
+                # Safe fallback may omit a detail from the Tiago line, but it
+                # cannot add an unsupported diamond/false nine or a contrary
+                # offensive/defensive description.
+                fallback.append(source)
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+        prepared.append((len(exact)+len(fallback),c,target,exact,fallback,aliases))
+    report=[];mapped=0;fallback_count=0;exact_count=0
+    with db:
+        db.execute(f"DELETE FROM mappings WHERE profile=? AND method NOT IN ('manual','gender_review') AND clip IN (SELECT c.key FROM clips c JOIN banks b ON b.key=c.bank WHERE b.active=1 AND c.event IN ({marks}))",(narrator,*FORMATION_EVENTS))
         used=collections.Counter()
         preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
-        for c in clips:
-            codes=tuple(sorted(formations(c['transcript'])))
-            if not 1<=len(codes)<=2:continue
-            pool=[s for s in sources.get((c['event'],codes),[]) if used[s['key']]<8]
-            aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
-            if not pool or any(a['key'] in preserved for a in aliases):continue
-            pool.sort(key=lambda s:(-overlap(c['transcript'],s['transcript']),used[s['key']],s['path']))
+        # Assign the rarest exact formation signatures first so broad/common
+        # variations do not consume recordings needed by a less common shape.
+        for _,c,target,exact,fallback,aliases in sorted(prepared,key=lambda item:(item[0],item[1]['event'],item[1]['bank'],item[1]['offset'])):
+            pool=[source for source in exact if used[source['key']]<8]
+            match_level='exact'
+            if not pool:
+                pool=[source for source in fallback if used[source['key']]<8]
+                match_level='context_fallback'
+            if not pool or any(a['key'] in preserved for a in aliases):
+                unmatched.append(dict(event=c['event'],formation=sorted(target),original=c['transcript'],reason='no_source_with_same_context' if not pool else 'manual_mapping_preserved'))
+                continue
+            pool.sort(key=lambda src:(-overlap(c['transcript'],src['transcript']),used[src['key']],src['path']))
             ranked=pool[:5];source=ranked[0];used[source['key']]+=1
             score=1.0-overlap(c['transcript'],source['transcript'])*.25
-            mapped+=put_aliases(db,narrator,c,source['key'],'formation_same_shape',score)
-            report.append(dict(event=c['event'],formation=list(codes),original=c['transcript'],replacement=source['transcript'],source=source['path'],alternatives=[dict(text=s['transcript'],path=s['path'],lexical_overlap=round(overlap(c['transcript'],s['transcript']),3)) for s in ranked]))
-    return dict(occurrences=mapped,physical=len(report),source_formation_variants=len(sources),report=report)
+            method='formation_same_context' if match_level=='exact' else 'formation_context_fallback'
+            mapped+=put_aliases(db,narrator,c,source['key'],method,score)
+            exact_count+=match_level=='exact';fallback_count+=match_level!='exact'
+            report.append(dict(event=c['event'],formation=sorted(target),match_level=match_level,original=c['transcript'],replacement=source['transcript'],source=source['path'],alternatives=[dict(text=s['transcript'],path=s['path'],lexical_overlap=round(overlap(c['transcript'],s['transcript']),3)) for s in ranked]))
+    return dict(occurrences=mapped,physical=len(report),exact_physical=exact_count,context_fallback_physical=fallback_count,source_formation_variants=sum(len(v)+len(front_fallbacks.get(k,[])) for k,v in sources.items()),unmatched_physical=len(unmatched),unmatched=unmatched,report=report)
 
 def weather_scene(event):
     e=(event or '').upper()
@@ -119,53 +237,76 @@ def weather_scene(event):
     # These named gameplay variants carry explicit rain/snow commentary too.
     return 'WEATHER' in e or 'RAIN' in e or 'SNOW' in e
 
+def weather_role(event):
+    """Keep weather wording attached to the play/commentary moment it describes."""
+    e=(event or '').upper()
+    if 'INTRO' in e or 'PRES_' in e:return 'presentation'
+    if 'GOAL' in e:return 'goal'
+    if 'MISS' in e:return 'miss'
+    if 'FOUL' in e:return 'foul'
+    if 'TCKL' in e or 'SLIDE' in e:return 'tackle'
+    if 'KICKOFF' in e:return 'kickoff'
+    if 'HT_' in e or 'HALFTIME' in e:return 'halftime'
+    if 'FT_' in e or 'FULLTIME' in e:return 'fulltime'
+    return e if weather_scene(e) else ''
+
+def weather_scene_compatible(target,source):
+    target_event=target['event'];source_event=source['event']
+    if target_event==source_event:return True
+    target_role=weather_role(target_event);source_role=weather_role(source_event)
+    return bool(target_role and target_role==source_role)
+
 def match_weather(db,narrator):
     clips=list(physical_clips(db,"(c.event LIKE '%WEATHER%' OR c.event LIKE '%RAIN%' OR c.event LIKE '%SNOW%') AND c.event NOT LIKE '%RAINBOW%'") )
     with db:
         db.execute("DELETE FROM mappings WHERE profile=? AND method='weather_same_condition'",(narrator,))
         preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
         for c in clips:
-            expected=weather_kind(c['event'],c['transcript'])
-            if expected not in ('rain','snow','dry'):continue
+            expected=weather_kind(c['event'],c['transcript']) or 'general'
             aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
             for alias in aliases:
                 if alias['key'] in preserved:continue
                 current=db.execute('SELECT m.source,m.method,s.event,s.transcript FROM mappings m JOIN sources s ON s.key=m.source WHERE m.profile=? AND m.clip=?',(narrator,alias['key'])).fetchone()
                 if current:
                     spoken=weather_kind(current['event'],current['transcript'])
-                    if spoken=='conflict' or spoken in ('rain','snow','dry') and spoken!=expected:
+                    source_role=weather_role(current['event'])
+                    target_role=weather_role(c['event'])
+                    incompatible_role=bool(source_role and target_role and source_role!=target_role)
+                    if spoken=='conflict' or (spoken in ('rain','snow','dry') and spoken!=expected) or (expected=='general' and spoken in ('rain','snow','dry')) or incompatible_role:
                         db.execute('DELETE FROM mappings WHERE profile=? AND clip=?',(narrator,alias['key']))
     sources=collections.defaultdict(list)
-    for r in db.execute("SELECT * FROM sources WHERE narrator=? AND (event LIKE '%WEATHER%' OR event LIKE '%RAIN%' OR event LIKE '%SNOW%') AND event NOT LIKE '%RAINBOW%' AND transcript!='' AND error=''",(narrator,)):
-        if not weather_scene(r['event']):continue
-        kind=weather_kind(r['event'],r['transcript']) or ('general' if 'WEATHER' in r['event'].upper() else '')
-        if kind and kind!='conflict':sources[(r['event'],kind)].append(dict(r))
-    report=[];mapped=0;used=collections.Counter()
+    for r in db.execute("SELECT * FROM sources WHERE narrator=? AND transcript!='' AND error=''",(narrator,)):
+        if 'RAINBOW' in r['event'].upper():continue
+        kind=weather_kind(r['event'],r['transcript'])
+        if kind in ('rain','snow','dry') and weather_role(r['event']):sources[(r['event'],kind)].append(dict(r))
+    report=[];unmatched=[];mapped=0;used=collections.Counter()
     with db:
         preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
         for c in clips:
             if not weather_scene(c['event']):continue
-            kind=weather_kind(c['event'],c['transcript']) or ('general' if 'WEATHER' in c['event'].upper() else '')
-            if not kind or kind=='conflict':continue
+            kind=weather_kind(c['event'],c['transcript']) or 'general'
+            if kind=='conflict':
+                unmatched.append(dict(event=c['event'],original=c['transcript'],reason='weather_condition_conflict'))
+                continue
             pool=[]
             for (event,state),rows in sources.items():
                 if state!=kind:continue
                 same_scene=event==c['event']
-                both_pregame='INTRO' in c['event'].upper() and 'WEATHER' in event.upper() and 'INTRO' in event.upper()
-                both_weather='WEATHER' in c['event'].upper() and 'WEATHER' in event.upper()
-                if same_scene or (kind!='general' and (both_pregame or both_weather)):pool.extend(rows)
+                if same_scene or (kind!='general' and weather_scene_compatible(c,rows[0])):pool.extend(rows)
             pool=[s for s in pool if used[s['key']]<4]
             aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
-            if not pool or any(a['key'] in preserved for a in aliases):continue
+            if not pool or any(a['key'] in preserved for a in aliases):
+                unmatched.append(dict(event=c['event'],condition=kind,original=c['transcript'],reason='no_source_with_same_weather_scene' if not pool else 'manual_mapping_preserved'))
+                continue
             pool.sort(key=lambda s:(-overlap(c['transcript'],s['transcript']),used[s['key']],s['path']))
             source=pool[0];used[source['key']]+=1
             mapped+=put_aliases(db,narrator,c,source['key'],'weather_same_condition',.95)
             report.append(dict(event=c['event'],condition=kind,original=c['transcript'],replacement=source['transcript'],source=source['path']))
-    return dict(occurrences=mapped,physical=len(report),conditions={k:sum(1 for r in report if r['condition']==k) for k in ('rain','snow','dry','general')},report=report)
+    return dict(occurrences=mapped,physical=len(report),unmatched_physical=len(unmatched),conditions={k:sum(1 for r in report if r['condition']==k) for k in ('rain','snow','dry','general')},unmatched=unmatched,report=report)
 
 def run(narrator):
     db=connect()
-    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
+    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),entity_mentions=match_entity_mentions(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
     dest=WORK/'transcriptions';dest.mkdir(exist_ok=True)
     (dest/(narrator+'_contextual_associations.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf8')
     db.close();print(json.dumps({k:(v if k=='narrator' else {key:val for key,val in v.items() if key!='report'}) for k,v in result.items()},ensure_ascii=False),flush=True)
