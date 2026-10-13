@@ -147,14 +147,20 @@ def coverage(name, converted=None):
         group = groups.setdefault(row['topic'], dict(total=0, linked=0, converted=0, transcribed=0, reviewed=0))
         group['total'] += 1
         group['transcribed'] += bool(row['transcript'])
-        group['reviewed'] += bool(row['reviewed'])
         original = name == 'Tiago Leifert'
-        group['linked'] += original or bool(row['path'])
+        has_audio = original or bool(row['path'])
+        group['linked'] += has_audio
+        # Review is available only for a custom narration that has an audio
+        # assignment; empty slots are tracked separately as missing audio.
+        group['reviewed'] += bool(row['reviewed']) and bool(row['path'])
         group['converted'] += original or (bool(row['path']) and converted.get(row['key']) == row['path'])
         if row['status'] == 'decoded':
             physical.add(row['wav'])
     db.close()
     totals = {key: sum(g[key] for g in groups.values()) for key in ('total', 'linked', 'converted', 'transcribed', 'reviewed')}
+    for group in groups.values():
+        group['pending_review'] = group['linked'] - group['reviewed']
     totals.update(physical=len(physical), missing=totals['total'] - totals['linked'],
-                  pending=totals['total'] - totals['converted'], topics=groups)
+                  pending=totals['total'] - totals['converted'],
+                  pending_review=totals['linked'] - totals['reviewed'], topics=groups)
     return totals

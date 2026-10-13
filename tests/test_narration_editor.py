@@ -62,7 +62,8 @@ class EditorTests(unittest.TestCase):
             db.execute("INSERT INTO narration_reviews(profile,clip,reviewed) VALUES ('Custom','0',1)");db.commit();db.close()
             rows,total=editor_catalog.paired_page('Custom',state='Revisados/aprovados',converted={})
             self.assertEqual(total,1);self.assertTrue(rows[0]['reviewed'])
-            self.assertEqual(editor_catalog.coverage('Custom',{})['reviewed'],1)
+            coverage=editor_catalog.coverage('Custom',{})
+            self.assertEqual((coverage['reviewed'],coverage['pending_review']),(1,0))
 
     def test_column_searches_filter_original_and_custom_text_independently(self):
         with tempfile.TemporaryDirectory() as root,patch.object(editor_catalog,'connect',self.fixture(root)):
@@ -79,6 +80,7 @@ class EditorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root,patch.object(editor_catalog,'connect',self.fixture(root)):
             counts=editor_catalog.coverage('Custom',{'0':'custom.mp3'})
             self.assertEqual((counts['linked'],counts['converted'],counts['missing'],counts['pending']),(1,1,3,3))
+            self.assertEqual(counts['pending_review'],1)
             original=editor_catalog.coverage('Tiago Leifert',{})
             self.assertEqual((original['linked'],original['pending']),(4,0))
 

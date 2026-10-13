@@ -267,7 +267,8 @@ class Studio(tk.Tk):
                 self.custom_count.set(f'{number(linked)} com áudio · verificando conversões…\n{number(total-linked)} sem áudio próprio')
             else:
                 reviewed=counts.get('reviewed',0)
-                self.custom_count.set(f'{number(linked)} com áudio · {number(ready)} convertidas\n{number(total-ready)} não convertidas · {number(total-linked)} sem áudio próprio\n{number(reviewed)} aprovadas · {number(total-reviewed)} pendentes de revisão')
+                pending_review=counts.get('pending_review',max(0,linked-reviewed))
+                self.custom_count.set(f'{number(linked)} com áudio · {number(ready)} convertidas\n{number(total-ready)} não convertidas · {number(total-linked)} sem áudio próprio\n{number(reviewed)} aprovadas · {number(pending_review)} pendentes de revisão')
 
     def schedule_refresh(self):
         if self.refresh_job: self.after_cancel(self.refresh_job)
