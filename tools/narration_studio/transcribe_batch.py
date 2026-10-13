@@ -11,7 +11,8 @@ def jobs_for(db,scope):
     original_pending="transcript='' AND status='decoded'"
     jobs=[]
     if scope=='Luiz_complete':
-        rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Luiz Roberto' ORDER BY event,variant,path").fetchall()
+        priority_topics=('Nomes de clubes','Campeonatos e competições','Estádios e cidades','Comentários de clubes')
+        rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Luiz Roberto' ORDER BY CASE WHEN topic='Call names de jogadores' THEN 0 WHEN topic IN ("+','.join('?' for _ in priority_topics)+") THEN 1 ELSE 2 END,event,variant,path",priority_topics).fetchall()
         jobs.extend(('sources',dict(r)) for r in rows)
     if scope=='Vilani_complete':
         priority_topics=('Nomes de clubes','Campeonatos e competições','Estádios e cidades','Comentários de clubes')
