@@ -83,7 +83,8 @@ def weather_kind(event,text):
     rain_text=t
     for pattern in negative_rain:rain_text=re.sub(pattern,' ',rain_text)
     snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\bgeada\b',t))
-    cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',t))
+    cold_text=re.sub(r'\b(?:(?:balde|banho)\s+de\s+agua\s+fria|frio\s+na\s+barriga)\b',' ',t)
+    cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',cold_text))
     wet_pitch=bool(re.search(r'\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',t))
     # General remarks such as “rain affects ball control” do not change a
     # sunny/no-rain scene into a rainy scene. Require a direct, present-tense
