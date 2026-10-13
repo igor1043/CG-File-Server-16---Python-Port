@@ -258,6 +258,7 @@ def run(name, db=None, write_report=True):
         (destination / (name + '_club_associations.json')).write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding='utf8')
     summary = dict(narrator=name, physical_occurrences=len(report), occurrences=len(updates),
+                   club_occurrences=len(updates),
                    unique_sources=len(used), teams=len({row['team_id'] for row in report}),
                    event_counts=dict(collections.Counter(row['event'] for row in report)))
     print(json.dumps(summary, ensure_ascii=False), flush=True)

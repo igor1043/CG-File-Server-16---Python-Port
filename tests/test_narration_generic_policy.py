@@ -15,6 +15,7 @@ class GenericPolicyTests(unittest.TestCase):
         self.assertTrue(blocked_reasons(dict(event='',transcript='She scores a great goal.')))
         self.assertTrue(blocked_reasons(dict(event='',transcript='She scored a great goal.')))
         self.assertTrue(blocked_reasons(dict(event='',transcript='Ela pegou a bola e chutou.')))
+        self.assertTrue(blocked_reasons(dict(event='',transcript='Ela foi titular na equipe.')))
 
     def test_generic_scene_proposals_keep_own_goals_and_set_pieces_distinct(self):
         source=dict(event='',transcript='Que belo gol!')

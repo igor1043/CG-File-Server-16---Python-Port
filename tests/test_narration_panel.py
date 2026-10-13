@@ -5,7 +5,7 @@ from unittest.mock import Mock,patch
 import test_stadium_selector as fixtures
 
 class NarrationPanelTests(unittest.TestCase):
-    def test_prematch_menu_opens_narrators_and_waits_for_ack(self):
+    def test_narrator_selection_applies_and_returns_to_prematch_menu(self):
         options=[dict(name=n,commentator='Caio Ribeiro') for n in ('Tiago Leifert','Vilani','Luiz Roberto')]
         runtime=SimpleNamespace(current='Tiago Leifert',pending=None,error='',profiles=lambda:options,apply=Mock())
         with tempfile.TemporaryDirectory() as tmp,patch('server16_py.narration_panel.narration_runtime',return_value=runtime):
@@ -20,7 +20,9 @@ class NarrationPanelTests(unittest.TestCase):
                 runtime.pending='Vilani';panel.tick()
                 self.assertTrue(selector.opened);selector.app.show_narration_applied.assert_not_called()
                 runtime.pending=None;runtime.current='Vilani';panel.tick()
-                self.assertFalse(selector.opened)
+                self.assertTrue(selector.opened)
+                self.assertTrue(selector.prematch_panel is not None)
+                self.assertFalse(selector.prematch_panel.crowd)
                 selector.app.show_narration_applied.assert_not_called() # Runtime owns notifications.
             finally:selector.shutdown()
     def test_empty_catalog_navigation_is_valid(self):

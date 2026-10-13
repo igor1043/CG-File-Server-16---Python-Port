@@ -10,7 +10,8 @@ def female_reference(text):
     if re.search(r'\b(she (shoots|shot|scores|scored|passes|passed|dribbles|dribbled|takes|hits|runs|plays|saves|saved)|her (shot|goal|pass|save))\b',text):return True
     if re.search(r'\bela (recuperou|perdeu|ganhou|empatou|driblou|chutou|bateu|finalizou|meteu|recebeu|dominou|pegou|tocou|passou|cruzou|cabeceou|correu|arrancou|marcou|carregou|conseguiu)\b',text):return True
     if re.search(r'\bela\s+(?:atua|fica|e|vai|joga|tem|forma|faz)\b.{0,72}\b(?:sozinha|referencia|dupla|trio|tridente|ataque|frente|titular|estreia)\b',text):return True
-    if re.search(r'\bela\b.{0,48}\b(?:merece|destaque|jogadora|artilheira|goleira|capita|estrela|heroina|parece|pareceu|perdida|jogou|atua|foi|esteve)\b',text):return True
+    if re.search(r'\bela\b.{0,48}\b(?:merece|destaque|jogadora|artilheira|goleira|capita|estrela|heroina|parece|pareceu|perdida|jogou|atua|esteve)\b',text):return True
+    if re.search(r'\bela (?:foi|e|era|ficou|esta|estava|sera) (?:a |uma )?(?:titular|jogadora|artilheira|goleira|capita|estrela)\b',text):return True
     if re.search(r'\b(?:gostando|gostei|vendo|marcando|acompanhando|ajudando)\s+dela\b|\bela\s+me\s+(?:parece|pareceu)\b',text):return True
     if re.search(r'\b(?:dela|jogadora|artilheira|goleira)\b.{0,48}\b(?:perdida|apagada|bem|mal|boa|ruim|estreia|destaque)\b',text):return True
     if re.search(r'\b(?:jogadora|artilheira|goleira|capita|atacante feminina)\b|\bdela\s+(?:no|na)\s+(?:ataque|defesa)\b',text):return True
