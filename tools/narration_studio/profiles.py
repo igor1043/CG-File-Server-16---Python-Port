@@ -114,7 +114,7 @@ def compile_profile(name, limit=0, destination=None):
     text_meta=dest/'narrator.txt'
     if text_meta.exists():
         values=dict(line.split('=',1) for line in text_meta.read_text(encoding='utf-8-sig').splitlines() if '=' in line)
-        commentator=values.get('Comentarista',commentator).strip()
+        commentator=values.get('Comentarista','').strip() or commentator
     summary=dict(name=name,commentator=commentator,version=3,package='profile.npack',mapped=applied,physical=sum(len(v) for v in banks.values()),unique_audio=len(pooled),failed=len(report)-applied,original_fallback=True,notes='Áudios completos em memória; falas sem associação usam o FIFA instalado.')
     if meta.exists():
         existing=json.loads(meta.read_text(encoding='utf8'))
