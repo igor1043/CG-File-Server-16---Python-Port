@@ -58,8 +58,14 @@ def transcribe_library(name):
     folders=PROJECTS/name/'library_folders.json'
     if folders.exists():
         for folder in json.loads(folders.read_text(encoding='utf8')):
-            root=Path(folder)
-            items=[item for item in index if Path(item['audio']).is_relative_to(root)]
+            root=Path(folder).expanduser().resolve()
+            if not root.is_dir():continue
+            items=[]
+            for item in index:
+                audio=Path(item['audio']).expanduser().resolve()
+                try:audio.relative_to(root)
+                except ValueError:continue
+                items.append(item)
             (root/'transcriptions.json').write_text(json.dumps(items,ensure_ascii=False,indent=2),encoding='utf8')
     export_text(db);db.close();write_progress('complete')
     if failed:raise ValueError(str(failed)+' áudios precisam de revisão. Consulte library.json.')

@@ -19,6 +19,7 @@ class LibraryPanel(ttk.Frame):
         self.progress=ttk.Progressbar(self,mode='determinate',maximum=100)
         self.progress.grid(row=2,column=0,sticky='ew',pady=5)
         filters=ttk.Frame(self);filters.grid(row=3,column=0,sticky='ew',pady=4)
+        ttk.Label(filters,text='⌕').pack(side='left',padx=(0,4))
         ttk.Entry(filters,textvariable=self.query).pack(side='left',fill='x',expand=True)
         combo=ttk.Combobox(filters,textvariable=self.filter,values=['Todos','Ainda não usados','Já usados','Sem transcrição'],state='readonly',width=18)
         combo.pack(side='left',padx=4);combo.bind('<<ComboboxSelected>>',lambda e:self.refresh(reset=True))
@@ -59,7 +60,7 @@ class LibraryPanel(ttk.Frame):
                 db.execute('CREATE TEMP TABLE source_usage(source TEXT PRIMARY KEY,uses INTEGER)')
                 db.execute('INSERT INTO source_usage SELECT source,count(DISTINCT clip) FROM mappings WHERE profile=? GROUP BY source',(name,))
                 where='s.narrator=?';params=[name]
-                if query:where+=' AND (fold(s.path) LIKE fold(?) OR fold(s.transcript) LIKE fold(?))';params+=['%'+query+'%']*2
+                if query:where+=' AND (fold(s.path) LIKE fold(?) OR fold(s.transcript) LIKE fold(?) OR fold(s.event) LIKE fold(?) OR fold(s.topic) LIKE fold(?))';params+=['%'+query+'%']*4
                 if state=='Ainda não usados':where+=' AND coalesce(u.uses,0)=0'
                 elif state=='Já usados':where+=' AND coalesce(u.uses,0)>0'
                 elif state=='Sem transcrição':where+=" AND coalesce(s.transcript,'')=''"
@@ -98,13 +99,15 @@ class LibraryPanel(ttk.Frame):
         if name=='Tiago Leifert':messagebox.showinfo('Biblioteca','Crie ou selecione um narrador personalizado.');return
         folder=filedialog.askdirectory(title='Pasta dos áudios completos · '+name)
         if not folder:return
+        folder=str(Path(folder).expanduser().resolve())
         def task():
-            import_sources(name,folder)
+            count=import_sources(name,folder)
             path=PROJECTS/name/'library_folders.json';path.parent.mkdir(parents=True,exist_ok=True)
-            folders=json.loads(path.read_text(encoding='utf8')) if path.exists() else []
+            folders=[str(Path(item).expanduser().resolve()) for item in json.loads(path.read_text(encoding='utf8'))] if path.exists() else []
             if folder not in folders:folders.append(folder)
             path.write_text(json.dumps(folders,ensure_ascii=False,indent=2),encoding='utf8')
-            return 'Pasta anexada. Abra a biblioteca para escolher os áudios.'
+            found=f'{count:,}'.replace(',','.')
+            return f'{found} áudios encontrados na pasta e nas subpastas. Abra a biblioteca para escolher os arquivos.'
         self.studio.job(task)
 
     def use(self):

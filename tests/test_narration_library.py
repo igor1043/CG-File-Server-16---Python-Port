@@ -52,4 +52,45 @@ class LibraryTests(unittest.TestCase):
             progress=json.loads((root/'library_progress_Custom.json').read_text())
             self.assertEqual((progress['state'],progress['done'],progress['total']),('complete',1,1))
 
+    def test_nested_audio_import_and_ai_transcription_cover_all_subfolders(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)/'Vilani';first=root/'por_br_FULL'/'match_01';second=root/'por_br_DEMO'/'special'/'match_02'
+            first.mkdir(parents=True);second.mkdir(parents=True)
+            audios=[first/'abertura.wav',first/'ataque.mp3',second/'ronaldinho.flac']
+            for audio in audios:audio.write_bytes(b'test audio')
+            audios[0].with_suffix('.wav.txt').write_text('Boa noite, começa a partida.',encoding='utf8')
+            (second/'not-audio.txt').write_text('ignorar',encoding='utf8')
+            (root/'subpasta-com-extensao.mp3').mkdir()
+            catalog=Path(temporary)/'catalog.sqlite';project=Path(temporary)/'projects'/'Custom';project.mkdir(parents=True)
+            (project/'library_folders.json').write_text(json.dumps([str(root)]),encoding='utf8')
+            original_connect=core.connect
+            with patch.object(core,'connect',lambda:original_connect(catalog)):
+                found=core.import_sources('Custom',root)
+            self.assertEqual(found,3)
+
+            class StubModel:
+                def transcribe(self,path,**kwargs):
+                    segment=SimpleNamespace(text=' Fala reconhecida em '+Path(path).stem+'.',no_speech_prob=.1,avg_logprob=-.2)
+                    return iter([segment]),None
+
+            with patch.object(transcription_worker,'connect',lambda:core.connect(catalog)),\
+                 patch.object(transcription_worker,'WORK',Path(temporary)),\
+                 patch.object(transcription_worker,'PROJECTS',Path(temporary)/'projects'),\
+                 patch.object(transcription_worker,'export_text'),\
+                 patch.object(transcription_worker,'whisper_model',return_value=StubModel()) as model:
+                transcription_worker.transcribe_library('Custom')
+                model.assert_called_once_with('small')
+
+            for audio in audios:
+                sidecar=audio.with_suffix(audio.suffix+'.txt')
+                self.assertTrue(sidecar.is_file(),str(sidecar))
+                self.assertTrue(sidecar.read_text(encoding='utf8').strip())
+            self.assertEqual(audios[0].with_suffix('.wav.txt').read_text(encoding='utf8'),'Boa noite, começa a partida.')
+            manifest=json.loads((root/'transcriptions.json').read_text(encoding='utf8'))
+            self.assertEqual(len(manifest),3)
+            self.assertEqual({Path(item['audio']).resolve() for item in manifest},{audio.resolve() for audio in audios})
+            progress=json.loads((Path(temporary)/'library_progress_Custom.json').read_text())
+            self.assertEqual((progress['state'],progress['done'],progress['total']),('complete',3,3))
+
 if __name__=='__main__':unittest.main()

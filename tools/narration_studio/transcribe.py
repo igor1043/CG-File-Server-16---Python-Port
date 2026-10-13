@@ -1,13 +1,15 @@
 """Resumable local Whisper transcription; results retain confidence for review."""
 from pathlib import Path
 import os, sys, ctypes, json, time, argparse
-from core import connect, WORK
+from core import connect, WORK, WHISPER_MODEL
 
 def whisper_model(size='small'):
+    model_path=WHISPER_MODEL if (WHISPER_MODEL/'model.bin').is_file() else Path(size)
+    model=str(model_path)
     def create(**kwargs):
         from faster_whisper import WhisperModel
-        try:return WhisperModel(size,local_files_only=True,**kwargs)
-        except (OSError,FileNotFoundError):return WhisperModel(size,**kwargs)
+        try:return WhisperModel(model,local_files_only=True,**kwargs)
+        except (OSError,FileNotFoundError):return WhisperModel(model,**kwargs)
     if getattr(sys,'frozen',False) or os.environ.get('F16_NARRATION_CPU')=='1':
         return create(device='cpu',compute_type='int8',cpu_threads=4)
     dll_dirs=[]

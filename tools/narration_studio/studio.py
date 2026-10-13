@@ -3,7 +3,9 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import threading, queue, subprocess, shutil, hashlib, json,sqlite3
-from core import connect, WORK, DB, GAME, APP_ROOT, PROJECTS, FFMPEG, CONFIG_PATH, import_sources,RESOURCE_ROOT,CODE_ROOT
+from portable_setup import ensure_game_config
+ensure_game_config()
+from core import connect, WORK, DB, GAME, APP_ROOT, PROJECTS, FFMPEG, CONFIG_PATH, import_sources,RESOURCE_ROOT,CODE_ROOT,SOURCE_ROOT,WHISPER_MODEL
 from profiles import assign
 from topics import TOPICS, topic
 from audio_playback import AudioPlayer
@@ -31,7 +33,7 @@ class Studio(tk.Tk):
         self.geometry('1440x880'); self.minsize(1100,740)
         self.queue=queue.Queue(); self.busy=False; self.offset=0
         self.profile=tk.StringVar(value='Vilani')
-        self.search=tk.StringVar(); self.topic_filter=tk.StringVar(value='Todos os assuntos')
+        self.original_search=tk.StringVar(); self.source_search=tk.StringVar(); self.topic_filter=tk.StringVar(value='Todos os assuntos')
         self.state_filter=tk.StringVar(value='Todos')
         self.status=tk.StringVar(value='Selecione uma linha: original e sua narração ficam na mesma ocorrência.')
         self.progress=tk.StringVar(); self.original_count=tk.StringVar(); self.custom_count=tk.StringVar()
@@ -60,11 +62,8 @@ class Studio(tk.Tk):
         self.topic_box=ttk.Combobox(filters,textvariable=self.topic_filter,state='readonly',width=38)
         self.topic_box.pack(side='left'); self.topic_box.bind('<<ComboboxSelected>>',lambda e:self.refresh_original())
         ttk.Label(filters,text='Mostrar:').pack(side='left',padx=(10,6))
-        states=ttk.Combobox(filters,textvariable=self.state_filter,values=['Todos','Sem áudio próprio','Com áudio próprio','Já convertidos','Ainda não convertidos','Com áudio, a converter','Revisados manualmente','Sugestões para revisar'],state='readonly',width=22)
+        states=ttk.Combobox(filters,textvariable=self.state_filter,values=['Todos','Sem áudio próprio','Com áudio próprio','Já convertidos','Ainda não convertidos','Com áudio, a converter','Revisados/aprovados','Sugestões para revisar'],state='readonly',width=22)
         states.pack(side='left'); states.bind('<<ComboboxSelected>>',lambda e:self.refresh_original())
-        ttk.Label(filters,text='Buscar:').pack(side='left',padx=(10,6))
-        ttk.Entry(filters,textvariable=self.search).pack(side='left',fill='x',expand=True)
-        self.search.trace_add('write',lambda *_:self.schedule_refresh())
         nav=ttk.Frame(self,padding=(14,0,14,5)); nav.pack(fill='x')
         ttk.Button(nav,text='← Anteriores',command=lambda:self.page(-500)).pack(side='left')
         ttk.Button(nav,text='Próximas →',command=lambda:self.page(500)).pack(side='left',padx=6)
@@ -78,30 +77,38 @@ class Studio(tk.Tk):
         self.library_panel=None
         ttk.Button(nav,text='Mostrar / ocultar biblioteca',command=self.toggle_library).pack(side='right',padx=6)
         for frame in (left,right):
-            frame.columnconfigure(0,weight=1); frame.rowconfigure(2,weight=1)
+            frame.columnconfigure(0,weight=1); frame.rowconfigure(3,weight=1)
         ttk.Label(left,text='Original · Tiago Leifert / Caio Ribeiro',font=('Segoe UI',14,'bold')).grid(row=0,column=0,sticky='w',pady=6)
         self.custom_title=ttk.Label(right,text='Sua narração · Vilani',font=('Segoe UI',14,'bold'))
         self.custom_title.grid(row=0,column=0,sticky='w',pady=6)
         ttk.Label(left,textvariable=self.original_count).grid(row=1,column=0,sticky='w',pady=(0,6))
         ttk.Label(right,textvariable=self.custom_count).grid(row=1,column=0,sticky='w',pady=(0,6))
-        self.left=self.tree(left,('Fala / ocorrência','Transcrição original'),(210,310))
-        self.right=self.tree(right,('Seu áudio / situação','Sua transcrição'),(210,310))
+        for frame,label,variable in ((left,'⌕ Buscar original:',self.original_search),(right,'⌕ Buscar narração:',self.source_search)):
+            search_bar=ttk.Frame(frame);search_bar.grid(row=2,column=0,sticky='ew',pady=(0,5))
+            ttk.Label(search_bar,text=label).pack(side='left',padx=(0,6))
+            ttk.Entry(search_bar,textvariable=variable).pack(side='left',fill='x',expand=True)
+        self.original_search.trace_add('write',lambda *_:self.schedule_refresh())
+        self.source_search.trace_add('write',lambda *_:self.schedule_refresh())
+        self.left=self.tree(left,('Fala / ocorrência','Transcrição original'),(210,310),row=3)
+        self.right=self.tree(right,('Aprovado','Seu áudio / situação','Sua transcrição'),(70,210,310),columns=('reviewed','name','text'),row=3)
+        self.right.tag_configure('approved',background='#ccebd3',foreground='#184b25')
+        self.right.bind('<Button-1>',self.review_cell_click,add='+')
         self.left.bind('<<TreeviewSelect>>',lambda e:self.select_row(self.left))
         self.right.bind('<<TreeviewSelect>>',lambda e:self.select_row(self.right))
         self.left_player=AudioPlayer(left,'Ouvir original',WORK/'preview_cache',FFMPEG,self.pause_other,self.status.set)
         self.right_player=AudioPlayer(right,'Ouvir minha narração',WORK/'preview_cache',FFMPEG,self.pause_other,self.status.set)
         self.players=[self.left_player,self.right_player]
         startup_checkpoint('players-ready')
-        self.left_player.grid(row=3,column=0,sticky='ew',pady=5)
-        self.right_player.grid(row=3,column=0,sticky='ew',pady=5)
-        ttk.Label(left,text='Transcrição original (editável)').grid(row=4,column=0,sticky='w')
-        ttk.Label(right,text='Transcrição da sua narração (editável)').grid(row=4,column=0,sticky='w')
+        self.left_player.grid(row=4,column=0,sticky='ew',pady=5)
+        self.right_player.grid(row=4,column=0,sticky='ew',pady=5)
+        ttk.Label(left,text='Descrição / transcrição original (editável)').grid(row=5,column=0,sticky='w')
+        ttk.Label(right,text='Descrição / transcrição da sua narração (editável)').grid(row=5,column=0,sticky='w')
         self.original_text=tk.Text(left,height=4,wrap='word',font=('Segoe UI',11),undo=True)
         self.source_text=tk.Text(right,height=4,wrap='word',font=('Segoe UI',11),undo=True)
-        self.original_text.grid(row=5,column=0,sticky='ew',pady=4)
-        self.source_text.grid(row=5,column=0,sticky='ew',pady=4)
+        self.original_text.grid(row=6,column=0,sticky='ew',pady=4)
+        self.source_text.grid(row=6,column=0,sticky='ew',pady=4)
         lbuttons=ttk.Frame(left); rbuttons=ttk.Frame(right)
-        lbuttons.grid(row=6,column=0,sticky='ew',pady=4); rbuttons.grid(row=6,column=0,sticky='ew',pady=4)
+        lbuttons.grid(row=7,column=0,sticky='ew',pady=4); rbuttons.grid(row=7,column=0,sticky='ew',pady=4)
         ttk.Button(lbuttons,text='Salvar transcrição',command=self.save_original).grid(row=0,column=0,sticky='w')
         ttk.Button(lbuttons,text='Transcrever este áudio com IA',command=lambda:self.transcribe_selected(True)).grid(row=0,column=1,padx=6,sticky='w')
         self.reference=tk.StringVar(value='Base completa do FIFA 16; nomes e comentários separados por assunto.')
@@ -114,8 +121,8 @@ class Studio(tk.Tk):
         ttk.Button(imports,text='Escolher da biblioteca',command=self.show_library).pack(side='left',padx=6)
         ttk.Button(imports,text='Usar original',command=self.clear_link).pack(side='left')
         review=ttk.Frame(rbuttons);review.grid(row=2,column=0,columnspan=2,sticky='ew',pady=(6,0))
-        ttk.Button(review,text='Marcar como revisado',command=self.mark_reviewed).pack(side='left')
-        ttk.Button(review,text='Repetir nas variações…',command=self.repeat_variations).pack(side='left',padx=6)
+        ttk.Label(review,text='Clique em ☐ na lista para aprovar; a linha aprovada fica verde.').pack(side='left')
+        ttk.Button(review,text='Repetir nas variações…',command=self.repeat_variations).pack(side='right',padx=6)
         bottom=ttk.Frame(self,padding=(14,8)); bottom.pack(side='bottom',fill='x',before=pane)
         self.status_label=ttk.Label(bottom,textvariable=self.status,wraplength=1050)
         self.status_label.pack(anchor='w')
@@ -129,14 +136,14 @@ class Studio(tk.Tk):
         # The action rows have different contents; reserve their common height
         # so both occurrence lists, players and transcripts remain aligned.
         self.column_frames=(left,right)
-        for row in (0,1,3,4,5,6):
+        for row in (0,1,2,4,5,6,7):
             height=max(frame.grid_bbox(0,row)[3] for frame in self.column_frames)
             for frame in self.column_frames: frame.rowconfigure(row,minsize=height)
         self.protocol('WM_DELETE_WINDOW',self.close_app)
 
     def request_data(self,recount=False):
         self.data_generation+=1
-        request=dict(generation=self.data_generation,name=self.profile.get(),query=self.search.get(),category=self.category(),
+        request=dict(generation=self.data_generation,name=self.profile.get(),original_query=self.original_search.get(),source_query=self.source_search.get(),category=self.category(),
                      offset=self.offset,state=self.state_filter.get(),recount=recount,selected=self.current_key)
         try:self.data_requests.get_nowait()
         except queue.Empty:pass
@@ -165,10 +172,10 @@ class Studio(tk.Tk):
                         # Show the editable rows before touching thousands of
                         # source files on a slow disk. Verify conversion next.
                         counts=dict(topics={},loading=True)
-                        rows,total=paired_page(request['name'],request['query'],request['category'],request['offset'],request['state'],converted)
+                        rows,total=paired_page(request['name'],category=request['category'],offset=request['offset'],state=request['state'],converted=converted,original_query=request['original_query'],source_query=request['source_query'])
                         self.data_results.put((True,dict(request=request,rows=rows,total=total,converted=converted,counts=counts)))
                     counts=coverage(name,converted);cached_name=name;cached_converted=converted
-                rows,total=paired_page(request['name'],request['query'],request['category'],request['offset'],request['state'],converted)
+                rows,total=paired_page(request['name'],category=request['category'],offset=request['offset'],state=request['state'],converted=converted,original_query=request['original_query'],source_query=request['source_query'])
                 self.data_results.put((True,dict(request=request,rows=rows,total=total,converted=converted,counts=counts)))
             except Exception as exc:self.data_results.put((False,dict(request=request,error=str(exc))))
 
@@ -190,10 +197,10 @@ class Studio(tk.Tk):
                     if db is not None:db.close()
             self.write_requests.task_done()
 
-    def tree(self,parent,labels,widths):
-        frame=ttk.Frame(parent); frame.grid(row=2,column=0,sticky='nsew')
-        tree=ttk.Treeview(frame,columns=('name','text'),show='headings',selectmode='browse',height=5)
-        for col,label,width in zip(('name','text'),labels,widths):
+    def tree(self,parent,labels,widths,columns=('name','text'),row=2):
+        frame=ttk.Frame(parent); frame.grid(row=row,column=0,sticky='nsew')
+        tree=ttk.Treeview(frame,columns=columns,show='headings',selectmode='browse',height=5)
+        for col,label,width in zip(columns,labels,widths):
             tree.heading(col,text=label); tree.column(col,width=width,minwidth=80)
         scroll=ttk.Scrollbar(frame,orient='vertical',command=self.scroll_both)
         tree.configure(yscrollcommand=lambda first,last,t=tree:self.scrolled(t,first,last))
@@ -258,7 +265,9 @@ class Studio(tk.Tk):
         else:
             if self.profile.get() not in self.conversion_cache:
                 self.custom_count.set(f'{number(linked)} com áudio · verificando conversões…\n{number(total-linked)} sem áudio próprio')
-            else:self.custom_count.set(f'{number(linked)} com áudio · {number(ready)} convertidas\n{number(total-ready)} não convertidas · {number(total-linked)} sem áudio próprio')
+            else:
+                reviewed=counts.get('reviewed',0)
+                self.custom_count.set(f'{number(linked)} com áudio · {number(ready)} convertidas\n{number(total-ready)} não convertidas · {number(total-linked)} sem áudio próprio\n{number(reviewed)} aprovadas · {number(total-reviewed)} pendentes de revisão')
 
     def schedule_refresh(self):
         if self.refresh_job: self.after_cancel(self.refresh_job)
@@ -292,7 +301,10 @@ class Studio(tk.Tk):
             filename=Path(row['source_path']).name if row['source_path'] else '＋ Importar áudio nesta fala'
             uses=row.get('source_uses',0)
             reuse=(' · Usado '+str(uses)+' vezes' if uses>1 else ' · Uso único' if uses else '')
-            self.right.insert('','end',iid=row['key'],values=(row['conversion']+reuse+' · '+filename,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem áudio próprio]')))
+            reviewed=bool(row.get('reviewed')) and bool(row['source_key'])
+            check='☑' if reviewed else '☐' if row['source_key'] and request['name']!='Tiago Leifert' else '—'
+            tags=('approved',) if reviewed else ()
+            self.right.insert('','end',iid=row['key'],values=(check,row['conversion']+reuse+' · '+filename,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem áudio próprio]')),tags=tags)
         self.progress.set(f'{number(self.offset+1 if rows else 0)}–{number(self.offset+len(rows))} de {number(self.total_rows)}')
         self.custom_title.configure(text='Sua narração · '+self.profile.get()); self.show_counts()
         if rows:
@@ -314,14 +326,24 @@ class Studio(tk.Tk):
             key=keys[target];self.left.selection_set(key);self.left.focus(key);self.left.see(key);self.select_row(self.left)
         else:self.page(direction*500)
 
-    def mark_reviewed(self):
-        original=self.originals.get(self.current_key);source=self.sources.get(self.current_key);name=self.profile.get()
-        if not original or not source or name=='Tiago Leifert':return
-        self.save_visible_texts()
-        def task():
-            assign(name,original['key'],source['key'],method='manual',score=1)
-            projects.save(name);return 'Fala marcada como revisada. As referências do mesmo áudio foram preservadas.'
-        self.job(task)
+    def review_cell_click(self,event):
+        if self.right.identify_region(event.x,event.y)!='cell' or self.right.identify_column(event.x)!='#1':return
+        key=self.right.identify_row(event.y)
+        if not key or key not in self.originals:return 'break'
+        self.right.selection_set(key);self.right.focus(key);self.select_row(self.right)
+        row=self.originals[key];source=self.sources.get(key);name=self.profile.get()
+        if source and name!='Tiago Leifert':
+            self.save_visible_texts()
+            reviewed=not bool(row.get('reviewed'))
+            row['reviewed']=reviewed
+            self.right.set(key,'reviewed','☑' if reviewed else '☐')
+            self.right.item(key,tags=('approved',) if reviewed else ())
+            if reviewed:
+                sql='INSERT INTO narration_reviews(profile,clip,reviewed) VALUES (?,?,1) ON CONFLICT(profile,clip) DO UPDATE SET reviewed=1,updated_at=CURRENT_TIMESTAMP'
+            else:sql='DELETE FROM narration_reviews WHERE profile=? AND clip=?'
+            self.write_requests.put([(sql,(name,key))])
+            self.status.set('Áudio aprovado e destacado em verde.' if reviewed else 'Aprovação removida.')
+        return 'break'
 
     def repeat_variations(self):
         original=self.originals.get(self.current_key);source=self.sources.get(self.current_key);name=self.profile.get()
@@ -577,7 +599,7 @@ class Studio(tk.Tk):
         command=[str(worker)] if worker.exists() else [str(CODE_ROOT/'.venv/Scripts/python.exe'),str(CODE_ROOT/'transcription_worker.py')]
         env=dict(__import__('os').environ)
         config=WORK/'worker_config.json';config.parent.mkdir(parents=True,exist_ok=True)
-        config.write_text(json.dumps(dict(game=str(GAME),catalog_root=str(WORK),projects=str(PROJECTS))),encoding='utf8')
+        config.write_text(json.dumps(dict(game=str(GAME),catalog_root=str(WORK),projects=str(PROJECTS),source_root=str(SOURCE_ROOT),whisper_model=str(WHISPER_MODEL)),ensure_ascii=False),encoding='utf8')
         env['F16_NARRATION_CONFIG']=str(config)
         result=subprocess.run(command+args,capture_output=True,env=env,creationflags=0x08000000)
         if result.returncode: raise ValueError(result.stderr.decode('utf8',errors='replace')[-1200:])
@@ -649,11 +671,11 @@ if __name__=='__main__':
         if '--smoke' in sys.argv:
             startup_checkpoint('smoke-verifying')
             import time
-            app.withdraw();deadline=time.monotonic()+25
-            while not app.data_loaded and time.monotonic()<deadline:
+            app.withdraw();deadline=time.monotonic()+60
+            while (not app.data_loaded or app.counts.get('loading')) and time.monotonic()<deadline:
                 app.update();time.sleep(.01)
-            if not app.data_loaded:raise ValueError('Catálogo não ficou disponível no teste de abertura.')
-            report=dict(projects=projects.names(),catalog=str(DB),original_rows=len(app.originals),paired_rows=list(app.left.get_children())==list(app.right.get_children()),counts=app.counts,status='ok')
+            if not app.data_loaded or app.counts.get('loading'):raise ValueError('Catálogo ou contagem não ficaram disponíveis no teste de abertura.')
+            report=dict(projects=projects.names(),catalog=str(DB),original_rows=len(app.originals),paired_rows=list(app.left.get_children())==list(app.right.get_children()),review_column='reviewed' in app.right['columns'],independent_searches=hasattr(app,'original_search') and hasattr(app,'source_search'),counts=app.counts,status='ok')
             (APP_ROOT/'studio_smoke.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8'); app.close_app(); startup_checkpoint('smoke-complete')
         else: app.mainloop()
     except Exception:

@@ -28,6 +28,7 @@ def save(name,commentator=None,competitions=None,portrait=None):
     rows=db.execute('''SELECT m.*,c.event,c.bank,c.offset,c.wav,s.path,s.transcript,s.confidence,s.duration,s.event source_event,s.variant
         FROM mappings m JOIN clips c ON m.clip=c.key JOIN sources s ON m.source=s.key WHERE profile=?''',(name,)).fetchall()
     data['mappings']=[dict(r) for r in rows]
+    data['reviewed']=[r['clip'] for r in db.execute('SELECT clip FROM narration_reviews WHERE profile=? AND reviewed=1 ORDER BY clip',(name,))]
     temp=dest/'project.tmp';temp.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf8');temp.replace(dest/'project.json')
     texts=dest/'transcriptions';texts.mkdir(exist_ok=True)
     sources=db.execute('SELECT key,path,event,transcript,confidence,duration FROM sources WHERE narrator=?',(name,)).fetchall()
@@ -58,6 +59,8 @@ def clone(original,name):
         key=name+':'+hashlib.sha256(r['path'].encode()).hexdigest()[:20];sources[r['key']]=key
         db.execute('INSERT OR IGNORE INTO sources (key,narrator,path,event,variant,transcript,confidence,duration,error,topic) VALUES (?,?,?,?,?,?,?,?,?,?)',(key,name,r['path'],r['event'],r['variant'],r['transcript'],r['confidence'],r['duration'],r['error'],r['topic']))
     for r in db.execute('SELECT * FROM mappings WHERE profile=?',(original,)).fetchall():db.execute('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',(name,r['clip'],sources[r['source']],r['method'],r['score']))
+    for r in db.execute('SELECT clip,reviewed FROM narration_reviews WHERE profile=?',(original,)).fetchall():
+        db.execute('INSERT OR REPLACE INTO narration_reviews(profile,clip,reviewed) VALUES (?,?,?)',(name,r['clip'],r['reviewed']))
     db.commit();db.close();return save(name,data.get('commentator',''),data.get('competitions',[]))
 
 def build(name):
@@ -145,6 +148,12 @@ def open_project(path):
         for bank,offset,wav in entries:
             source=db.execute('SELECT key FROM sources WHERE narrator=? AND path=?',(name,wav)).fetchone()
             for clip in lookup[(Path(bank).stem,offset)]:db.execute('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',(name,clip,source['key'],'manual',1))
+        db.commit();db.close()
+    if data.get('reviewed'):
+        db=connect()
+        for clip in data['reviewed']:
+            if db.execute('SELECT 1 FROM clips WHERE key=?',(clip,)).fetchone():
+                db.execute('INSERT OR REPLACE INTO narration_reviews(profile,clip,reviewed) VALUES (?,?,1)',(name,clip))
         db.commit();db.close()
     portrait=data.get('portrait','portrait.png')
     if (src/portrait).is_file():

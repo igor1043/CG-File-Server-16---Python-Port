@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, json, sqlite3, subprocess, os, hashlib, struct, wave, zlib
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 import unicodedata
@@ -10,17 +10,69 @@ from server16_py.narration_bank import BigArchive, HarmonyBank, sps_size
 APP_ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 RESOURCE_ROOT=Path(getattr(sys,'_MEIPASS',APP_ROOT))
 CODE_ROOT=Path(__file__).resolve().parent
-LOCAL_GAME=(APP_ROOT/'fifa16.exe').is_file() if getattr(sys,'frozen',False) else False
-CONFIG_PATH=Path(os.environ.get('F16_NARRATION_CONFIG',str(APP_ROOT/'studio_config.json')))
+CONFIG_PATH=Path(os.environ.get('F16_NARRATION_CONFIG',str(APP_ROOT/'studio_config.json'))).resolve()
 CONFIG=json.loads(CONFIG_PATH.read_text(encoding='utf8')) if CONFIG_PATH.exists() else {}
-GAME = Path(CONFIG.get('game',str(APP_ROOT) if LOCAL_GAME else r'U:\fifa 16'))
-TOOL = Path(CONFIG.get('audio_tool',r'J:\mods\fifa 16\02_Ferramentas\FIFA16AudioTool\FIFA16AudioTool'))
-WORK = Path(CONFIG.get('catalog_root',str(GAME/'Narrations/.studio') if LOCAL_GAME else str(CODE_ROOT)))
-PROJECTS = Path(CONFIG.get('projects',str(GAME/'Narrations') if LOCAL_GAME else str(APP_ROOT/'Projects')))
+
+def configured_path(key, default):
+    value=CONFIG.get(key)
+    if value in (None,''): value=default
+    path=Path(value)
+    if not path.is_absolute(): path=CONFIG_PATH.parent/path
+    return path.resolve()
+
+GAME=configured_path('game',str(APP_ROOT))
+LOCAL_GAME=(GAME/'fifa16.exe').is_file()
+TOOL=configured_path('audio_tool',str(APP_ROOT/'FIFA16AudioTool'))
+WORK=configured_path('catalog_root',str(GAME/'Narrations/.studio' if LOCAL_GAME else APP_ROOT/'Projects/.studio'))
+PROJECTS=configured_path('projects',str(GAME/'Narrations' if LOCAL_GAME else APP_ROOT/'Projects'))
+SOURCE_ROOT=configured_path('source_root',str(CONFIG_PATH.parent))
+WHISPER_MODEL=configured_path('whisper_model',str(RESOURCE_ROOT/'models/faster-whisper-small'))
 DB = WORK/'catalog.sqlite'
 VGM = RESOURCE_ROOT/'bin/vgmstream-cli.exe' if (RESOURCE_ROOT/'bin/vgmstream-cli.exe').exists() else APP_ROOT/'bin/vgmstream-cli.exe' if (APP_ROOT/'bin/vgmstream-cli.exe').exists() else TOOL/'vgmstream-cli.exe'
 SX = RESOURCE_ROOT/'bin/sx.exe' if (RESOURCE_ROOT/'bin/sx.exe').exists() else APP_ROOT/'bin/sx.exe' if (APP_ROOT/'bin/sx.exe').exists() else TOOL/'tools/ea_soundexchange/sx_6.00.00/sx/sx.exe'
 FFMPEG = str(RESOURCE_ROOT/'bin/ffmpeg.exe') if (RESOURCE_ROOT/'bin/ffmpeg.exe').exists() else str(APP_ROOT/'bin/ffmpeg.exe') if (APP_ROOT/'bin/ffmpeg.exe').exists() else 'ffmpeg'
+
+def _relative_path(value, root):
+    """Return a Windows path relative to root, even when drive-letter case differs."""
+    path_parts=PureWindowsPath(str(value)).parts
+    root_parts=PureWindowsPath(str(root)).parts
+    if len(path_parts)<len(root_parts) or tuple(p.casefold() for p in path_parts[:len(root_parts)])!=tuple(p.casefold() for p in root_parts):
+        return None
+    return path_parts[len(root_parts):]
+
+def relocate_catalog_paths(db):
+    """Rebase absolute paths saved by this PC when a prepared catalogue moves."""
+    manifest_path=WORK/'portable_catalog.json'
+    if not manifest_path.is_file(): return
+    manifest=json.loads(manifest_path.read_text(encoding='utf8'))
+    old=manifest.get('resolved_roots',{})
+    if not old: old={k:manifest.get(k,'') for k in ('game_root','work_root','source_root')}
+    current={'game_root':str(GAME),'work_root':str(WORK),'source_root':str(SOURCE_ROOT)}
+    if all(not old.get(name) or os.path.normcase(os.path.normpath(str(old[name])))==os.path.normcase(os.path.normpath(str(current[name]))) for name in current):
+        return
+    changes=(('banks','source',('game_root',)),('banks','sbr',('work_root','game_root')),
+             ('banks','body',('game_root',)),('clips','wav',('work_root','game_root')),
+             ('sources','path',('source_root','work_root','game_root')))
+    for table,column,order in changes:
+        key='key'
+        rows=db.execute(f'SELECT {key},{column} FROM {table} WHERE {column} IS NOT NULL AND {column}!=""').fetchall()
+        updates=[]
+        for row in rows:
+            value=row[1]
+            for root_name in order:
+                before=old.get(root_name)
+                if not before: continue
+                relative=_relative_path(value,before)
+                if relative is not None:
+                    value=str(Path(current[root_name]).joinpath(*relative))
+                    break
+            if value!=row[1]: updates.append((value,row[0]))
+        if updates: db.executemany(f'UPDATE {table} SET {column}=? WHERE {key}=?',updates)
+    db.commit()
+    manifest['resolved_roots']=current
+    temporary=manifest_path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf8')
+    temporary.replace(manifest_path)
 
 def connect(path=DB):
     Path(path).parent.mkdir(parents=True,exist_ok=True)
@@ -37,15 +89,19 @@ def connect(path=DB):
     CREATE TABLE IF NOT EXISTS clips (key TEXT PRIMARY KEY, bank TEXT, group_id INTEGER, dataset_id INTEGER, event TEXT, row INTEGER, sound_id INTEGER, offset INTEGER, size INTEGER, capacity INTEGER, wav TEXT, status TEXT DEFAULT 'pending', error TEXT DEFAULT '', transcript TEXT DEFAULT '', duration REAL DEFAULT 0, category TEXT);
     CREATE TABLE IF NOT EXISTS sources (key TEXT PRIMARY KEY, narrator TEXT, path TEXT, event TEXT, variant INTEGER, transcript TEXT DEFAULT '', confidence REAL, duration REAL, error TEXT DEFAULT '');
     CREATE TABLE IF NOT EXISTS mappings (profile TEXT, clip TEXT, source TEXT, method TEXT, score REAL, PRIMARY KEY(profile,clip));
+    CREATE TABLE IF NOT EXISTS narration_reviews (profile TEXT, clip TEXT, reviewed INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(profile,clip));
     CREATE INDEX IF NOT EXISTS clips_bank_offset ON clips(bank,offset);
     CREATE INDEX IF NOT EXISTS clips_event ON clips(event,row);
     CREATE INDEX IF NOT EXISTS clips_bank_group ON clips(bank,group_id);
     CREATE INDEX IF NOT EXISTS sources_event ON sources(narrator,event,variant);
     ''')
+    db.execute('CREATE TABLE IF NOT EXISTS narration_reviews (profile TEXT, clip TEXT, reviewed INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(profile,clip))')
+    db.execute('CREATE INDEX IF NOT EXISTS narration_reviews_profile_state ON narration_reviews(profile,reviewed)')
     from topics import update_topics
     ready=('topic_metadata' in tables and db.execute('SELECT 1 FROM topic_metadata WHERE version=4').fetchone()
            and all('topic' in {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table in ('clips','sources')))
     if not ready:update_topics(db)
+    relocate_catalog_paths(db)
     return db
 
 def decompress(b):
@@ -191,23 +247,42 @@ def decode_all(workers=4):
     (WORK/'decode_report.json').write_text(json.dumps(result,indent=2),encoding='utf8')
     db.close(); return result
 
+SOURCE_AUDIO_EXTENSIONS={'.wav','.mp3','.flac','.ogg','.m4a'}
+
+def iter_source_audio(root):
+    """Yield supported recordings from a folder and every nested folder."""
+    root=Path(root).expanduser()
+    if root.is_file():
+        if root.suffix.lower() in SOURCE_AUDIO_EXTENSIONS: yield root.resolve()
+        return
+    if not root.is_dir(): raise FileNotFoundError('Pasta de áudios não encontrada: '+str(root))
+    def walk_error(error): raise error
+    for folder,subfolders,filenames in os.walk(root,topdown=True,onerror=walk_error,followlinks=False):
+        subfolders.sort(key=str.casefold)
+        for filename in sorted(filenames,key=str.casefold):
+            path=Path(folder)/filename
+            if path.suffix.lower() in SOURCE_AUDIO_EXTENSIONS and path.is_file(): yield path.resolve()
+
 def import_sources(narrator, root):
     import re
     db=connect(); count=0
-    for p in Path(root).rglob('*'):
-        if p.suffix.lower() not in ('.wav','.mp3','.flac','.ogg','.m4a'): continue
-        match=re.match(r'(.+)_(\d+)_(\d+)$',p.stem)
-        event,variant=(match[1],int(match[2])) if match else ('',-1)
-        duration=0
-        key=narrator+':'+hashlib.sha256(str(p).encode()).hexdigest()[:20]
-        from topics import topic
-        transcript=''
-        for text_path in (p.with_suffix(p.suffix+'.txt'),p.with_suffix('.txt')):
-            if text_path.is_file():
-                transcript=text_path.read_text(encoding='utf-8-sig').strip();break
-        db.execute('INSERT OR IGNORE INTO sources (key,narrator,path,event,variant,duration,topic,transcript) VALUES (?,?,?,?,?,?,?,?)',(key,narrator,str(p),event,variant,duration,topic(event,str(p),transcript),transcript)); count+=1
-        if count%200==0: db.commit()
-    db.commit(); db.close(); print('sources',narrator,count,flush=True)
+    try:
+        for p in iter_source_audio(root):
+            match=re.match(r'(.+)_(\d+)_(\d+)$',p.stem)
+            event,variant=(match[1],int(match[2])) if match else ('',-1)
+            duration=0
+            key=narrator+':'+hashlib.sha256(str(p).encode()).hexdigest()[:20]
+            from topics import topic
+            transcript=''
+            for text_path in (p.with_suffix(p.suffix+'.txt'),p.with_suffix('.txt')):
+                if text_path.is_file():
+                    transcript=text_path.read_text(encoding='utf-8-sig').strip();break
+            db.execute('INSERT OR IGNORE INTO sources (key,narrator,path,event,variant,duration,topic,transcript) VALUES (?,?,?,?,?,?,?,?)',(key,narrator,str(p),event,variant,duration,topic(event,str(p),transcript),transcript)); count+=1
+            if count%200==0: db.commit()
+        db.commit()
+    finally: db.close()
+    print('sources',narrator,count,flush=True)
+    return count
 
 if __name__=='__main__':
     import argparse

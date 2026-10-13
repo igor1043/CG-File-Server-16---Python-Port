@@ -2,6 +2,7 @@ import sys,struct,tempfile,unittest,json
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools/narration_studio'))
+import core,projects
 from projects import unpack,safe_name
 from server16_py.narration_competitions import choose_profile,competitions
 from generic_policy import female_reference
@@ -38,5 +39,20 @@ class ProjectTests(unittest.TestCase):
             self.assertFalse(female_reference(text),text)
     def test_invalid_project_name_is_rejected(self):
         with self.assertRaises(ValueError):safe_name('../outside')
+    def test_review_checkmarks_are_saved_and_restored_with_the_project(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);catalog=root/'catalog.sqlite';db=core.connect(catalog)
+            db.execute("INSERT INTO clips(key,event,row,wav,status,transcript,topic) VALUES ('clip','INTRO',0,'original.wav','decoded','Original','Abertura e apresentação')")
+            db.execute("INSERT INTO narration_reviews(profile,clip,reviewed) VALUES ('Custom','clip',1)");db.commit();db.close()
+            projects_root=root/'projects';game=root/'game'
+            with patch.object(projects,'connect',lambda:core.connect(catalog)),patch.object(projects,'PROJECTS',projects_root),patch.object(projects,'GAME',game):
+                folder=projects.save('Custom')
+                saved=json.loads((folder/'project.json').read_text(encoding='utf8'))
+                self.assertEqual(saved['reviewed'],['clip'])
+                db=core.connect(catalog);db.execute("DELETE FROM narration_reviews WHERE profile='Custom'");db.commit();db.close()
+                projects.open_project(folder)
+                db=core.connect(catalog)
+                self.assertEqual(db.execute("SELECT reviewed FROM narration_reviews WHERE profile='Custom' AND clip='clip'").fetchone()[0],1)
+                db.close()
 
 if __name__=='__main__':unittest.main()

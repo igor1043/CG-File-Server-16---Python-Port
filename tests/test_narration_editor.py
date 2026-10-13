@@ -56,8 +56,24 @@ class EditorTests(unittest.TestCase):
             self.assertEqual(total,3)
             rows,total=editor_catalog.paired_page('Custom',state='Com áudio, a converter',converted={})
             self.assertEqual(total,1)
-            rows,total=editor_catalog.paired_page('Custom',state='Revisados manualmente',converted={})
-            self.assertEqual(total,1)
+            rows,total=editor_catalog.paired_page('Custom',state='Revisados/aprovados',converted={})
+            self.assertEqual(total,0)
+            db=core.connect(Path(root)/'catalog.sqlite')
+            db.execute("INSERT INTO narration_reviews(profile,clip,reviewed) VALUES ('Custom','0',1)");db.commit();db.close()
+            rows,total=editor_catalog.paired_page('Custom',state='Revisados/aprovados',converted={})
+            self.assertEqual(total,1);self.assertTrue(rows[0]['reviewed'])
+            self.assertEqual(editor_catalog.coverage('Custom',{})['reviewed'],1)
+
+    def test_column_searches_filter_original_and_custom_text_independently(self):
+        with tempfile.TemporaryDirectory() as root,patch.object(editor_catalog,'connect',self.fixture(root)):
+            rows,total=editor_catalog.paired_page('Custom',original_query='ORIGINAL 1',converted={})
+            self.assertEqual(total,1);self.assertEqual(rows[0]['key'],'1')
+            rows,total=editor_catalog.paired_page('Custom',source_query='MINHA APRESENTACAO',converted={})
+            self.assertEqual(total,1);self.assertEqual(rows[0]['key'],'0')
+            rows,total=editor_catalog.paired_page('Custom',original_query='original 0',source_query='minha apresentação',converted={})
+            self.assertEqual(total,1);self.assertEqual(rows[0]['key'],'0')
+            rows,total=editor_catalog.paired_page('Custom',original_query='original 1',source_query='minha apresentação',converted={})
+            self.assertEqual(total,0)
 
     def test_conversion_counts_distinguish_missing_and_unconverted(self):
         with tempfile.TemporaryDirectory() as root,patch.object(editor_catalog,'connect',self.fixture(root)):
