@@ -99,8 +99,9 @@ def weather_kind(event,text):
         r'\b(?:vai\s+)?chover\s+(?:levantamentos?|cruzamentos?|chutes?|passes?|escanteios?|cartoes|faltas|comentarios?)\b',
         r'\b(?:vai\s+)?chover\s+(?:comentari\w*|critica\w*|elogio\w*|aplausos)\b',
         r'\bchover\s+no\s+molhado\b',r'\bchovendo\s+molhado\b',r'\b(?:faca\s+)?chuva\s+ou\s+(?:faca\s+)?sol\b',
-        r'\b(?:balde|banho|ducha)\s+de\s+agua\s+(?:fria|gelada)\b',
-        r'\bfrio\s+na\s+barriga\b',r'\b(?:cabeca|sangue)\s+fria\b',
+        r'\b(?:balde|banho|ducha)\s+(?:de\s+)?(?:agua\s+)?(?:fria|gelada)\b',
+        r'\bfrio\s+na\s+barriga\b',r'\b(?:cabeca|sangue)\s+fri[oa]\b',
+        r'\bgol\s+gelad[oa]\b',
         r'\b(?:ta|esta)\s+com\s+frio\s*,?\s*goleir\w*\b',
         r'\b(?:goleir\w*\s+)?ta\s+com\s+frio\b.{0,45}\b(?:cavadinha|lencol|golaco)\b',
         r'\bfri[oa]\s+(?:na\s+hora\s+de|e\s+calculad[oa])\b',r'\bbola\s+de\s+neve\b'
