@@ -3,7 +3,7 @@ from __future__ import annotations
 import collections,json,re,unicodedata
 from pathlib import Path
 from core import connect,WORK
-from generic_policy import plain
+from generic_policy import plain,blocked_reasons
 
 NUMBER_WORDS={'um':'1','uma':'1','dois':'2','duas':'2','tres':'3','quatro':'4','cinco':'5','seis':'6'}
 NUMBER_VALUES={**{word:int(value) for word,value in NUMBER_WORDS.items()},**{str(n):n for n in range(1,6)}}
@@ -69,12 +69,12 @@ def weather_kind(event,text):
     # “não vai chover” is a dry/no-rain line, not a rain line.
     negative_rain=(
         r'\bsem\s+chuva\b',r'\bnada\s+de\s+chuva\b',r'\bnao\s+(?:vai\s+)?chover\b',
-        r'\bnao\s+(?:esta\s+)?chovendo\b',r'\bnao\s+chove\b',
+        r'\bnao\s+(?:esta\s+)?chovendo(?!\s+(?:tanto|muito|pouco))\b',r'\bnao\s+chove\b',
         r'\bno\s+rain\b',r'\bnot\s+raining\b'
     )
     dry_patterns=(
         r'\bsem\s+(?:chuva|precipitacao|vento)\b',r'\bnada\s+de\s+(?:chuva|vento)\b',r'\bnao\s+(?:vai\s+)?chover\b',
-        r'\bnao\s+(?:esta\s+)?chovendo\b',r'\bnao\s+chove\b',
+        r'\bnao\s+(?:esta\s+)?chovendo(?!\s+(?:tanto|muito|pouco))\b',r'\bnao\s+chove\b',
         r'\btempo\s+(?:seco|aberto|bom)\b',r'\bceu\s+(?:aberto|limpo)\b',
         r'\bclima\s+(?:perfeito|agradavel)\b',r'\bgram(?:ado|a)\s+seco\b',
         r'\bno\s+rain\b',r'\bnot\s+raining\b'
@@ -83,20 +83,25 @@ def weather_kind(event,text):
     rain_text=t
     for pattern in negative_rain:rain_text=re.sub(pattern,' ',rain_text)
     snow=bool(re.search(r'\b(neve|nevando|nevar|snow)\b|\b(?:gramado|campo)\s+branquinho\b|\bgeada\b',t))
+    cold=bool(re.search(r'\b(frio|fria|gelado|gelada|friaca|congelad[oa]s?|temperatura\s+baixa)\b',t))
+    wet_pitch=bool(re.search(r'\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',t))
     # General remarks such as “rain affects ball control” do not change a
     # sunny/no-rain scene into a rainy scene. Require a direct, present-tense
     # rain cue when the same transcript also explicitly says it is dry.
-    direct_rain=bool(re.search(r'\b(chovendo|chove|choveu|chovia|chover|chuvisco|temporal|chuvoso|chuvosa|rainy)\b|\bque\s+chuva\b|\bcair\s+o\s+mundo\b|\bgalochas\b|\braios\s+e\s+trovoes\b|\bchuva\b.{0,20}\b(forte|caindo|caiu|cai|intensa|desse\s+jeito|assim)\b|\b(?:gramado|grama|campo)\s+(?:molhado|molhada|pesado|pesada|encharcado|encharcada|escorregadio|escorregadia)\b',rain_text))
+    direct_rain=bool(re.search(r'\b(chovendo|chove|choveu|chovia|chover|chuvisco|temporal|chuvoso|chuvosa|rainy)\b|\bque\s+chuva\b|\bcair\s+o\s+mundo\b|\bgalochas\b|\braios\s+e\s+trovoes\b|\bchuva\b.{0,20}\b(forte|caindo|caiu|cai|intensa|desse\s+jeito|assim)\b',rain_text))
     general_rain=bool(re.search(r'\b(chuva|rain)\b',rain_text))
     rain=direct_rain or (general_rain and not dry)
     if snow and rain:spoken='conflict'
     elif snow:spoken='snow'
-    elif dry and rain:spoken='conflict'
+    elif dry and (rain or wet_pitch):spoken='conflict'
     elif dry:spoken='dry'
     elif rain:spoken='rain'
+    elif wet_pitch:spoken='wet'
+    elif cold:spoken='cold'
     else:spoken=''
-    coded='dry' if any(x in e for x in ('NO_RAIN','DRY','CLEAR_SKY','SUNNY')) else 'snow' if 'SNOW' in e else 'rain' if re.search(r'(?:^|_)RAIN(?:_|$)|(?:^|_)RAINY(?:_|$)',e) else ''
-    if spoken=='conflict' or (spoken and coded and spoken!=coded):return 'conflict'
+    coded='dry' if any(x in e for x in ('NO_RAIN','DRY','CLEAR_SKY','SUNNY')) else 'snow' if 'SNOW' in e else 'cold' if 'COLD' in e else 'rain' if re.search(r'(?:^|_)RAIN(?:_|$)|(?:^|_)RAINY(?:_|$)',e) else ''
+    if spoken=='conflict' or (spoken and coded and spoken!=coded and not (spoken=='wet' and coded in ('rain','snow'))):return 'conflict'
+    if spoken=='wet' and coded in ('rain','snow'):return coded
     return spoken or coded
 
 def physical_clips(db,where,args=()):
@@ -155,6 +160,66 @@ def match_entity_mentions(db,narrator):
         mapped+=put_aliases(db,narrator,c,source['key'],'entity_transcript_exact',1.0)
         report.append(dict(topic=c['topic'],event=c['event'],text=c['transcript'],source=source['path']))
     return dict(occurrences=mapped,physical=len(report),report=report)
+
+def debut_position(event,text=''):
+    e=(event or '').upper()
+    for token,position in (
+        ('POSITION_CENTRAL_DEFENDER','central_defender'),('POSITION_DEF_MID_FIELD','defensive_midfield'),
+        ('POSITION_FULL_BACK','full_back'),('POSITION_GK','goalkeeper'),('POSITION_MID_FIELD','midfield'),
+        ('POSITION_WINGER','winger'),('POSITION_FORWARD','forward')
+    ):
+        if token in e:return position
+    value=plain(text or '')
+    if re.search(r'\b(goleir[oa]s?|guarda redes|goalkeepers?)\b',value):return 'goalkeeper'
+    if re.search(r'\b(lateral|ala|full back)\b',value):return 'full_back'
+    if re.search(r'\b(volante|meio campista defensiv[oa])\b',value):return 'defensive_midfield'
+    if re.search(r'\b(meia|meias|meio campista|meio campo ofensivo)\b',value):return 'midfield'
+    if re.search(r'\b(ponta|pontas|extremo|extremos|winger)\b',value):return 'winger'
+    if re.search(r'\b(zaga|zagueir[oa]s?|defensor[ae]?s?|defesa central|central defender)\b',value):return 'central_defender'
+    if re.search(r'\b(atacante|atacantes|centroavante|camisa 9|jogador de frente|na linha de frente)\b',value):return 'forward'
+    return ''
+
+def match_debut_milestones(db,narrator):
+    targets=list(physical_clips(db,"(c.event LIKE 'bDEBUT_INTRO%' OR c.event IN ('bDEBUT_FT_SINGLE_GEN','bDEBUT_FT_LAST_DUAL'))"))
+    source_events=('bPRE_INTRO_SCENE_FOCUS_SINGLE_PLAYER_DEBUT_STITCH','bPTW_INTRO_SINGLE_DEBUT_GEN','bPRE_INTRO_SCENE_FOCUS_DUAL_PLAYER_DEBUTANTS','bPTW_FT_SEQ2_PLAYER_PROGRESSION_POSITIVE_DEBUT','bPTW_FT_SEQ2_PLAYER_PROGRESSION_NEGATIVE_DEBUT')
+    rows=db.execute("SELECT * FROM sources WHERE narrator=? AND transcript!='' AND error='' AND (event IN ("+','.join('?' for _ in source_events)+") OR event LIKE 'bPTW_INTRO_SEQ2_SINGLE_DEBUT_POSITION_%')",(narrator,*source_events)).fetchall()
+    sources=[]
+    for row in rows:
+        source=dict(row)
+        if blocked_reasons(source):continue
+        sources.append(source)
+    with db:
+        db.execute("DELETE FROM mappings WHERE profile=? AND method NOT IN ('manual','gender_review') AND clip IN (SELECT c.key FROM clips c JOIN banks b ON b.key=c.bank WHERE b.active=1 AND (c.event LIKE 'bDEBUT_INTRO%' OR c.event IN ('bDEBUT_FT_SINGLE_GEN','bDEBUT_FT_LAST_DUAL')))",(narrator,))
+    report=[];unmatched=[];used=collections.Counter();mapped=0
+    preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
+    for clip in targets:
+        event=clip['event']
+        both_players=bool(re.search(r'\b(?:duas?\s+(?:importantes\s+)?estreias?|dois\s+estreantes?|duas\s+estreantes?|dois\s+jogadores\s+estreantes?|duas\s+contratacoes?|uma\s+para\s+cada\s+(?:time|lado)|um\s+em\s+cada\s+(?:time|lado)|para\s+os\s+dois\s+lados|cada\s+(?:time|lado)\s+(?:tera|tem|vai\s+ter)\s+(?:um|uma)\s+estreante)\b',plain(clip['transcript'] or '')))
+        position=debut_position('',clip['transcript'])
+        if 'DUAL' in event and both_players:
+            pool=[s for s in sources if s['event']=='bPRE_INTRO_SCENE_FOCUS_DUAL_PLAYER_DEBUTANTS'];method='debut_dual_intro'
+        elif event=='bDEBUT_FT_LAST_DUAL':
+            pool=[s for s in sources if s['event']=='bPTW_FT_SEQ2_PLAYER_PROGRESSION_NEGATIVE_DEBUT'];method='debut_negative_result'
+        elif event=='bDEBUT_FT_SINGLE_GEN':
+            pool=[s for s in sources if s['event']=='bPTW_FT_SEQ2_PLAYER_PROGRESSION_POSITIVE_DEBUT'];method='debut_positive_result'
+        else:
+            exact=[s for s in sources if position and s['event'].startswith('bPTW_INTRO_SEQ2_SINGLE_DEBUT_POSITION_') and debut_position(s['event'],s['transcript'])==position]
+            generic=[s for s in sources if s['event'] in ('bPRE_INTRO_SCENE_FOCUS_SINGLE_PLAYER_DEBUT_STITCH','bPTW_INTRO_SINGLE_DEBUT_GEN')]
+            pool=exact or generic
+            method='debut_position_exact' if exact else 'debut_intro_generic'
+        aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(clip['bank'],clip['offset'])).fetchall()
+        if not pool or any(alias['key'] in preserved for alias in aliases):
+            unmatched.append(dict(event=event,position=debut_position('',clip['transcript']),original=clip['transcript'],reason='no_safe_debut_source' if not pool else 'manual_mapping_preserved'))
+            continue
+        available=[source for source in pool if used[source['key']]<8]
+        if not available:
+            unmatched.append(dict(event=event,position=debut_position('',clip['transcript']),original=clip['transcript'],reason='source_reuse_limit'))
+            continue
+        available.sort(key=lambda source:(-overlap(clip['transcript'],source['transcript']),used[source['key']],source['path']))
+        source=available[0];used[source['key']]+=1
+        with db: mapped+=put_aliases(db,narrator,clip,source['key'],method,1.0-overlap(clip['transcript'],source['transcript'])*.25)
+        report.append(dict(event=event,position=debut_position('',clip['transcript']),method=method,original=clip['transcript'],replacement=source['transcript'],source=source['path']))
+    return dict(occurrences=mapped,physical=len(report),methods={method:sum(1 for row in report if row['method']==method) for method in ('debut_position_exact','debut_intro_generic','debut_dual_intro','debut_positive_result','debut_negative_result')},unmatched_physical=len(unmatched),unmatched=unmatched,report=report)
 
 FORMATION_EVENTS=('bTS_FORMATION','bTS_FORMATION_REPEAT','bTS_FORMATION_FRONT')
 
@@ -274,13 +339,13 @@ def match_weather(db,narrator):
                     source_role=weather_role(current['event'])
                     target_role=weather_role(c['event'])
                     incompatible_role=bool(source_role and target_role and source_role!=target_role)
-                    if spoken=='conflict' or (spoken in ('rain','snow','dry') and spoken!=expected) or (expected=='general' and spoken in ('rain','snow','dry')) or incompatible_role:
+                    if spoken=='conflict' or (spoken in ('rain','snow','dry','cold','wet') and spoken!=expected) or (expected=='general' and spoken in ('rain','snow','dry','cold','wet')) or incompatible_role:
                         db.execute('DELETE FROM mappings WHERE profile=? AND clip=?',(narrator,alias['key']))
     sources=collections.defaultdict(list)
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND transcript!='' AND error=''",(narrator,)):
         if 'RAINBOW' in r['event'].upper():continue
         kind=weather_kind(r['event'],r['transcript'])
-        if kind in ('rain','snow','dry') and weather_role(r['event']):sources[(r['event'],kind)].append(dict(r))
+        if kind in ('rain','snow','dry','cold','wet') and weather_role(r['event']):sources[(r['event'],kind)].append(dict(r))
     report=[];unmatched=[];mapped=0;used=collections.Counter()
     with db:
         preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
@@ -304,14 +369,14 @@ def match_weather(db,narrator):
             source=pool[0];used[source['key']]+=1
             mapped+=put_aliases(db,narrator,c,source['key'],'weather_same_condition',.95)
             report.append(dict(event=c['event'],condition=kind,original=c['transcript'],replacement=source['transcript'],source=source['path']))
-    return dict(occurrences=mapped,physical=len(report),unmatched_physical=len(unmatched),conditions={k:sum(1 for r in report if r['condition']==k) for k in ('rain','snow','dry','general')},unmatched=unmatched,report=report)
+        return dict(occurrences=mapped,physical=len(report),unmatched_physical=len(unmatched),conditions={k:sum(1 for r in report if r['condition']==k) for k in ('rain','snow','dry','cold','wet','general')},unmatched=unmatched,report=report)
 
 def run(narrator):
     db=connect()
-    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),entity_mentions=match_entity_mentions(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
+    result=dict(narrator=narrator,player_calls=match_player_calls(db,narrator),entity_mentions=match_entity_mentions(db,narrator),debut_milestones=match_debut_milestones(db,narrator),formations=match_formations(db,narrator),weather=match_weather(db,narrator))
     dest=WORK/'transcriptions';dest.mkdir(exist_ok=True)
     (dest/(narrator+'_contextual_associations.json')).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf8')
-    db.close();print(json.dumps({k:(v if k=='narrator' else {key:val for key,val in v.items() if key!='report'}) for k,v in result.items()},ensure_ascii=False),flush=True)
+    db.close();print(json.dumps({k:(v if k=='narrator' else {key:val for key,val in v.items() if key not in ('report','unmatched')}) for k,v in result.items()},ensure_ascii=False),flush=True)
     return result
 if __name__=='__main__':
     import argparse
