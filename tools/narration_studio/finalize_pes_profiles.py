@@ -44,6 +44,10 @@ def run():
         name=voice['narrator']
         try:
             command('base_matching.py',name)
+            # Restore identity- and scene-specific layers after the broad
+            # semantic pass so call names, formations and weather variants
+            # survive the full-corpus profile rebuild.
+            command('contextual_matching.py',name)
             command('match_club_names.py',name)
             # The CLI accepts every project, with no narrator-name whitelist.
             command('profiles.py',name)
