@@ -38,14 +38,20 @@ def canon_name(text):
     return value
 
 def weather_kind(event,text):
-    e=(event or '').upper();t=plain(text or '')
-    if any(x in e for x in ('RAIN','RAINY')):return 'rain'
-    if 'SNOW' in e:return 'snow'
-    if any(x in e for x in ('NO_RAIN','DRY','CLEAR_SKY','SUNNY')):return 'dry'
-    if re.search(r'\b(sem chuva|nao chove|nao vai chover|tempo seco|sol forte|ceu aberto)\b',t):return 'dry'
-    if re.search(r'\b(neve|nevando|nevar|snow)\b',t):return 'snow'
-    if re.search(r'\b(chuva|chuvoso|chovendo|chove|chuvisco|temporal|rain)\b',t):return 'rain'
-    return ''
+    e=(event or '').upper()
+    t=plain(text or '')
+    tokens=set(t.split())
+    if any(phrase in t for phrase in ('sem chuva','nao chove','nao vai chover','tempo seco','tempo aberto','tempo bom','ceu aberto','ceu limpo','clima perfeito','clima agradavel','sem vento','gramado seco','grama seca')):
+        spoken='dry'
+    elif tokens & {'neve','nevando','nevar','snow'}:
+        spoken='snow'
+    elif tokens & {'chuva','chuvoso','chovendo','chove','chuvisco','temporal','rain'}:
+        spoken='rain'
+    else:
+        spoken=''
+    coded='rain' if any(x in e for x in ('RAIN','RAINY')) else 'snow' if 'SNOW' in e else 'dry' if any(x in e for x in ('NO_RAIN','DRY','CLEAR_SKY','SUNNY')) else ''
+    if spoken and coded and spoken!=coded:return 'conflict'
+    return spoken or coded
 
 def physical_clips(db,where,args=()):
     rows=db.execute('SELECT c.*,b.name bank_name FROM clips c JOIN banks b ON b.key=c.bank WHERE b.active=1 AND '+where+' ORDER BY c.bank,c.offset,c.key',args).fetchall()
@@ -61,6 +67,10 @@ def put_aliases(db,narrator,clip,source,method,score):
     return len(aliases)
 
 def match_player_calls(db,narrator):
+    # Rebuild this exact-text layer every run; names without a matching spoken
+    # form remain the FIFA original.
+    with db:
+        db.execute("DELETE FROM mappings WHERE profile=? AND method='player_call_exact'",(narrator,))
     sources=collections.defaultdict(list)
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND topic='Call names de jogadores' AND transcript!='' AND error='' AND event LIKE 'pPLAYER_NAMES%'",(narrator,)):
         if r['confidence'] is not None and r['confidence'] < -1.0:continue
@@ -105,27 +115,45 @@ def match_formations(db,narrator):
 
 def weather_scene(event):
     e=(event or '').upper()
-    if any(x in e for x in ('RAINBOW','GOAL','MISS','FOUL','TCKL','REPLAY')):return False
-    return 'WEATHER' in e or e.startswith('BINTRO') and any(x in e for x in ('RAIN','SNOW','DRY','CLEAR','SUNNY'))
+    if 'RAINBOW' in e:return False
+    # These named gameplay variants carry explicit rain/snow commentary too.
+    return 'WEATHER' in e or 'RAIN' in e or 'SNOW' in e
 
 def match_weather(db,narrator):
     clips=list(physical_clips(db,"(c.event LIKE '%WEATHER%' OR c.event LIKE '%RAIN%' OR c.event LIKE '%SNOW%') AND c.event NOT LIKE '%RAINBOW%'") )
+    with db:
+        db.execute("DELETE FROM mappings WHERE profile=? AND method='weather_same_condition'",(narrator,))
+        preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
+        for c in clips:
+            expected=weather_kind(c['event'],c['transcript'])
+            if expected not in ('rain','snow','dry'):continue
+            aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
+            for alias in aliases:
+                if alias['key'] in preserved:continue
+                current=db.execute('SELECT m.source,m.method,s.event,s.transcript FROM mappings m JOIN sources s ON s.key=m.source WHERE m.profile=? AND m.clip=?',(narrator,alias['key'])).fetchone()
+                if current:
+                    spoken=weather_kind(current['event'],current['transcript'])
+                    if spoken=='conflict' or spoken in ('rain','snow','dry') and spoken!=expected:
+                        db.execute('DELETE FROM mappings WHERE profile=? AND clip=?',(narrator,alias['key']))
     sources=collections.defaultdict(list)
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND (event LIKE '%WEATHER%' OR event LIKE '%RAIN%' OR event LIKE '%SNOW%') AND event NOT LIKE '%RAINBOW%' AND transcript!='' AND error=''",(narrator,)):
         if not weather_scene(r['event']):continue
         kind=weather_kind(r['event'],r['transcript']) or ('general' if 'WEATHER' in r['event'].upper() else '')
-        if kind:sources[(r['event'],kind)].append(dict(r))
+        if kind and kind!='conflict':sources[(r['event'],kind)].append(dict(r))
     report=[];mapped=0;used=collections.Counter()
     with db:
         preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
         for c in clips:
             if not weather_scene(c['event']):continue
             kind=weather_kind(c['event'],c['transcript']) or ('general' if 'WEATHER' in c['event'].upper() else '')
-            if not kind:continue
+            if not kind or kind=='conflict':continue
             pool=[]
             for (event,state),rows in sources.items():
                 if state!=kind:continue
-                if event==c['event'] or (kind!='general' and 'WEATHER' in event.upper()):pool.extend(rows)
+                same_scene=event==c['event']
+                both_pregame='INTRO' in c['event'].upper() and 'WEATHER' in event.upper() and 'INTRO' in event.upper()
+                both_weather='WEATHER' in c['event'].upper() and 'WEATHER' in event.upper()
+                if same_scene or (kind!='general' and (both_pregame or both_weather)):pool.extend(rows)
             pool=[s for s in pool if used[s['key']]<4]
             aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
             if not pool or any(a['key'] in preserved for a in aliases):continue
