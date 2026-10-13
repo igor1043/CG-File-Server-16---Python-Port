@@ -14,7 +14,8 @@ def jobs_for(db,scope):
         rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Luiz Roberto' ORDER BY event,variant,path").fetchall()
         jobs.extend(('sources',dict(r)) for r in rows)
     if scope=='Vilani_complete':
-        rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Vilani' ORDER BY (event LIKE '%FORMATION%' OR event LIKE '%WEATHER%' OR event LIKE '%RAIN%' OR event LIKE '%SNOW%') DESC,event,variant,path").fetchall()
+        priority_topics=('Nomes de clubes','Campeonatos e competições','Estádios e cidades','Comentários de clubes')
+        rows=db.execute('SELECT * FROM sources WHERE '+source_pending+" AND narrator='Vilani' ORDER BY CASE WHEN topic='Call names de jogadores' THEN 0 WHEN topic IN ("+','.join('?' for _ in priority_topics)+") THEN 1 WHEN event LIKE '%FORMATION%' OR event LIKE '%WEATHER%' OR event LIKE '%RAIN%' OR event LIKE '%SNOW%' THEN 2 ELSE 3 END,event,variant,path",priority_topics).fetchall()
         jobs.extend(('sources',dict(r)) for r in rows)
     if scope=='generic_sources':
         events=('bINTRO_SEQ1_GENERIC','bINTRO_SEQ2_GENERIC','bINTRO_SEQ1_COMMENTATORS_STITCH','bINTRO_SEQ1_WELCOME_STITCH','bINTRO_SEQ1_WRAP_UP','bTS_TEAM_INTRO')
