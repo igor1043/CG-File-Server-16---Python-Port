@@ -68,7 +68,9 @@ def weather_kind(event,text):
     # Ignore common football idioms so “chuva de gols” or “banho de água fria”
     # cannot masquerade as weather and leak into condition-specific scenes.
     figurative=(
-        r'\bchuva\s+de\s+(?:gol\w*|aplausos|criticas|comentarios|elogios|ofertas|propostas)\b',
+        r'\bchuva\s+de\s+(?:gol\w*|cart(?:ao|oes)|faltas|escanteios|aplausos|criticas|comentarios|elogios|ofertas|propostas|assistencias|papel(?:\s+picado)?)\b',
+        r'\b(?:vai\s+)?chover\s+bola(?:s)?(?:\s+na\s+area)?\b',
+        r'\bchuva\s+de\s+bola(?:s)?(?:\s+na\s+area)?\b',
         r'\b(?:vai\s+)?chover\s+(?:comentari\w*|critica\w*|elogio\w*|aplausos)\b',
         r'\bchover\s+no\s+molhado\b',r'\b(?:faca\s+)?chuva\s+ou\s+(?:faca\s+)?sol\b',
         r'\b(?:balde|banho|ducha)\s+de\s+agua\s+(?:fria|gelada)\b',
@@ -86,7 +88,8 @@ def weather_kind(event,text):
     dry_patterns=(
         r'\bsem\s+(?:chuva|precipitacao|vento)\b',r'\bnada\s+de\s+(?:chuva|vento)\b',r'\bnao\s+(?:vai\s+)?chover\b',
         r'\bnao\s+(?:esta\s+)?chovendo(?!\s+(?:tanto|muito|pouco))\b',r'\bnao\s+chove\b',
-        r'\btempo\s+(?:(?:esta|ta|tava|estava)\s+)?(?:seco|aberto|bom)\b',r'\bceu\s+(?:aberto|limpo)\b',
+        r'\btempo\s+(?:(?:esta|ta|tava|estava)\s+)?(?:seco|aberto)\b',
+        r'\btempo\s+(?:esta|ta|tava|estava)\s+bom\b',r'\bceu\s+(?:aberto|limpo)\b',
         r'\bclima\s+(?:perfeito|agradavel)\b',r'\btemperatura\s+agradavel\b',
         r'\b(?:nao\s+(?:esta|ta)\s+ventando|sem\s+vento)\b',
         r'\bdia\s+de\s+(?:muito\s+)?sol\b',r'\bmuito\s+sol\b',
