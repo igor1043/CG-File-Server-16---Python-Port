@@ -438,7 +438,9 @@ def match_weather(db,narrator):
                 if state!=kind:continue
                 same_scene=event==c['event']
                 if same_scene or (kind!='general' and weather_scene_compatible(c,rows[0])):pool.extend(rows)
-            pool=[s for s in pool if used[s['key']]<4]
+            # Weather-specific intro variants outnumber the compatible target
+            # slots; keep each selected recording unique across the profile.
+            pool=[s for s in pool if used[s['key']]==0]
             aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
             if not pool or any(a['key'] in preserved for a in aliases):
                 unmatched.append(dict(event=c['event'],condition=kind,original=c['transcript'],reason='no_source_with_same_weather_scene' if not pool else 'manual_mapping_preserved'))
