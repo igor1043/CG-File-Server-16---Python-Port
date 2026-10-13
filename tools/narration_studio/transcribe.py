@@ -89,7 +89,7 @@ def export_text(db):
     out=WORK/'transcriptions';out.mkdir(exist_ok=True)
     for (narrator,) in db.execute('SELECT DISTINCT narrator FROM sources'):
         rows=db.execute("SELECT path,transcript,confidence FROM sources WHERE narrator=? AND transcript!=''",(narrator,))
-        text='\n'.join(f"{r['path']}\t{r['confidence']:.3f}\t{r['transcript']}" for r in rows)
+        text='\n'.join(f"{r['path']}\t{float(r['confidence'] or 0):.3f}\t{r['transcript']}" for r in rows)
         (out/(narrator+'.txt')).write_text(text,encoding='utf8')
     rows=db.execute("SELECT key,event,transcript FROM clips WHERE transcript!=''")
     (out/'Tiago Leifert.txt').write_text('\n'.join(f"{r['key']}\t{r['event']}\t{r['transcript']}" for r in rows),encoding='utf8')
