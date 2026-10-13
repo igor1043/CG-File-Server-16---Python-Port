@@ -197,6 +197,8 @@ def match_formations(db,narrator):
             source_special=source_tags & {'diamond','false-9'}
             target_styles=target_tags & {'offensive','defensive'}
             source_styles=source_tags & {'offensive','defensive'}
+            # False nine is a distinct tactical role, not a harmless omission.
+            if 'false-9' in target_special and 'false-9' not in source_special:continue
             if target_shapes==source_shapes and target_special==source_special and target_styles==source_styles:
                 exact.append(source)
             elif source_special.issubset(target_special) and source_styles.issubset(target_styles):
