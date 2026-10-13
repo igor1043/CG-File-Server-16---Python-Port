@@ -94,6 +94,8 @@ def weather_kind(event,text):
         r'\bchuva\s+de\s+(?:gol\w*|cart(?:ao|oes)|faltas|escanteios|aplausos|criticas|comentarios|elogios|ofertas|propostas|assistencias|papel(?:\s+picado)?)\b',
         r'\b(?:vai\s+)?chover\s+bola(?:s)?(?:\s+na\s+area)?\b',
         r'\bchuva\s+de\s+bola(?:s)?(?:\s+na\s+area)?\b',
+        r'\bchoveu\s+(?:o\s+)?gol\w*\b',
+        r'\b(?:faz|fazia|fizeram|fez|fazer|fazendo)\s+chover(?:\s+gol\w*)?\b',
         r'\b(?:so\s+)?faltou\s+(?:ele\s+)?fazer\s+chover\b',
         r'\bfazer\s+chover(?:\s+(?:hoje|no\s+ataque|em\s+campo))?\b',
         r'\b(?:vai\s+)?chover\s+(?:levantamentos?|cruzamentos?|chutes?|passes?|escanteios?|cartoes|faltas|comentarios?)\b',
