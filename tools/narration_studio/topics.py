@@ -1,10 +1,11 @@
 """Human-readable navigation over the game's commentary event names."""
 import re
-TOPICS=('Abertura e apresentação','Ataque e chances','Defesa e goleiro','Gols','Faltas e cartões','Bola parada e laterais','Formações e táticas','Comentários de jogadores','Call names de jogadores','Nomes de clubes','Comentários de clubes','Campeonatos e competições','Estádios e cidades','Intervalo e resultado','Outros comentários')
+TOPICS=('Abertura e apresentação','Clima e gramado','Ataque e chances','Defesa e goleiro','Gols','Faltas e cartões','Bola parada e laterais','Formações e táticas','Comentários de jogadores','Call names de jogadores','Nomes de clubes','Comentários de clubes','Campeonatos e competições','Estádios e cidades','Intervalo e resultado','Outros comentários')
 
 def topic(event, path='', transcript=''):
     e=event.upper();p=path.upper();t=transcript.casefold()
     if e.startswith(('PPLAYER_NAMES','PSIMPLE_SURNAME')) or 'CALLNAME' in e or '10_PLAYER' in p:return 'Call names de jogadores'
+    if 'RAINBOW' not in e and any(x in e for x in ('WEATHER','RAIN','SNOW')):return 'Clima e gramado'
     if e.startswith(('SBANTER_STADIUM','SINTROSEQ1_STADIUM')) or any(x in e for x in ('STADIUM','VENUE','CITY_NAME')):return 'Estádios e cidades'
     # c/l events are named competition/league variants, unlike generic b events.
     if event.startswith(('c','l')) and any(x in e for x in ('CUP','LEAGUE','COMPETITION','TOURNAMENT','CHAMPIONSHIP')):return 'Campeonatos e competições'
@@ -43,7 +44,7 @@ def topic(event, path='', transcript=''):
 def update_topics(db):
     if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='topic_metadata'").fetchone():
         db.execute('CREATE TABLE topic_metadata (version INTEGER PRIMARY KEY)')
-    rebuild=not db.execute('SELECT 1 FROM topic_metadata WHERE version=3').fetchone()
+    rebuild=not db.execute('SELECT 1 FROM topic_metadata WHERE version=4').fetchone()
     for table in ('clips','sources'):
         columns={r[1] for r in db.execute('PRAGMA table_info('+table+')')}
         if 'topic' not in columns:db.execute('ALTER TABLE '+table+" ADD COLUMN topic TEXT DEFAULT ''")
@@ -51,5 +52,5 @@ def update_topics(db):
         db.executemany('UPDATE '+table+' SET topic=? WHERE key=?',[(topic(r['event'],r['path'],r['transcript']),r['key']) for r in rows])
         if not db.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",(table+'_topic',)).fetchone():
             db.execute('CREATE INDEX '+table+'_topic ON '+table+'(topic)')
-    if rebuild:db.execute('INSERT OR IGNORE INTO topic_metadata VALUES (3)')
+    if rebuild:db.execute('INSERT OR IGNORE INTO topic_metadata VALUES (4)')
     db.commit()
