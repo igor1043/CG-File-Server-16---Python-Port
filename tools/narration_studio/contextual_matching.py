@@ -1,6 +1,7 @@
 """Context constrained mappings for player calls, formations and weather."""
 from __future__ import annotations
 import collections,json,re,unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 from core import connect,WORK
 from generic_policy import plain,blocked_reasons,female_reference
@@ -9,6 +10,7 @@ NUMBER_WORDS={'um':'1','uma':'1','dois':'2','duas':'2','tres':'3','quatro':'4','
 NUMBER_VALUES={**{word:int(value) for word,value in NUMBER_WORDS.items()},**{str(n):n for n in range(1,6)}}
 FORMATION_PLAYER_COUNTS={9,10}
 STOP=set('o a os as um uma de do da dos das que e e no na nos nas para por como mais menos esse essa esta este time equipe vai jogar jogo hoje esquema tatica formacao tecnico treinador campo meio defesa ataque ofensivo ofensiva defensivo defensiva com jogadores jogador ali bem muito'.split())
+SAFE_CALL_NAME_ALIASES={'iniesta':'andres iniesta','bamford':'patrick bamford','socrates':'doutor socrates'}
 
 def formations(text):
     value=plain(text or '')
@@ -183,11 +185,12 @@ def put_aliases(db,narrator,clip,source,method,score):
 def match_player_calls(db,narrator):
     # Rebuild the exact-text call-name layer every run. The source banks do not
     # contain a dedicated surname event, but an identical one-to-one spoken
-    # name can safely fill the game's standalone-surname slot. Transfer
-    # confirmations also contain short player-name clips; map those by exact
-    # name, never by a semantically similar gameplay sentence.
+    # name can fill the game's standalone-surname slot when the source's
+    # final name token is unique and not a common/ambiguous call. Transfer
+    # confirmations also contain short player-name clips; never map them by
+    # a semantically similar gameplay sentence.
     with db:
-        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('player_call_exact','player_surname_exact','player_transfer_name_exact')",(narrator,))
+        db.execute("DELETE FROM mappings WHERE profile=? AND method IN ('player_call_exact','player_call_name_alias','player_call_name_asr','player_surname_exact','player_surname_name_alias','player_surname_name_asr','player_transfer_name_exact','player_transfer_name_alias','player_transfer_name_asr')",(narrator,))
         for event in ('pTR_M_CONFIRMED','pTR_M_RUMOURED'):
             for clip in physical_clips(db,"upper(c.event)=?",(event.upper(),)):
                 aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(clip['bank'],clip['offset'])).fetchall()
@@ -200,40 +203,96 @@ def match_player_calls(db,narrator):
     sources=collections.defaultdict(list)
     # FIFA event banks carry explicit pPLAYER_NAMES events. PES libraries do
     # not: their extracted name calls live in 10_PLAYER.awb and have no event
-    # key. Keep that second path eligible, then require an exact normalized
-    # one-to-one transcript match below so ordinary PES commentary cannot be
-    # mistaken for a player's call name.
+    # key. Keep that second path eligible, then restrict aliases to standalone
+    # name calls so ordinary PES commentary cannot be mistaken for a player's
+    # call name.
     for r in db.execute("SELECT * FROM sources WHERE narrator=? AND topic='Call names de jogadores' AND transcript!='' AND error=''",(narrator,)):
         if r['confidence'] is not None and r['confidence'] < -1.0:continue
         if not r['event'].startswith('pPLAYER_NAMES') and '10_PLAYER' not in r['path'].upper():continue
         key=canon_name(r['transcript'])
         if key:sources[key].append(dict(r))
+    # Build a second, deliberately narrower index for safe spelling and
+    # surname variants. Keep only standalone name calls; linked commentary
+    # and full sentences can contain a player's name without being a call.
+    alias_sources=collections.defaultdict(list)
+    for name,rows in sources.items():
+        for source in rows:
+            event=source['event'].upper()
+            standalone=('SIMPLE' in event or 'HIGH' in event or '10_PLAYER' in source['path'].upper())
+            if 'LINK' in event or not standalone or len(name.split())>3:continue
+            alias_sources[name].append(source)
+    names_by_final_token=collections.defaultdict(set)
+    names_by_shape=collections.defaultdict(list)
+    for name,rows in alias_sources.items():
+        final_token=name.split()[-1]
+        if len(final_token)>=4:names_by_final_token[final_token].add(name)
+        names_by_shape[(len(name.split()),name[0])].append(name)
+
+    def preferred(rows):
+        return sorted(rows,key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
+                                          -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))[0]
+
+    def resolve_call_name(text):
+        """Return a source and mapping confidence using only one-to-one name evidence."""
+        key=canon_name(text)
+        if not key:return None
+        pool=sources.get(key,[])
+        if pool:return preferred(pool),'exact',1.0
+        tokens=key.split()
+        # Single-word labels are often shared by different players, so only
+        # reviewed, identity-specific surnames may expand to a longer call.
+        # This avoids guessing a player's identity from source-bank frequency.
+        if len(tokens)==1:
+            phrase=SAFE_CALL_NAME_ALIASES.get(key)
+            if phrase and phrase in names_by_final_token.get(key,set()):
+                return preferred(alias_sources[phrase]),'name_alias',.96
+        # Correct only clear ASR spelling errors. Compare against a small
+        # shape/initial index, require a high score and a decisive margin, and
+        # reject common short names that could identify multiple players.
+        candidates=set(names_by_shape.get((len(tokens),key[0]),()))
+        ranked=[]
+        if len(tokens)==1:return None
+        for name in candidates:
+            if len(name)<4 or abs(len(name)-len(key))>max(2,len(key)//4):continue
+            score=SequenceMatcher(None,key,name,autojunk=False).ratio()
+            if score<.94:continue
+            left,right=key.split(),name.split()
+            # Permit a clear ASR typo in one component only when at least one
+            # other component matches exactly and no word differs too much.
+            exact_words=len(set(left)&set(right))
+            word_scores=[SequenceMatcher(None,a,b,autojunk=False).ratio() for a,b in zip(left,right)]
+            if exact_words and min(word_scores)>=.88:ranked.append((score,name))
+        ranked.sort(reverse=True)
+        if ranked and ranked[0][0]>=.94 and (len(ranked)==1 or ranked[0][0]-ranked[1][0]>=.08):
+            name=ranked[0][1]
+            return preferred(alias_sources[name]),'name_asr',ranked[0][0]
+        return None
     rows=[];mapped=0;surname_rows=[];surname_mapped=0;transfer_rows=[];transfer_mapped=0
     preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
     for c in physical_clips(db,"c.topic='Call names de jogadores' AND c.transcript!='' AND c.event LIKE 'pPLAYER_NAMES%'"):
-        key=canon_name(c['transcript']);pool=sources.get(key,[])
+        resolved=resolve_call_name(c['transcript'])
         aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
-        if not pool or any(a['key'] in preserved for a in aliases):continue
-        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
-                                -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))
-        source=pool[0];mapped+=put_aliases(db,narrator,c,source['key'],'player_call_exact',1.0)
-        rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
+        if not resolved or any(a['key'] in preserved for a in aliases):continue
+        source,kind,score=resolved
+        method='player_call_exact' if kind=='exact' else 'player_call_'+kind
+        mapped+=put_aliases(db,narrator,c,source['key'],method,score)
+        rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path'],method=method,score=score))
     for c in physical_clips(db,"c.topic='Call names de jogadores' AND c.transcript!='' AND c.event='pSIMPLE_SURNAME'"):
-        key=canon_name(c['transcript']);pool=sources.get(key,[])
+        resolved=resolve_call_name(c['transcript'])
         aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
-        if not pool or any(a['key'] in preserved for a in aliases):continue
-        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
-                                -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))
-        source=pool[0];surname_mapped+=put_aliases(db,narrator,c,source['key'],'player_surname_exact',1.0)
-        surname_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
+        if not resolved or any(a['key'] in preserved for a in aliases):continue
+        source,kind,score=resolved
+        method='player_surname_exact' if kind=='exact' else 'player_surname_'+kind
+        surname_mapped+=put_aliases(db,narrator,c,source['key'],method,score)
+        surname_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path'],method=method,score=score))
     for c in physical_clips(db,"upper(c.event)='PTR_M_CONFIRMED' AND c.transcript!='' AND c.duration<=1.6"):
-        key=canon_name(c['transcript']);pool=sources.get(key,[])
+        resolved=resolve_call_name(c['transcript'])
         aliases=db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',(c['bank'],c['offset'])).fetchall()
-        if not pool or any(a['key'] in preserved for a in aliases):continue
-        pool.sort(key=lambda s:(0 if 'SIMPLE' in s['event'] else 1 if 'HIGH' in s['event'] else 2,
-                                -(s['confidence'] if s['confidence'] is not None else -2.0),s['path']))
-        source=pool[0];transfer_mapped+=put_aliases(db,narrator,c,source['key'],'player_transfer_name_exact',1.0)
-        transfer_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path']))
+        if not resolved or any(a['key'] in preserved for a in aliases):continue
+        source,kind,score=resolved
+        method='player_transfer_name_exact' if kind=='exact' else 'player_transfer_name_'+kind
+        transfer_mapped+=put_aliases(db,narrator,c,source['key'],method,score)
+        transfer_rows.append(dict(event=c['event'],original=c['transcript'],replacement=source['transcript'],source=source['path'],method=method,score=score))
     return dict(occurrences=mapped+surname_mapped+transfer_mapped,physical=len(rows)+len(surname_rows)+len(transfer_rows),
                 call_name_physical=len(rows),surname_physical=len(surname_rows),transfer_name_physical=len(transfer_rows),
                 unique_sources=len(sources),report=rows+surname_rows+transfer_rows)

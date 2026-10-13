@@ -11,6 +11,30 @@ FEMALE_CUES = re.compile(r'\b(?:meninas|mulherada|jogadoras?|atletas|feminina|fe
 SUFFIXES = re.compile(r'\b(?:fc|cf|sc|afc|ac|ss|ud|cd|rc|se|cr|ec|clube|club|football|futebol)\b')
 STOP_ALIAS = {'united', 'city', 'sporting', 'athletic', 'national', 'nacional', 'internacional'}
 
+# Reviewed ASR variants from the extracted Brazilian 00_TEAM banks. These are
+# direct identity labels, not fuzzy guesses; keep them tied to a unique FIFA
+# team ID so similarly named clubs cannot absorb the call.
+REVIEWED_CLUB_LABELS = {
+    'bota fogo': '517',
+    'corintians': '1041',
+    'atletico mineiro': '1035',
+    'atletico gonnc': '112119',
+    'atletico parada nc': '1039',
+    'fiorentina': '110374',
+    'cristiuma': '111046',
+    'figue a danca': '111045',
+    'afaii': '111976',
+    'bai': '1598',
+    'esporte recife': '111057',
+    'somos caetano': '1789',
+    'bota fogo de ribeirao preto': '130028',
+    'bota fogo de riberao preto': '130028',
+}
+
+# These bare labels are shared with lower-division clubs in the game's
+# metadata. The PES call is the well-known Brazilian top-flight club.
+REVIEWED_BARE_TEAMS = {'fluminense': '567', 'vitoria': '1719'}
+
 
 def _team_ids(teams, exact=None, includes=()):
     exact = plain(exact or '')
@@ -68,11 +92,21 @@ def team_aliases():
         if len(ids) == 1:
             for variant in variants:
                 add(variant, ids, allow_short=True)
+    for variant, team_id in REVIEWED_CLUB_LABELS.items():
+        if team_id in teams:
+            add(variant, [team_id], allow_short=True)
+    for label, team_id in REVIEWED_BARE_TEAMS.items():
+        if team_id in teams:
+            aliases[label] = {team_id}
     return aliases
 
 
 def resolve_team(text, aliases):
-    value = ' ' + plain(text or '') + ' '
+    normalized = plain(text or '')
+    reviewed_id = REVIEWED_BARE_TEAMS.get(normalized)
+    if reviewed_id and reviewed_id in aliases.get(normalized, set()):
+        return reviewed_id, normalized, True
+    value = ' ' + normalized + ' '
     found = []
     for alias in sorted(aliases, key=lambda item: (-len(item), item)):
         needle = ' ' + alias + ' '
