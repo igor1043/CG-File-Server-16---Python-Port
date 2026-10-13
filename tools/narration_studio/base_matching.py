@@ -4,12 +4,13 @@ import collections,hashlib,json,re
 from core import connect,WORK
 from matching import model,MODEL as MATCHING_MODEL
 from topics import topic as classify
-from generic_policy import approved_pool,proposed_opening_pool,blocked_reasons,candidate_allowed,intro_role,reference
+from generic_policy import approved_pool,proposed_opening_pool,blocked_reasons,candidate_allowed,intro_role,reference,event_pair_compatible
 MAX_SOURCE_REUSE=8
 
 EXCLUDED=('Call names de jogadores','Nomes de clubes')
 def eligible(row):
     e=row['event'].upper()
+    if e.startswith('PTR_'):return False
     return row['topic'] not in EXCLUDED and not (e.startswith('P') and any(t in e for t in ('PLAYER','SPECIFIC','SURNAME','NAMES')))
 
 def normalized(event):
@@ -21,6 +22,7 @@ def description(event):
 
 def compatible(left,right):
     a=left.upper();b=right.upper()
+    if not event_pair_compatible(a,b):return False
     # A goal must never become a miss, or an own goal an ordinary score.
     goal=lambda e:any(t in e for t in ('GOAL_SCORED','C_GOAL_','REPLAY_GOAL','CONSOLATION_GOAL'))
     miss=lambda e:any(t in e for t in ('MISS','NO_GOAL','SHOTWIDE'))
@@ -122,7 +124,9 @@ def seed(narrator,threshold=.64):
         for start in range(0,len(unique_queries),128):
             values=encoded_queries[start:start+128]@spoken_vectors.T
             for query,similarities in zip(unique_queries[start:start+128],values):
-                indices=np.argsort(similarities)[::-1][:30]
+                # Search deeply enough that stricter scene/fact guards can
+                # discard a tempting wrong match and still find a valid one.
+                indices=np.argsort(similarities)[::-1][:100]
                 rankings[query]=[(int(j),float(similarities[j])) for j in indices if similarities[j]>=.60]
     print('Selecting compatible recordings',narrator,flush=True)
     preserved={r['clip'] for r in db.execute("SELECT clip FROM mappings WHERE profile=? AND method IN ('manual','gender_review')",(narrator,))}
@@ -173,6 +177,11 @@ def seed(narrator,threshold=.64):
                 candidate=spoken[j]
                 if source_uses[candidate['key']]>=MAX_SOURCE_REUSE:continue
                 if candidate['confidence'] is None and value<.72:continue
+                if value<.64:
+                    scene_tags=('OFFSIDE','CORNER','THROW_IN','THROWIN','GOAL','MISS','SAVE','KEEPER','KPR','FOUL','CARD','PENALTY','PSO','SHOOTOUT','SUB','DEBUT','PTW','TRANSFER','STORYLINE','WEATHER','RAIN','SNOW','FORMATION','TACTIC','SCORELINE','CROSS','PASS','TACKLE','TCKL','STADIUM','COMPETITION','CUP','LEAGUE','REF')
+                    target_tags={tag for tag in scene_tags if tag in event.upper()}
+                    source_tags={tag for tag in scene_tags if tag in candidate['event'].upper()}
+                    if not target_tags.intersection(source_tags):continue
                 if not candidate_allowed(c,candidate):continue
                 if candidate['topic']!=c['topic'] and not (candidate['topic']=='Outros comentários' and c['topic'] in ('Abertura e apresentação','Intervalo e resultado','Outros comentários')):continue
                 lower=candidate['transcript'].casefold()
