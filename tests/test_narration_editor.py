@@ -138,6 +138,17 @@ class EditorTests(unittest.TestCase):
         for event,label in expected.items(): self.assertEqual(topic(event),label)
 
     @unittest.skipUnless(os.name=='nt','WinMM requires Windows')
+    def test_native_preview_handles_long_unicode_paths(self):
+        with tempfile.TemporaryDirectory() as root:
+            directory=Path(root)/'narrações e comentários'/'subpasta de apresentação';directory.mkdir(parents=True)
+            path=directory/'bINTRO_SEQ1_WEATHER_STITCH_17_17.wav'
+            with wave.open(str(path),'wb') as audio:
+                audio.setnchannels(1);audio.setsampwidth(2);audio.setframerate(44100);audio.writeframes(b'\0\0'*44100)
+            player=MciAudio()
+            try:player.load(path);self.assertEqual(player.length,1000)
+            finally:player.close()
+
+    @unittest.skipUnless(os.name=='nt','WinMM requires Windows')
     def test_native_preview_reports_actual_length_and_seek_without_playing(self):
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'silent.wav'

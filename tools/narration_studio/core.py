@@ -33,7 +33,7 @@ USER_AUDIO_ROOT=configured_path('user_audio_root',str(APP_ROOT.parent/'Áudios O
 WHISPER_MODEL=configured_path('whisper_model',str(RESOURCE_ROOT/'models/faster-whisper-small'))
 DB = WORK/'catalog.sqlite'
 VGM = RESOURCE_ROOT/'bin/vgmstream-cli.exe' if (RESOURCE_ROOT/'bin/vgmstream-cli.exe').exists() else APP_ROOT/'bin/vgmstream-cli.exe' if (APP_ROOT/'bin/vgmstream-cli.exe').exists() else TOOL/'vgmstream-cli.exe'
-SX = RESOURCE_ROOT/'bin/sx.exe' if (RESOURCE_ROOT/'bin/sx.exe').exists() else APP_ROOT/'bin/sx.exe' if (APP_ROOT/'bin/sx.exe').exists() else TOOL/'tools/ea_soundexchange/sx_6.00.00/sx/sx.exe'
+SX = next((path for path in (RESOURCE_ROOT/'bin/encoder/sx.exe',APP_ROOT/'bin/encoder/sx.exe',RESOURCE_ROOT/'bin/sx.exe',APP_ROOT/'bin/sx.exe') if path.exists()),TOOL/'tools/ea_soundexchange/sx_6.00.00/sx/sx.exe')
 FFMPEG = str(RESOURCE_ROOT/'bin/ffmpeg.exe') if (RESOURCE_ROOT/'bin/ffmpeg.exe').exists() else str(APP_ROOT/'bin/ffmpeg.exe') if (APP_ROOT/'bin/ffmpeg.exe').exists() else 'ffmpeg'
 
 def _relative_path(value, root):
@@ -74,9 +74,8 @@ def relocate_catalog_paths(db):
         if updates: db.executemany(f'UPDATE {table} SET {column}=? WHERE {key}=?',updates)
     db.commit()
     manifest['resolved_roots']=current
-    temporary=manifest_path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf8')
-    temporary.replace(manifest_path)
+    from atomic_io import write_json
+    write_json(manifest_path,manifest)
 
 def connect(path=DB):
     Path(path).parent.mkdir(parents=True,exist_ok=True)
@@ -102,6 +101,11 @@ def connect(path=DB):
     db.execute('CREATE TABLE IF NOT EXISTS narration_reviews (profile TEXT, clip TEXT, reviewed INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(profile,clip))')
     db.execute('CREATE INDEX IF NOT EXISTS narration_reviews_profile_state ON narration_reviews(profile,reviewed)')
     db.execute('CREATE INDEX IF NOT EXISTS sources_narrator_path ON sources(narrator,path)')
+    source_columns={row[1] for row in db.execute('PRAGMA table_info(sources)')}
+    for column,definition in (('topic_manual','INTEGER NOT NULL DEFAULT 0'),('origin_path',"TEXT DEFAULT ''")):
+        if column not in source_columns:db.execute('ALTER TABLE sources ADD COLUMN '+column+' '+definition)
+    db.commit()
+    db.execute('CREATE INDEX IF NOT EXISTS sources_narrator_origin ON sources(narrator,origin_path)')
     from topics import update_topics
     ready=('topic_metadata' in tables and db.execute('SELECT 1 FROM topic_metadata WHERE version=4').fetchone()
            and all('topic' in {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table in ('clips','sources')))
@@ -337,7 +341,7 @@ def import_sources(narrator, root):
             match=re.match(r'(.+)_(\d+)_(\d+)$',p.stem)
             event,variant=(match[1],int(match[2])) if match else ('',-1)
             duration=0
-            existing=db.execute('SELECT key,transcript FROM sources WHERE narrator=? AND path=?',(narrator,str(p))).fetchone()
+            existing=db.execute('SELECT key,transcript FROM sources WHERE narrator=? AND path=? UNION ALL SELECT key,transcript FROM sources WHERE narrator=? AND origin_path=? LIMIT 1',(narrator,str(p),narrator,str(p))).fetchone()
             transcript=''
             for text_path in (p.with_suffix(p.suffix+'.txt'),p.with_suffix('.txt')):
                 if text_path.is_file():
@@ -364,6 +368,7 @@ def remove_source_asset(narrator, key, managed_root):
         if row is None:raise ValueError('Este áudio não está na biblioteca do narrador ativo.')
         path=Path(row['path']).expanduser().resolve()
         profiles=[item['profile'] for item in db.execute('SELECT DISTINCT profile FROM mappings WHERE source=?',(key,))]
+        changes={profile:[item['clip'] for item in db.execute('SELECT clip FROM mappings WHERE source=? AND profile=?',(key,profile))] for profile in profiles}
         db.execute('DELETE FROM mappings WHERE source=?',(key,))
         db.execute('DELETE FROM sources WHERE key=? AND narrator=?',(key,narrator))
         db.commit()
@@ -374,7 +379,25 @@ def remove_source_asset(narrator, key, managed_root):
         for candidate in {path,Path(str(path)+'.txt'),path.with_suffix('.txt')}:
             try:candidate.unlink(missing_ok=True)
             except OSError as exc:delete_error=str(exc)
-    return dict(path=path,profiles=profiles,deleted_file=deleted_file,delete_error=delete_error)
+    return dict(path=path,profiles=profiles,changes=changes,deleted_file=deleted_file,delete_error=delete_error)
+
+def stage_source_asset(narrator, key, managed_root):
+    """Keep the same asset identity while copying its complete recording into the game."""
+    from atomic_io import write_text
+    db=connect()
+    try:
+        row=db.execute('SELECT * FROM sources WHERE key=? AND narrator=?',(key,narrator)).fetchone()
+        if row is None:raise ValueError('Áudio não encontrado na base deste narrador.')
+        source=Path(row['path']).expanduser().resolve();root=Path(managed_root).resolve()
+        if not source.is_file():raise FileNotFoundError('Áudio não encontrado: '+str(source))
+        if _inside_directory(source,root):return source
+        target=root/'Utilizados'/(hashlib.sha256(key.encode()).hexdigest()[:12]+'_'+source.name)
+        target.parent.mkdir(parents=True,exist_ok=True)
+        if not target.exists() or (target.stat().st_size,target.stat().st_mtime_ns)!=(source.stat().st_size,source.stat().st_mtime_ns):shutil.copy2(source,target)
+        if row['transcript']:write_text(Path(str(target)+'.txt'),row['transcript'])
+        db.execute('UPDATE sources SET path=?,origin_path=CASE WHEN coalesce(origin_path,\'\')=\'\' THEN ? ELSE origin_path END WHERE key=?',(str(target),str(source),key))
+        db.commit();return target
+    finally:db.close()
 
 if __name__=='__main__':
     import argparse

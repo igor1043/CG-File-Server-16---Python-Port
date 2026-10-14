@@ -4,6 +4,7 @@ from pathlib import Path
 from core import connect,WORK,PROJECTS
 from transcribe import whisper_model,export_text
 from topics import topic
+from atomic_io import write_json,write_text
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--table',choices=['clips','sources']);p.add_argument('--key');p.add_argument('--scope');p.add_argument('--library',action='store_true');p.add_argument('--project',default='Vilani');p.add_argument('--smoke',action='store_true');a=p.parse_args()
@@ -24,7 +25,8 @@ def main():
         text=' '.join(s.text.strip() for s in segments) or '[sem fala detectada]'
         score=sum(s.avg_logprob for s in segments)/max(1,len(segments))
         if a.table=='clips':db.execute('UPDATE clips SET transcript=? WHERE wav=?',(text,path))
-        else:db.execute('UPDATE sources SET transcript=?,confidence=?,topic=? WHERE key=?',(text,score,topic(r['event'],path,text),a.key))
+        else:db.execute('UPDATE sources SET transcript=?,confidence=?,topic=CASE WHEN topic_manual=1 THEN topic ELSE ? END WHERE key=?',(text,score,topic(r['event'],path,text),a.key))
+        write_text(Path(str(path)+'.txt'),text)
         db.commit();export_text(db);db.close();print(text)
     from projects import save
     save(a.project)
@@ -34,7 +36,7 @@ def transcribe_library(name):
     model=None;done=0;failed=0;index=[]
     progress=WORK/('library_progress_'+name+'.json')
     def write_progress(state):
-        temp=progress.with_suffix('.tmp');temp.write_text(json.dumps(dict(state=state,done=done,total=len(rows),failed=failed)),encoding='utf8');temp.replace(progress)
+        write_json(progress,dict(state=state,done=done,total=len(rows),failed=failed),best_effort=True)
     write_progress('running')
     for row in rows:
         path=Path(row['path']);text=row['transcript'] or '';error=''
@@ -48,8 +50,8 @@ def transcribe_library(name):
                     segments=[s for s in segments if s.no_speech_prob<.6 and s.avg_logprob>-1]
                 text=' '.join(s.text.strip() for s in segments) or '[sem fala detectada]'
                 score=sum(s.avg_logprob for s in segments)/max(1,len(segments))
-                db.execute('UPDATE sources SET transcript=?,confidence=?,topic=? WHERE key=?',(text,score,topic(row['event'],str(path),text),row['key']));db.commit()
-            path.with_suffix(path.suffix+'.txt').write_text(text,encoding='utf8')
+                db.execute('UPDATE sources SET transcript=?,confidence=?,topic=CASE WHEN topic_manual=1 THEN topic ELSE ? END WHERE key=?',(text,score,topic(row['event'],str(path),text),row['key']));db.commit()
+            write_text(path.with_suffix(path.suffix+'.txt'),text)
         except Exception as exc:failed+=1;error=str(exc)
         index.append(dict(audio=str(path),transcript=text,error=error));done+=1;write_progress('running')
     target=PROJECTS/name/'transcriptions/library.json';target.parent.mkdir(parents=True,exist_ok=True)

@@ -48,7 +48,11 @@ def update_topics(db):
     for table in ('clips','sources'):
         columns={r[1] for r in db.execute('PRAGMA table_info('+table+')')}
         if 'topic' not in columns:db.execute('ALTER TABLE '+table+" ADD COLUMN topic TEXT DEFAULT ''")
-        rows=db.execute('SELECT key,event,transcript,'+('wav' if table=='clips' else 'path')+' AS path FROM '+table+('' if rebuild else " WHERE topic='' OR topic IS NULL")).fetchall()
+        if table=='sources' and 'topic_manual' not in columns:db.execute('ALTER TABLE sources ADD COLUMN topic_manual INTEGER NOT NULL DEFAULT 0')
+        where=[]
+        if table=='sources':where.append('coalesce(topic_manual,0)=0')
+        if not rebuild:where.append("(topic='' OR topic IS NULL)")
+        rows=db.execute('SELECT key,event,transcript,'+('wav' if table=='clips' else 'path')+' AS path FROM '+table+(' WHERE '+' AND '.join(where) if where else '')).fetchall()
         db.executemany('UPDATE '+table+' SET topic=? WHERE key=?',[(topic(r['event'],r['path'],r['transcript']),r['key']) for r in rows])
         if not db.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",(table+'_topic',)).fetchone():
             db.execute('CREATE INDEX '+table+'_topic ON '+table+'(topic)')

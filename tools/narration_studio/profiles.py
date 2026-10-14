@@ -8,6 +8,25 @@ from server16_py.narration_paths import profile_directory
 
 ROOT=NARRATIONS
 
+def package_bytes(banks):
+    def u32(n):return struct.pack('<I',n)
+    unique={};pooled=[]
+    banks={path:samples for path,samples in banks.items() if samples}
+    for samples in banks.values():
+        for payload in samples.values():
+            token=hashlib.sha256(payload).digest()
+            if token not in unique:unique[token]=len(pooled);pooled.append(payload)
+    out=bytearray(b'F16NPK3\0'+u32(len(pooled)))
+    for payload in pooled:out+=u32(len(payload))+payload
+    out+=u32(len(banks))
+    for path,samples in sorted(banks.items()):
+        text=path.encode('utf-16le');out+=u32(len(text)//2)+text+u32(len(samples))
+        for off,payload in sorted(samples.items()):
+            if len(payload)>64*1024*1024:raise ValueError('Uma gravação excede o limite de memória de 64 MiB por áudio')
+            out+=struct.pack('<QI',off,unique[hashlib.sha256(payload).digest()])
+    if len(out)>512*1024*1024:raise ValueError('Pacote excede o limite de memória de 512 MiB')
+    return out,len(pooled)
+
 def assign(profile, clip, source, method='manual', score=1):
     db=connect()
     if not db.execute('SELECT 1 FROM clips WHERE key=?',(clip,)).fetchone(): raise ValueError('Áudio original inexistente')
@@ -16,6 +35,8 @@ def assign(profile, clip, source, method='manual', score=1):
     # consistent instead of silently selecting conflicting recordings.
     row=db.execute('SELECT bank,offset FROM clips WHERE key=?',(clip,)).fetchone()
     for alias in db.execute('SELECT key FROM clips WHERE bank=? AND offset=?',tuple(row)).fetchall():
+        previous=db.execute('SELECT source FROM mappings WHERE profile=? AND clip=?',(profile,alias['key'])).fetchone()
+        if not previous or previous['source']!=source:db.execute('DELETE FROM narration_reviews WHERE profile=? AND clip=?',(profile,alias['key']))
         db.execute('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',(profile,alias['key'],source,method,score))
     db.commit();db.close()
 
@@ -47,7 +68,7 @@ def encoded(source, destination, bitrate=16000, fallback=None):
     if result.returncode or not sps.exists(): raise ValueError(result.stdout.decode(errors='replace')+result.stderr.decode(errors='replace'))
     verify=destination/(token+'.verify.wav')
     decoded=subprocess.run([str(VGM),'-i','-o',str(verify),str(sps)],capture_output=True,timeout=60,creationflags=0x08000000)
-    if decoded.returncode or not verify.exists(): raise ValueError('SPS gerado não decodifica')
+    if decoded.returncode or not verify.exists(): raise ValueError(f'SPS gerado não decodifica ({decoded.returncode}): '+(decoded.stdout+decoded.stderr).decode('utf8',errors='replace')[-600:])
     with wave.open(str(verify)) as w: actual=w.getnframes()/w.getframerate()
     with wave.open(str(wav)) as w: expected=w.getnframes()/w.getframerate()
     if abs(actual-expected)>0.1: raise ValueError('Duração codificada não corresponde à fonte')
@@ -90,24 +111,9 @@ def compile_profile(name, limit=0, destination=None):
             stat=Path(row['path']).stat()
             report.append(dict(clip=row['key'],event=row['event'],source=row['path'],source_signature=dict(size=stat.st_size,mtime_ns=stat.st_mtime_ns),transcript=row['source_transcript'],mode='resident_sps',bytes=len(payload),original_bytes=row['capacity'],original_duration=row['duration']))
         except Exception as exc: report.append(dict(clip=row['key'],source=row['path'],error=str(exc)))
-    def u32(n):return struct.pack('<I',n)
-    unique={};pooled=[]
-    for samples in banks.values():
-        for payload in samples.values():
-            token=hashlib.sha256(payload).digest()
-            if token not in unique:unique[token]=len(pooled);pooled.append(payload)
-    # Full recordings appear once; bank occurrences only reference an asset.
-    # This changes memory use, never the duration or samples of the recording.
-    out=bytearray(b'F16NPK3\0'+u32(len(pooled)))
-    for payload in pooled:out+=u32(len(payload))+payload
-    out+=u32(len(banks))
-    for path,samples in sorted(banks.items()):
-        text=path.encode('utf-16le');out+=u32(len(text)//2)+text+u32(len(samples))
-        for off,payload in sorted(samples.items()):
-            if len(payload)>64*1024*1024:raise ValueError('Uma gravação excede o limite de memória de 64 MiB por áudio')
-            out+=struct.pack('<QI',off,unique[hashlib.sha256(payload).digest()])
-    if len(out)>512*1024*1024:raise ValueError('Pacote excede o limite de memória de 512 MiB')
-    package=dest/'profile.npack';temp=package.with_suffix('.tmp');temp.write_bytes(out);temp.replace(package)
+    from atomic_io import write_bytes
+    out,unique_audio=package_bytes(banks)
+    package=dest/'profile.npack';write_bytes(package,out)
     applied=sum('error' not in r for r in report)
     commentator=''
     meta=dest/'profile.json'
@@ -116,7 +122,7 @@ def compile_profile(name, limit=0, destination=None):
     if text_meta.exists():
         values=dict(line.split('=',1) for line in text_meta.read_text(encoding='utf-8-sig').splitlines() if '=' in line)
         commentator=values.get('Comentarista','').strip() or commentator
-    summary=dict(name=name,commentator=commentator,version=3,package='profile.npack',mapped=applied,physical=sum(len(v) for v in banks.values()),unique_audio=len(pooled),failed=len(report)-applied,original_fallback=True,notes='Áudios completos em memória; falas sem associação usam o FIFA instalado.')
+    summary=dict(name=name,commentator=commentator,version=3,package='profile.npack',mapped=applied,physical=sum(len(v) for v in banks.values()),unique_audio=unique_audio,failed=len(report)-applied,original_fallback=True,notes='Áudios completos em memória; falas sem associação usam o FIFA instalado.')
     if meta.exists():
         existing=json.loads(meta.read_text(encoding='utf8'))
         for key in ('competitions','portrait','gender_policy'):

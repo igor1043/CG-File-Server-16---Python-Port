@@ -7,15 +7,18 @@ import subprocess
 import threading
 import uuid
 import wave
+import shutil
+import tempfile
 import tkinter as tk
 from tkinter import ttk
 
 
 class MciAudio:
     def __init__(self, send=None):
-        self.alias = 'narration_' + uuid.uuid4().hex
+        self.alias = 'n' + uuid.uuid4().hex[:7]
         self.opened = False
         self.length = 0
+        self.preview_directory=None
         self._send = send
         if send is None:
             self.winmm = ctypes.WinDLL('winmm')
@@ -37,7 +40,22 @@ class MciAudio:
         self.close()
         if '"' in str(path):
             raise ValueError('Caminho de áudio inválido.')
-        self.command(f'open "{Path(path).resolve()}" type waveaudio alias {self.alias}')
+        playable=Path(path).resolve()
+        if self._send is None:
+            # The legacy waveaudio driver rejects some Unicode/long paths.
+            # A byte-for-byte copy gives it a short local filename.
+            self.preview_directory=tempfile.TemporaryDirectory(prefix='f16_')
+            playable=Path(self.preview_directory.name)/'audio.wav'
+            shutil.copy2(path,playable)
+            kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+            kernel.GetShortPathNameW.argtypes=[ctypes.c_wchar_p,ctypes.c_wchar_p,ctypes.c_uint]
+            buffer=ctypes.create_unicode_buffer(32768)
+            size=kernel.GetShortPathNameW(str(playable),buffer,len(buffer))
+            if size and size<len(buffer):playable=Path(buffer.value)
+        try:self.command(f'open "{playable}" type waveaudio alias {self.alias}')
+        except Exception:
+            if self.preview_directory:self.preview_directory.cleanup();self.preview_directory=None
+            raise
         self.opened = True
         try:
             self.command(f'set {self.alias} time format milliseconds')
@@ -87,6 +105,8 @@ class MciAudio:
             finally:
                 self.opened = False
                 self.length = 0
+        if self.preview_directory:
+            self.preview_directory.cleanup();self.preview_directory=None
 
 
 def prepare_preview(source, cache, ffmpeg):

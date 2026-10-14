@@ -39,9 +39,6 @@ class Studio(tk.Tk):
             'Todas as falas':'Todos',
             'Sem áudio substituto (usa o original)':'Sem áudio próprio',
             'Já substituídos (com áudio próprio)':'Com áudio próprio',
-            'Convertidos e prontos no jogo':'Já convertidos',
-            'Substituídos, aguardando conversão':'Com áudio, a converter',
-            'Não convertidos (inclui sem substituto)':'Ainda não convertidos',
             'Aprovados':'Revisados/aprovados',
             'Sugestões para revisar':'Sugestões para revisar',
         }
@@ -55,14 +52,14 @@ class Studio(tk.Tk):
         self.counts=dict(total=0,linked=0,converted=0,transcribed=0,topics={});self.converted={}
         self.loaded_profile=self.profile.get();self.closed=False
         self.write_requests=queue.Queue();self.write_results=queue.Queue();self.local_original_text={};self.local_source_text={}
-        self.autosave_timer=None;self.autosave_requested=None;self.autosave_running=False;self.autosave_results=queue.Queue()
+        self.autosave_timer=None;self.autosave_requested=[];self.autosave_running=False;self.autosave_results=queue.Queue()
+        self.text_save_timer=None;self._displaying_text=False
         style=ttk.Style(self); style.theme_use('clam')
         style.configure('Treeview',rowheight=28,font=('Segoe UI',10))
         style.configure('Treeview.Heading',font=('Segoe UI',10,'bold'))
         style.configure('TButton',padding=6)
         top=ttk.Frame(self,padding=(14,10)); top.pack(fill='x')
         ttk.Label(top,text='FIFA 16 Narration Studio',font=('Segoe UI',21,'bold')).pack(side='left')
-        ttk.Button(top,text='Gerar áudio e instalar no jogo',command=self.build_project).pack(side='right')
         bar=ttk.Frame(self,padding=(14,0,14,8)); bar.pack(fill='x')
         ttk.Label(bar,text='Narrador ativo:').pack(side='left',padx=(0,6))
         self.profile_box=ttk.Combobox(bar,textvariable=self.profile,values=projects.names(),width=20,state='readonly')
@@ -82,8 +79,6 @@ class Studio(tk.Tk):
         ttk.Button(nav,text='← Anteriores',command=lambda:self.page(-500)).pack(side='left')
         ttk.Button(nav,text='Próximas →',command=lambda:self.page(500)).pack(side='left',padx=6)
         ttk.Label(nav,textvariable=self.progress).pack(side='left',padx=8)
-        ttk.Button(nav,text='← Fala',command=lambda:self.next_occurrence(-1)).pack(side='right')
-        ttk.Button(nav,text='Fala →',command=lambda:self.next_occurrence(1)).pack(side='right',padx=6)
         pane=ttk.Panedwindow(self,orient='horizontal'); pane.pack(fill='both',expand=True,padx=14)
         left=ttk.Frame(pane,padding=(0,0,6,0)); right=ttk.Frame(pane,padding=(6,0,0,0))
         pane.add(left,weight=1); pane.add(right,weight=1)
@@ -105,7 +100,7 @@ class Studio(tk.Tk):
         self.original_search.trace_add('write',lambda *_:self.schedule_refresh())
         self.source_search.trace_add('write',lambda *_:self.schedule_refresh())
         self.left=self.tree(left,('Fala / ocorrência','Transcrição original'),(210,310),row=3)
-        self.right=self.tree(right,('Aprovado','Seu áudio / situação','Sua transcrição'),(70,210,310),columns=('reviewed','name','text'),row=3)
+        self.right=self.tree(right,('Aprovado','Seu áudio','Sua transcrição'),(70,210,310),columns=('reviewed','name','text'),row=3)
         self.right.tag_configure('approved',background='#ccebd3',foreground='#184b25')
         self.right.bind('<Button-1>',self.review_cell_click,add='+')
         self.left.bind('<<TreeviewSelect>>',lambda e:self.select_row(self.left))
@@ -122,14 +117,13 @@ class Studio(tk.Tk):
         self.source_text=tk.Text(right,height=4,wrap='word',font=('Segoe UI',11),undo=True)
         self.original_text.grid(row=6,column=0,sticky='ew',pady=4)
         self.source_text.grid(row=6,column=0,sticky='ew',pady=4)
+        for widget in (self.original_text,self.source_text):widget.bind('<<Modified>>',self.text_modified)
         lbuttons=ttk.Frame(left); rbuttons=ttk.Frame(right)
         lbuttons.grid(row=7,column=0,sticky='ew',pady=4); rbuttons.grid(row=7,column=0,sticky='ew',pady=4)
-        ttk.Button(lbuttons,text='Salvar transcrição',command=self.save_original).grid(row=0,column=0,sticky='w')
-        ttk.Button(lbuttons,text='Transcrever este áudio com IA',command=lambda:self.transcribe_selected(True)).grid(row=0,column=1,padx=6,sticky='w')
+        ttk.Button(lbuttons,text='Transcrever este áudio com IA',command=lambda:self.transcribe_selected(True)).grid(row=0,column=0,sticky='w')
         self.reference=tk.StringVar(value='Base completa do FIFA 16; nomes e comentários separados por assunto.')
         ttk.Label(lbuttons,textvariable=self.reference,foreground='#68798c').grid(row=1,column=0,columnspan=2,sticky='w',pady=8)
-        ttk.Button(rbuttons,text='Salvar transcrição',command=self.save_source).grid(row=0,column=0,sticky='w')
-        ttk.Button(rbuttons,text='Transcrever este áudio com IA',command=lambda:self.transcribe_selected(False)).grid(row=0,column=1,padx=6,sticky='w')
+        ttk.Button(rbuttons,text='Transcrever este áudio com IA',command=lambda:self.transcribe_selected(False)).grid(row=0,column=0,sticky='w')
         imports=ttk.Frame(rbuttons); imports.grid(row=1,column=0,columnspan=2,sticky='ew',pady=(6,0))
         self.import_button=ttk.Button(imports,text='＋ Importar MP3 / WAV',command=self.import_audio)
         self.import_button.pack(side='left')
@@ -176,13 +170,6 @@ class Studio(tk.Tk):
                     from core import inventory,decode_all
                     inventory(GAME);decode_all()
                 name=request['name']
-                if (request['recount'] or name not in self.conversion_cache) and name not in self.conversion_verifying:
-                    self.conversion_verifying.add(name)
-                    def verify(profile=name):
-                        try:self.conversion_results.put((profile,converted_keys(profile),None))
-                        except Exception as exc:self.conversion_results.put((profile,{},str(exc)))
-                    threading.Thread(target=verify,daemon=True).start()
-                converted=self.conversion_cache.get(name,{})
                 if name!=cached_name or request['recount'] or cached_converted is not converted:
                     if request['name']!=cached_name:
                         # Show the editable rows before touching thousands of
@@ -204,11 +191,18 @@ class Studio(tk.Tk):
                 db=None
                 try:
                     db=connect()
-                    for sql,values in queries:db.execute(sql,values)
+                    from editor_edits import update_transcript,update_style
+                    for sql,values in queries:
+                        if sql=='@transcript':update_transcript(db,*values)
+                        elif sql=='@style':update_style(db,*values)
+                        else:db.execute(sql,values)
                     db.commit();self.write_results.put((True,''));break
                 except sqlite3.OperationalError as exc:
                     if db is not None:db.rollback()
                     self.write_results.put((False,str(exc)));time.sleep(.5)
+                except Exception as exc:
+                    if db is not None:db.rollback()
+                    self.write_results.put((False,str(exc)));break
                 finally:
                     if db is not None:db.close()
             self.write_requests.task_done()
@@ -279,16 +273,22 @@ class Studio(tk.Tk):
         if self.profile.get()=='Tiago Leifert':
             self.custom_count.set(f'{number(total)} falas originais disponíveis\nProjeto original: usa os áudios do jogo')
         else:
-            if self.profile.get() not in self.conversion_cache:
-                self.custom_count.set(f'{number(linked)} com áudio · verificando conversões…\n{number(total-linked)} sem áudio próprio')
-            else:
-                reviewed=counts.get('reviewed',0)
-                pending_review=counts.get('pending_review',max(0,linked-reviewed))
-                self.custom_count.set(f'{number(linked)} com áudio · {number(ready)} convertidas\n{number(total-ready)} não convertidas · {number(total-linked)} sem áudio próprio\n{number(reviewed)} aprovadas · {number(pending_review)} pendentes de revisão')
+            reviewed=counts.get('reviewed',0)
+            pending_review=counts.get('pending_review',max(0,linked-reviewed))
+            self.custom_count.set(f'{number(linked)} com áudio próprio · {number(total-linked)} usam o original\n{number(reviewed)} aprovadas · {number(pending_review)} pendentes de revisão')
 
     def schedule_refresh(self):
         if self.refresh_job: self.after_cancel(self.refresh_job)
         self.refresh_job=self.after(350,self.refresh_original)
+
+    def text_modified(self,event):
+        if self._displaying_text or not event.widget.edit_modified():return
+        if self.text_save_timer:self.after_cancel(self.text_save_timer)
+        self.text_save_timer=self.after(300,self.flush_transcript_edits)
+
+    def flush_transcript_edits(self):
+        self.text_save_timer=None
+        self.save_visible_texts()
 
     def reset_filters(self):
         self.topic_filter.set('Todos os tipos')
@@ -312,8 +312,6 @@ class Studio(tk.Tk):
         for row in rows:
             if row['wav'] in self.local_original_text:row['transcript']=self.local_original_text[row['wav']]
             if row['source_key'] in self.local_source_text:row['source_transcript']=self.local_source_text[row['source_key']]
-            if request['name'] not in self.conversion_cache and request['name']!='Tiago Leifert' and row['source_key']:
-                row['conversion']='Verificando conversão'
         self.counts=data['counts'];self.converted=data['converted'];self.display_coverage();self.data_loaded=True
         self.originals={row['key']:row for row in rows}
         self.loaded_profile=self.profile.get()
@@ -323,13 +321,12 @@ class Studio(tk.Tk):
         for row in rows:
             self.left.insert('','end',iid=row['key'],values=(f"{row['topic']} · {row['row']}",row['transcript'] or '[Transcrição pendente]'))
             filename=Path(row['source_path']).name if row['source_path'] else '＋ Importar áudio'
-            situation={'Sem áudio próprio':'Sem substituto · usa original','A converter':'Substituído · falta converter','Convertido':'Convertido · pronto no jogo'}.get(row['conversion'],row['conversion'])
             uses=row.get('source_uses',0)
             reuse=(' · Usado '+str(uses)+' vezes' if uses>1 else ' · Uso único' if uses else '')
             reviewed=bool(row.get('reviewed')) and bool(row['source_key'])
             check='☑' if reviewed else '☐' if row['source_key'] and request['name']!='Tiago Leifert' else '—'
             tags=('approved',) if reviewed else ()
-            self.right.insert('','end',iid=row['key'],values=(check,situation+reuse+' · '+filename,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem substituto]')),tags=tags)
+            self.right.insert('','end',iid=row['key'],values=(check,filename+reuse,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem substituto]')),tags=tags)
         page=self.offset//500+1;pages=max(1,(self.total_rows+499)//500)
         first=self.offset+1 if rows else 0;last=self.offset+len(rows)
         self.progress.set(f'Página {page} de {pages} · {number(first)}–{number(last)} de {number(self.total_rows)}')
@@ -387,8 +384,7 @@ class Studio(tk.Tk):
             if not selected:return
             window.destroy()
             def task():
-                for key in selected:assign(name,key,source['key'],method='manual',score=1)
-                projects.save(name);return f'Gravação aplicada a {len(selected)} referências selecionadas.'
+                projects.assign_audio(name,selected,source['key']);return f'Gravação salva no jogo em {len(selected)} referências selecionadas.'
             self.job(task)
         ttk.Button(window,text='Aplicar às variações selecionadas',command=apply).pack(fill='x',padx=14,pady=(0,14))
 
@@ -406,7 +402,7 @@ class Studio(tk.Tk):
     def schedule_autosave(self,name=None):
         name=name or self.loaded_profile or self.profile.get()
         if not name or name=='Tiago Leifert':return
-        self.autosave_requested=name
+        if name not in self.autosave_requested:self.autosave_requested.append(name)
         if self.autosave_timer:
             try:self.after_cancel(self.autosave_timer)
             except tk.TclError:pass
@@ -417,7 +413,7 @@ class Studio(tk.Tk):
         if not self.autosave_requested:return
         if self.busy or self.autosave_running:
             self.autosave_timer=self.after(500,self._start_autosave);return
-        name=self.autosave_requested;self.autosave_requested=None;self.autosave_running=True
+        name=self.autosave_requested.pop(0);self.autosave_running=True
         def save():
             try:
                 self.write_requests.join()
@@ -460,15 +456,19 @@ class Studio(tk.Tk):
         if self.current_key and self.current_key!=key: self.save_visible_texts()
         self.current_key=key
         original=self.originals.get(key); source=self.sources.get(key)
+        self._displaying_text=True
         for widget,text in ((self.original_text,original['transcript'] if original else ''),(self.source_text,source['transcript'] if source else '')):
             widget.configure(state='normal')
-            widget.delete('1.0','end'); widget.insert('1.0',text); widget.edit_modified(False)
+            if widget.get('1.0','end-1c')!=text:
+                widget.delete('1.0','end');widget.insert('1.0',text)
+            widget.edit_modified(False)
+        self._displaying_text=False
         self.left_player.set_source(original['wav'] if original else None)
         self.right_player.set_source(source['path'] if source else None)
         self.source_text.configure(state='normal' if source else 'disabled')
         if original:
-            self.reference.set(f"{original['topic']} · variante {original['row']} · referência {original['sound_id']:08x}")
-            self.status.set(f"{original['event']} · original {original['duration']:.2f}s · {original['conversion']} · {original['bank']}")
+            self.reference.set(f"{original['topic']} · variante {original['row']} · referência {(original['sound_id'] or 0):08x}")
+            self.status.set(f"{original['event']} · original {(original['duration'] or 0):.2f}s · edições salvas automaticamente")
         else: self.reference.set('Nenhuma ocorrência neste filtro.')
 
     def play_original(self): self.left_player.toggle()
@@ -500,7 +500,7 @@ class Studio(tk.Tk):
         def task():
             db=connect()
             db.execute('DELETE FROM mappings WHERE profile=? AND clip IN (SELECT key FROM clips WHERE bank=? AND offset=?)',(name,row['bank'],row['offset']));db.commit();db.close()
-            projects.save(name);return 'Esta fala voltou a usar o áudio original.'
+            projects.apply_changes(name,[row['key']]);projects.save(name);return 'Esta fala voltou a usar o áudio original. O pacote do jogo já foi atualizado.'
         self.job(task)
 
     def import_audio(self):
@@ -511,11 +511,11 @@ class Studio(tk.Tk):
         paths=filedialog.askopenfilenames(title='Importar áudio para esta ocorrência',filetypes=[('Áudio','*.wav *.mp3 *.flac *.ogg *.m4a'),('Todos','*.*')])
         if not paths: return
         def task():
-            folder=USER_AUDIO_ROOT/projects.safe_name(name)/'Áudios individuais'; folder.mkdir(parents=True,exist_ok=True)
+            folder=projects.assets_folder(name)/'Importados'; folder.mkdir(parents=True,exist_ok=True)
             imported=[]
             for path in paths:
                 source=Path(path).expanduser().resolve()
-                try:source.relative_to(USER_AUDIO_ROOT.resolve());managed=True
+                try:source.relative_to(projects.assets_folder(name).resolve());managed=True
                 except ValueError:managed=False
                 target=source if managed else folder/(hashlib.sha256(str(source).encode()).hexdigest()[:8]+'_'+source.name)
                 if not managed:
@@ -528,7 +528,7 @@ class Studio(tk.Tk):
                 import_sources(name,target)
             if len(imported)==1:
                 db=connect(); row=db.execute('SELECT key FROM sources WHERE narrator=? AND path=?',(name,imported[0])).fetchone(); db.close()
-                assign(name,original['key'],row['key']); result='Áudio importado e colocado nesta ocorrência. Você já pode ouvir sua narração.'
+                result=projects.assign_audio(name,original['key'],row['key'])
             else: result='Áudios importados. Use Escolher da biblioteca para colocá-los nas falas desejadas.'
             projects.save(name); return result
         self.job(task)
@@ -579,7 +579,7 @@ class Studio(tk.Tk):
         def choose():
             row=self.selected(tree,rows)
             if not row: return
-            assign(name,original['key'],row['key']); close(); self.job(lambda:projects.save(name))
+            key=row['key'];close();self.job(lambda:projects.assign_audio(name,original['key'],key))
         ttk.Button(footer,text='Usar na ocorrência selecionada',command=choose).pack(side='right')
         window.protocol('WM_DELETE_WINDOW',close); load()
 
@@ -600,12 +600,13 @@ class Studio(tk.Tk):
         name=self.profile.get(); self.job(lambda:projects.build(name))
 
     def save_visible_texts(self):
+        if self.library_panel:self.library_panel.flush_text()
         if not self.original_text.edit_modified() and not self.source_text.edit_modified(): return
         original=self.originals.get(self.current_key); source=self.sources.get(self.current_key)
         queries=[]
         if original and self.original_text.edit_modified():
             text=self.original_text.get('1.0','end').strip()
-            queries.append(('UPDATE clips SET transcript=? WHERE wav=?',(text,original['wav'])))
+            queries.append(('@transcript',('clips',original['key'],text)))
             self.local_original_text[original['wav']]=text
             for key,item in self.originals.items():
                 if item['wav']==original['wav']:
@@ -614,11 +615,12 @@ class Studio(tk.Tk):
         if source and self.source_text.edit_modified():
             text=self.source_text.get('1.0','end').strip()
             if self.loaded_profile=='Tiago Leifert':
-                queries.append(('UPDATE clips SET transcript=? WHERE wav=?',(text,source['path'])))
+                queries.append(('@transcript',('clips',source['key'],text)))
                 self.local_original_text[source['path']]=text
             else:
-                queries.append(('UPDATE sources SET transcript=?,confidence=0,topic=? WHERE key=?',(text,topic(source['event'],source['path'],text),source['key'])))
+                queries.append(('@transcript',('sources',source['key'],text)))
                 self.local_source_text[source['key']]=text
+                if self.library_panel:self.library_panel.sync_transcript(source['key'],text)
             for key,item in self.sources.items():
                 if item['key']==source['key']:
                     item['transcript']=text
@@ -659,7 +661,7 @@ class Studio(tk.Tk):
                     projects.clone(name,target)
                     if portrait.get() and (projects.folder(name)/portrait.get()).is_file(): shutil.copy2(projects.folder(name)/portrait.get(),projects.folder(target)/'portrait.png')
                 projects.save(target,commentator.get(),[available[i]['id'] for i in choices.curselection()],portrait.get())
-                self.profile_box['values']=projects.names(); self.profile.set(target); window.destroy(); self.change_profile(); self.status.set('Configuração salva. Converta e instale para aplicar no jogo.')
+                self.profile_box['values']=projects.names(); self.profile.set(target); window.destroy(); self.change_profile(); self.status.set('Configuração salva automaticamente na pasta do narrador no jogo.')
             except ValueError as exc: messagebox.showerror('Projeto',str(exc),parent=window)
         ttk.Button(window,text='Salvar configuração do projeto',command=commit).pack(fill='x',padx=18,pady=14)
 
@@ -675,7 +677,8 @@ class Studio(tk.Tk):
         command=[str(worker)] if worker.exists() else [str(CODE_ROOT/'.venv/Scripts/python.exe'),str(CODE_ROOT/'transcription_worker.py')]
         env=dict(__import__('os').environ)
         config=WORK/'worker_config.json';config.parent.mkdir(parents=True,exist_ok=True)
-        config.write_text(json.dumps(dict(game=str(GAME),catalog_root=str(WORK),projects=str(PROJECTS),source_root=str(SOURCE_ROOT),whisper_model=str(WHISPER_MODEL)),ensure_ascii=False),encoding='utf8')
+        from atomic_io import write_json
+        write_json(config,dict(game=str(GAME),catalog_root=str(WORK),projects=str(PROJECTS),source_root=str(SOURCE_ROOT),user_audio_root=str(USER_AUDIO_ROOT),whisper_model=str(WHISPER_MODEL)))
         env['F16_NARRATION_CONFIG']=str(config)
         result=subprocess.run(command+args,capture_output=True,env=env,creationflags=0x08000000)
         if result.returncode: raise ValueError(result.stderr.decode('utf8',errors='replace')[-1200:])
@@ -718,7 +721,7 @@ class Studio(tk.Tk):
             while True:
                 name,error=self.autosave_results.get_nowait();self.autosave_running=False
                 if error:self.status.set('Falha no salvamento automático: '+error)
-                elif name==self.profile.get():self.status.set(f'Edição salva automaticamente em Narrations\\{name}\\Studio. Use “Gerar áudio e instalar no jogo” para atualizar a voz da partida.')
+                elif name==self.profile.get():self.status.set(f'Edição salva automaticamente em Narrations\\{name}\\Studio.')
                 if self.autosave_requested and not self.autosave_timer:self.autosave_timer=self.after(300,self._start_autosave)
         except queue.Empty:pass
         try:
@@ -751,6 +754,9 @@ class Studio(tk.Tk):
         except queue.Empty:pass
         self.data_requests.put_nowait(None)
         for player in self.players: player.shutdown()
+        for callback in self.tk.splitlist(self.tk.call('after','info')):
+            try:self.after_cancel(callback)
+            except tk.TclError:pass
         self.destroy()
 
 
