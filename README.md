@@ -7,7 +7,7 @@ Painel para configurar partidas do FIFA 16, escolher estádios e administrar apr
 | Recurso | Funcionamento |
 |---|---|
 | **Configurações da partida** | Liga ou desliga mascotes, pirotecnia, fogos na entrada, fogos nos gols e objetos de abertura da competição. Aplicar salva; Voltar cancela. |
-| **Objetos de abertura** | Prepara o conjunto pelo ID da competição e da fase antes de aplicar estádio e placar. O padrão é Sim. Modelo ausente ou inválido deixa a partida sem o conjunto. |
+| **Objetos de abertura** | Prepara o conjunto pelo ID da competição e da fase. Em amistosos, dois clubes da mesma liga usam a entrada dessa liga. O padrão é Sim; modelo ausente ou inválido deixa a partida sem o conjunto. |
 | **Estádio** | Escolha para o confronto com busca, prévia e navegação por teclado, mouse ou controle. |
 | **Placar e TV** | Usa os pacotes associados à competição e à fase. |
 | **Público** | Ajusta a ocupação quando o módulo nativo confirma a comunicação. |

@@ -2917,6 +2917,8 @@ class Server16App(tk.Tk):
                 return
             self.team_db = db
             self.discord_rpc.set_team_name_resolver(self.team_db.get_team_name)
+            if self.HID and self.AID:
+                self.entrance_props_runtime.prepare_match()
             self.log(f" Team database loaded for {fifa_root.name} ({team_count} teams)")
             _report_progress(100, f"{self.progress_text('database_ready')} ({team_count} teams)")
             if not self.memory.is_open():
@@ -3671,6 +3673,8 @@ class Server16App(tk.Tk):
         return post_match_page(page_name)
 
     def _clear_live_context(self) -> None:
+        if getattr(self, 'entrance_props_runtime', None) is not None:
+            self.entrance_props_runtime.clear_context()
         self.HID = ""
         self.AID = ""
         self.audio_profiles.sync()
