@@ -1,7 +1,7 @@
 """Editable projects separate from deployed game packages."""
 from pathlib import Path
 import collections,concurrent.futures,hashlib,json,os,shutil,struct,subprocess,wave
-from core import connect,GAME,WORK,PROJECTS,VGM,import_sources
+from core import connect,GAME,WORK,PROJECTS,VGM,USER_AUDIO_ROOT,import_sources
 from server16_py.narration_paths import narration_root, profile_directory, profile_directories
 from profiles import compile_profile,assign
 
@@ -33,6 +33,7 @@ def _mirror_editable_project(name,dest):
 
 def save(name,commentator=None,competitions=None,portrait=None):
     dest=folder(name);dest.mkdir(parents=True,exist_ok=True)
+    if name!='Tiago Leifert':(USER_AUDIO_ROOT/safe_name(name)).mkdir(parents=True,exist_ok=True)
     data=metadata(name);data.update(name=name,format='FIFA16NarrationProject',version=1)
     data.setdefault('template','Tiago Leifert')
     data.setdefault('template_commentator','Caio Ribeiro')

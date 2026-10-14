@@ -356,6 +356,26 @@ def import_sources(narrator, root):
     print('sources',narrator,count,flush=True)
     return count
 
+def remove_source_asset(narrator, key, managed_root):
+    """Remove one narrator asset and its mappings; only delete managed audio files."""
+    db=connect()
+    try:
+        row=db.execute('SELECT path FROM sources WHERE key=? AND narrator=?',(key,narrator)).fetchone()
+        if row is None:raise ValueError('Este áudio não está na biblioteca do narrador ativo.')
+        path=Path(row['path']).expanduser().resolve()
+        profiles=[item['profile'] for item in db.execute('SELECT DISTINCT profile FROM mappings WHERE source=?',(key,))]
+        db.execute('DELETE FROM mappings WHERE source=?',(key,))
+        db.execute('DELETE FROM sources WHERE key=? AND narrator=?',(key,narrator))
+        db.commit()
+    finally:db.close()
+    deleted_file=False;delete_error=''
+    if _inside_directory(path,managed_root):
+        deleted_file=True
+        for candidate in {path,Path(str(path)+'.txt'),path.with_suffix('.txt')}:
+            try:candidate.unlink(missing_ok=True)
+            except OSError as exc:delete_error=str(exc)
+    return dict(path=path,profiles=profiles,deleted_file=deleted_file,delete_error=delete_error)
+
 if __name__=='__main__':
     import argparse
     parser=argparse.ArgumentParser(); parser.add_argument('action',choices=['inventory','decode','import']); args=parser.parse_args()

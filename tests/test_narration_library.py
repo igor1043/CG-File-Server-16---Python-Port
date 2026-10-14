@@ -53,6 +53,33 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual((repeated,count),(target,1))
             self.assertEqual(len(list(managed.iterdir())),1)
 
+    def test_removing_managed_asset_clears_mappings_and_deletes_only_its_sidecars(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);managed=root/'assets'/'Custom';managed.mkdir(parents=True)
+            audio=managed/'fala.wav';audio.write_bytes(b'audio');audio.with_suffix('.wav.txt').write_text('Transcrição')
+            catalog=root/'catalog.sqlite';original_connect=core.connect
+            with patch.object(core,'connect',lambda:original_connect(catalog)):
+                db=original_connect(catalog)
+                db.execute('INSERT INTO sources(key,narrator,path) VALUES (?,?,?)',('asset','Custom',str(audio)))
+                db.execute('INSERT INTO mappings VALUES (?,?,?,?,?)',('Custom','clip','asset','manual',1))
+                db.commit();db.close()
+                result=core.remove_source_asset('Custom','asset',managed)
+                self.assertTrue(result['deleted_file']);self.assertFalse(result['delete_error'])
+                self.assertEqual(result['profiles'],['Custom'])
+                self.assertFalse(audio.exists());self.assertFalse(audio.with_suffix('.wav.txt').exists())
+                db=original_connect(catalog)
+                self.assertEqual(db.execute('SELECT count(*) FROM sources').fetchone()[0],0)
+                self.assertEqual(db.execute('SELECT count(*) FROM mappings').fetchone()[0],0);db.close()
+
+    def test_removing_external_asset_keeps_original_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);audio=root/'originals'/'fala.mp3';audio.parent.mkdir();audio.write_bytes(b'original')
+            catalog=root/'catalog.sqlite';original_connect=core.connect
+            with patch.object(core,'connect',lambda:original_connect(catalog)):
+                db=original_connect(catalog);db.execute('INSERT INTO sources(key,narrator,path) VALUES (?,?,?)',('asset','Custom',str(audio)));db.commit();db.close()
+                result=core.remove_source_asset('Custom','asset',root/'managed'/'Custom')
+                self.assertFalse(result['deleted_file']);self.assertTrue(audio.exists())
+
     def test_existing_transcripts_export_beside_audio_without_loading_ai(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);audio=root/'recordings'/'fala.mp3';audio.parent.mkdir();audio.write_bytes(b'unchanged')

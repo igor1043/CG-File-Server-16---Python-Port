@@ -35,7 +35,17 @@ class Studio(tk.Tk):
         self.queue=queue.Queue(); self.busy=False; self.offset=0
         self.profile=tk.StringVar(value=initial_profile or 'Vilani')
         self.original_search=tk.StringVar(); self.source_search=tk.StringVar(); self.topic_filter=tk.StringVar(value='Todos os tipos')
-        self.state_filter=tk.StringVar(value='Todos')
+        self.state_options={
+            'Todas as falas':'Todos',
+            'Sem áudio substituto (usa o original)':'Sem áudio próprio',
+            'Já substituídos (com áudio próprio)':'Com áudio próprio',
+            'Convertidos e prontos no jogo':'Já convertidos',
+            'Substituídos, aguardando conversão':'Com áudio, a converter',
+            'Não convertidos (inclui sem substituto)':'Ainda não convertidos',
+            'Aprovados':'Revisados/aprovados',
+            'Sugestões para revisar':'Sugestões para revisar',
+        }
+        self.state_filter=tk.StringVar(value='Todas as falas')
         self.status=tk.StringVar(value='Selecione uma linha: original e sua narração ficam na mesma ocorrência.')
         self.progress=tk.StringVar(); self.original_count=tk.StringVar(); self.custom_count=tk.StringVar()
         self.originals={}; self.sources={}; self.current_key=None; self.refresh_job=None; self.loaded_profile=self.profile.get(); self.players=[]
@@ -64,9 +74,10 @@ class Studio(tk.Tk):
         ttk.Label(filters,text='Tipo de ocorrência (filtra as duas colunas):').pack(side='left',padx=(0,6))
         self.topic_box=ttk.Combobox(filters,textvariable=self.topic_filter,state='readonly',width=38)
         self.topic_box.pack(side='left'); self.topic_box.bind('<<ComboboxSelected>>',lambda e:self.refresh_original())
-        ttk.Label(filters,text='Mostrar:').pack(side='left',padx=(10,6))
-        states=ttk.Combobox(filters,textvariable=self.state_filter,values=['Todos','Sem áudio próprio','Com áudio próprio','Já convertidos','Ainda não convertidos','Com áudio, a converter','Revisados/aprovados','Sugestões para revisar'],state='readonly',width=22)
+        ttk.Label(filters,text='Situação do áudio:').pack(side='left',padx=(10,6))
+        states=ttk.Combobox(filters,textvariable=self.state_filter,values=list(self.state_options),state='readonly',width=37)
         states.pack(side='left'); states.bind('<<ComboboxSelected>>',lambda e:self.refresh_original())
+        ttk.Button(filters,text='Limpar filtros',command=self.reset_filters).pack(side='left',padx=(8,0))
         nav=ttk.Frame(self,padding=(14,0,14,5)); nav.pack(fill='x')
         ttk.Button(nav,text='← Anteriores',command=lambda:self.page(-500)).pack(side='left')
         ttk.Button(nav,text='Próximas →',command=lambda:self.page(500)).pack(side='left',padx=6)
@@ -123,7 +134,7 @@ class Studio(tk.Tk):
         self.import_button=ttk.Button(imports,text='＋ Importar MP3 / WAV',command=self.import_audio)
         self.import_button.pack(side='left')
         ttk.Button(imports,text='Escolher da biblioteca',command=self.show_library).pack(side='left',padx=6)
-        ttk.Button(imports,text='Usar original',command=self.clear_link).pack(side='left')
+        ttk.Button(imports,text='Restaurar áudio original',command=self.clear_link).pack(side='left')
         review=ttk.Frame(rbuttons);review.grid(row=2,column=0,columnspan=2,sticky='ew',pady=(6,0))
         ttk.Label(review,text='Clique em ☐ na lista para aprovar; a linha aprovada fica verde.').pack(side='left')
         ttk.Button(review,text='Repetir nas variações…',command=self.repeat_variations).pack(side='right',padx=6)
@@ -149,7 +160,7 @@ class Studio(tk.Tk):
     def request_data(self,recount=False):
         self.data_generation+=1
         request=dict(generation=self.data_generation,name=self.profile.get(),original_query=self.original_search.get(),source_query=self.source_search.get(),category=self.category(),
-                     offset=self.offset,state=self.state_filter.get(),recount=recount,selected=self.current_key)
+                     offset=self.offset,state=self.state_options.get(self.state_filter.get(),'Todos'),recount=recount,selected=self.current_key)
         try:self.data_requests.get_nowait()
         except queue.Empty:pass
         self.data_requests.put_nowait(request)
@@ -279,6 +290,13 @@ class Studio(tk.Tk):
         if self.refresh_job: self.after_cancel(self.refresh_job)
         self.refresh_job=self.after(350,self.refresh_original)
 
+    def reset_filters(self):
+        self.topic_filter.set('Todos os tipos')
+        self.state_filter.set('Todas as falas')
+        self.original_search.set('')
+        self.source_search.set('')
+        self.schedule_refresh()
+
     def refresh_original(self):
         self.refresh_job=None; self.offset=0; self.load_original()
 
@@ -304,14 +322,17 @@ class Studio(tk.Tk):
         self.left.delete(*self.left.get_children()); self.right.delete(*self.right.get_children())
         for row in rows:
             self.left.insert('','end',iid=row['key'],values=(f"{row['topic']} · {row['row']}",row['transcript'] or '[Transcrição pendente]'))
-            filename=Path(row['source_path']).name if row['source_path'] else '＋ Importar áudio nesta fala'
+            filename=Path(row['source_path']).name if row['source_path'] else '＋ Importar áudio'
+            situation={'Sem áudio próprio':'Sem substituto · usa original','A converter':'Substituído · falta converter','Convertido':'Convertido · pronto no jogo'}.get(row['conversion'],row['conversion'])
             uses=row.get('source_uses',0)
             reuse=(' · Usado '+str(uses)+' vezes' if uses>1 else ' · Uso único' if uses else '')
             reviewed=bool(row.get('reviewed')) and bool(row['source_key'])
             check='☑' if reviewed else '☐' if row['source_key'] and request['name']!='Tiago Leifert' else '—'
             tags=('approved',) if reviewed else ()
-            self.right.insert('','end',iid=row['key'],values=(check,row['conversion']+reuse+' · '+filename,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem áudio próprio]')),tags=tags)
-        self.progress.set(f'{number(self.offset+1 if rows else 0)}–{number(self.offset+len(rows))} de {number(self.total_rows)}')
+            self.right.insert('','end',iid=row['key'],values=(check,situation+reuse+' · '+filename,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem substituto]')),tags=tags)
+        page=self.offset//500+1;pages=max(1,(self.total_rows+499)//500)
+        first=self.offset+1 if rows else 0;last=self.offset+len(rows)
+        self.progress.set(f'Página {page} de {pages} · {number(first)}–{number(last)} de {number(self.total_rows)}')
         self.custom_title.configure(text='Sua narração · '+self.profile.get()); self.show_counts()
         if rows:
             key=previous if previous in self.originals else rows[0]['key']
@@ -469,6 +490,12 @@ class Studio(tk.Tk):
     def clear_link(self):
         row=self.originals.get(self.current_key)
         if not row or self.profile.get()=='Tiago Leifert': return
+        if row.get('source_key') and not messagebox.askyesno(
+            'Restaurar áudio original',
+            'Remover o áudio substituto desta fala e voltar ao áudio original do FIFA 16?',
+            parent=self,
+        ):
+            return
         name=self.profile.get();self.save_visible_texts()
         def task():
             db=connect()
