@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 import json, struct, subprocess, wave, hashlib, collections, re
 from concurrent.futures import ThreadPoolExecutor,as_completed
-from core import connect, GAME, TOOL, SX, VGM, WORK,FFMPEG
+from core import connect, GAME, NARRATIONS, TOOL, SX, VGM, WORK,FFMPEG
+from server16_py.narration_paths import profile_directory
 
-ROOT=GAME/'Narrations'
+ROOT=NARRATIONS
 
 def assign(profile, clip, source, method='manual', score=1):
     db=connect()
@@ -53,7 +54,7 @@ def encoded(source, destination, bitrate=16000, fallback=None):
     wav.unlink();verify.unlink();return sps.read_bytes()
 
 def compile_profile(name, limit=0, destination=None):
-    db=connect(); dest=Path(destination) if destination else ROOT/name; dest.mkdir(parents=True,exist_ok=True)
+    db=connect(); dest=Path(destination) if destination else profile_directory(GAME,name); dest.mkdir(parents=True,exist_ok=True)
     rows=db.execute('''SELECT c.*,b.name AS bank_name,b.active,s.path,s.transcript AS source_transcript,m.method,m.score FROM mappings m
         JOIN clips c ON m.clip=c.key JOIN banks b ON b.key=c.bank JOIN sources s ON s.key=m.source WHERE m.profile=? AND b.active=1
         ORDER BY (c.event='bINTRO_HELLO_SHORT') DESC, m.score DESC,c.bank,c.offset''',(name,)).fetchall()

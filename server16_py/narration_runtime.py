@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes, mmap, os, json, subprocess, time, threading, queue
 from pathlib import Path
 from .narration_competitions import choose_profile
+from .narration_paths import narration_root, profile_directories
 MAPPING_NAME='Local\\FIFA16_Narration_v1'
 
 def load_preferences(path):
@@ -39,7 +40,7 @@ class NarrationShared(ctypes.Structure):
 
 class NarrationRuntime:
     def __init__(self,app):
-        self.app=app;self.root=Path(getattr(app,'exedir',app.base_dir))/'Narrations'
+        self.app=app;self.root=narration_root(getattr(app,'exedir',app.base_dir))
         self.preferences_path=self.root.parent/'FSW/narration_settings.json'
         self.default_narrator=load_preferences(self.preferences_path).get('default_narrator','Tiago Leifert')
         self.mapping=mmap.mmap(-1,ctypes.sizeof(NarrationShared),tagname=MAPPING_NAME)
@@ -60,20 +61,19 @@ class NarrationRuntime:
         if self._profiles_cache is not None and time.monotonic()<self._profiles_until:
             return self._profiles_cache
         result=[]
-        if self.root.is_dir():
-            for folder in self.root.iterdir():
-                try:
-                    meta=json.loads((folder/'profile.json').read_text(encoding='utf8'))
-                    metadata=folder/'narrator.txt'
-                    if metadata.exists():
-                        values=dict(line.split('=',1) for line in metadata.read_text(encoding='utf-8-sig').splitlines() if '=' in line)
-                        meta['name']=values.get('Narrador',meta['name']).strip() or meta['name']
-                        meta['commentator']=values.get('Comentarista',meta.get('commentator','')).strip()
-                    package=(folder/meta.get('package','profile.npack')).resolve()
-                    if package.parent!=folder.resolve() or not package.is_file():continue
-                    portrait=(folder/meta.get('portrait','portrait.png')).resolve()
-                    result.append(dict(name=meta['name'],commentator=meta.get('commentator',''),path=package,mapped=meta.get('mapped',0),competitions=meta.get('competitions',[]),portrait=str(portrait) if portrait.parent==folder.resolve() and portrait.is_file() else ''))
-                except (OSError,ValueError,KeyError):continue
+        for folder in profile_directories(self.root):
+            try:
+                meta=json.loads((folder/'profile.json').read_text(encoding='utf8'))
+                metadata=folder/'narrator.txt'
+                if metadata.exists():
+                    values=dict(line.split('=',1) for line in metadata.read_text(encoding='utf-8-sig').splitlines() if '=' in line)
+                    meta['name']=values.get('Narrador',meta['name']).strip() or meta['name']
+                    meta['commentator']=values.get('Comentarista',meta.get('commentator','')).strip()
+                package=(folder/meta.get('package','profile.npack')).resolve()
+                if package.parent!=folder.resolve() or not package.is_file():continue
+                portrait=(folder/meta.get('portrait','portrait.png')).resolve()
+                result.append(dict(name=meta['name'],commentator=meta.get('commentator',''),path=package,mapped=meta.get('mapped',0),competitions=meta.get('competitions',[]),portrait=str(portrait) if portrait.parent==folder.resolve() and portrait.is_file() else ''))
+            except (OSError,ValueError,KeyError):continue
         self._profiles_until=time.monotonic()+2
         self._profiles_cache=sorted(result,key=lambda r:({'Tiago Leifert':0,'Vilani':1,'Luiz Roberto':2}.get(r['name'],3),r['name']))
         return self._profiles_cache

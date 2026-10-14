@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 import unicodedata
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from server16_py.narration_bank import BigArchive, HarmonyBank, sps_size
+from server16_py.narration_paths import narration_root
 
 APP_ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 RESOURCE_ROOT=Path(getattr(sys,'_MEIPASS',APP_ROOT))
@@ -23,8 +24,9 @@ def configured_path(key, default):
 GAME=configured_path('game',str(APP_ROOT))
 LOCAL_GAME=(GAME/'fifa16.exe').is_file()
 TOOL=configured_path('audio_tool',str(APP_ROOT/'FIFA16AudioTool'))
-WORK=configured_path('catalog_root',str(GAME/'Narrations/.studio' if LOCAL_GAME else APP_ROOT/'Projects/.studio'))
-PROJECTS=configured_path('projects',str(GAME/'Narrations' if LOCAL_GAME else APP_ROOT/'Projects'))
+NARRATIONS=narration_root(GAME)
+WORK=configured_path('catalog_root',str(GAME/'NarrationStudio/Catalog' if LOCAL_GAME else APP_ROOT/'Projects/.studio'))
+PROJECTS=configured_path('projects',str(GAME/'NarrationStudio/Projects' if LOCAL_GAME else APP_ROOT/'Projects'))
 SOURCE_ROOT=configured_path('source_root',str(CONFIG_PATH.parent))
 WHISPER_MODEL=configured_path('whisper_model',str(RESOURCE_ROOT/'models/faster-whisper-small'))
 DB = WORK/'catalog.sqlite'

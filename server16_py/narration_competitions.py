@@ -1,6 +1,7 @@
 """Competition identities from Server configuration; names never replace IDs."""
 from pathlib import Path
 import configparser,json,random,re
+from .narration_paths import narration_root
 
 def competitions(game):
     ini=configparser.ConfigParser(interpolation=None,strict=False);ini.optionxform=str
@@ -15,7 +16,7 @@ def competitions(game):
                 lines=[line for line in match[1].splitlines() if '=' in line and line.split('=',1)[0].strip() and not line.lstrip().startswith((';','#'))]
                 ini.read_string('['+section+']\n'+'\n'.join(lines))
     names={}
-    for candidate in (Path(game)/'Narrations/competition_names.json',):
+    for candidate in (narration_root(game)/'competition_names.json',):
         if candidate.exists():names.update(json.loads(candidate.read_text(encoding='utf8')))
     keys=dict(ini.items('comp')) if ini.has_section('comp') else {}
     for section in ('movies','Scoreboard'):

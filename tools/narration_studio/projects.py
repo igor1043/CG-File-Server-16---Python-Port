@@ -2,6 +2,7 @@
 from pathlib import Path
 import collections,concurrent.futures,hashlib,json,os,shutil,struct,subprocess,wave
 from core import connect,GAME,WORK,PROJECTS,VGM,import_sources
+from server16_py.narration_paths import narration_root, profile_directory, profile_directories
 from profiles import compile_profile,assign
 
 def safe_name(name):
@@ -13,7 +14,7 @@ def safe_name(name):
 def folder(name):return PROJECTS/safe_name(name)
 
 def metadata(name):
-    for path in (folder(name)/'project.json',GAME/'Narrations'/name/'profile.json'):
+    for path in (folder(name)/'project.json',profile_directory(GAME,name)/'profile.json'):
         if path.exists():return json.loads(path.read_text(encoding='utf8'))
     return dict(name=name,commentator='',competitions=[])
 
@@ -47,8 +48,8 @@ def new(name,commentator='',competitions=None):
 
 def names():
     result={'Tiago Leifert','Vilani','Luiz Roberto'}
-    for root,marker in ((PROJECTS,'project.json'),(GAME/'Narrations','profile.json')):
-        if root.exists():result.update(p.name for p in root.iterdir() if p.is_dir() and (p/marker).exists())
+    if PROJECTS.exists():result.update(p.name for p in PROJECTS.iterdir() if p.is_dir() and (p/'project.json').exists())
+    result.update(path.name for path in profile_directories(narration_root(GAME)))
     return sorted(result,key=lambda n:({'Tiago Leifert':0,'Vilani':1,'Luiz Roberto':2}.get(n,3),n))
 
 def clone(original,name):
@@ -70,14 +71,21 @@ def build(name):
     (export/'profile.json').write_text(json.dumps({k:v for k,v in data.items() if k not in ('mappings','format')},ensure_ascii=False,indent=2),encoding='utf8')
     compile_profile(name,destination=export)
     if json.loads((export/'profile.json').read_text(encoding='utf8'))['failed']:raise ValueError('A geração encontrou falhas. Confira build_report.json; o pacote instalado foi preservado.')
-    deployed=GAME/'Narrations'/name;deployed.mkdir(parents=True,exist_ok=True)
-    for source in export.iterdir():
-        if source.is_file():
-            temporary=deployed/(source.name+'.new');shutil.copy2(source,temporary);temporary.replace(deployed/source.name)
-    if project.resolve()!=deployed.resolve():
-        shutil.copy2(project/'project.json',deployed/'project.json')
-        shutil.copytree(project/'transcriptions',deployed/'transcriptions',dirs_exist_ok=True)
+    deployed=install_profile(export,name,GAME)
     return f'Pacote criado e instalado: {deployed}. Aplique o narrador na prévia.'
+
+def install_profile(export,name,game_root):
+    """Install only assets consumed by the game; keep editing data in Studio."""
+    export=Path(export)
+    deployed=profile_directory(game_root,name)
+    deployed.mkdir(parents=True,exist_ok=True)
+    for filename in ('profile.npack','profile.json','narrator.txt','portrait.png'):
+        source=export/filename
+        if source.is_file():
+            temporary=deployed/(filename+'.new')
+            shutil.copy2(source,temporary)
+            temporary.replace(deployed/filename)
+    return deployed
 
 def unpack(package):
     """Streaming reader: preserve complete SPS, validate before extraction."""

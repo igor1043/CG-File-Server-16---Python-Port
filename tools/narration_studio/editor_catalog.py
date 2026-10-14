@@ -2,6 +2,7 @@
 from pathlib import Path
 import json,os,collections
 from core import connect, GAME, PROJECTS
+from server16_py.narration_paths import profile_directory
 
 
 def source_signature(path):
@@ -12,7 +13,7 @@ def source_signature(path):
 def converted_keys(name):
     """Only count sources contained in a package and unchanged since conversion."""
     reports = []
-    for root in (PROJECTS / name / 'build', GAME / 'Narrations' / name):
+    for root in (PROJECTS / name / 'build', profile_directory(GAME,name)):
         report, package = root / 'build_report.json', root / 'profile.npack'
         if report.is_file() and package.is_file():
             reports.append((report.stat().st_mtime_ns, report, package))

@@ -9,21 +9,23 @@ verdes, são filtráveis e acompanham o projeto salvo.
 
 ## Uso portátil
 
-Execute `NarrationStudio.exe` no pacote fornecido. Na primeira abertura, escolha
-a pasta raiz do FIFA 16 (a que contém `fifa16.exe`). No pacote de trabalho, o
-catálogo fica em `03 - CATÁLOGO ORIGINAL FIFA 16\Catálogo editável\.studio`, o
-modelo Whisper em `02 - EDITOR DE NARRAÇÕES\Modelo IA` e os projetos em
-`02 - EDITOR DE NARRAÇÕES\Projetos`. As pastas podem ser movidas juntas para
-outro disco; caminhos do computador de origem são convertidos na primeira
-abertura. O pacote inclui `bin` com FFmpeg, vgmstream e EA Sound, além do modelo
-local, então importar, converter e transcrever não exigem downloads separados.
+Execute `NarrationStudio.exe` na pasta `Narration Studio`. Na primeira abertura,
+escolha a pasta raiz do FIFA 16 (a que contém `fifa16.exe`). O catálogo fica em
+`Catálogo Original FIFA 16\Catálogo editável\.studio`, o modelo Whisper em
+`Narration Studio\Modelo IA` e os projetos em `Narration Studio\Projetos`.
+Mantenha essas quatro pastas lado a lado ao mover o pacote; os caminhos antigos
+são atualizados automaticamente. O pacote inclui `bin` com FFmpeg, vgmstream e
+EA Sound, além do modelo local, então importar, converter e transcrever não
+exigem downloads separados.
 
 Se executar o editor fora do pacote, ele também pode ficar ao lado de
 `fifa16.exe`. A configuração salva em `studio_config.json` aceita caminhos
-relativos à própria pasta do arquivo ou caminhos absolutos. Projetos e pacotes
-ficam em `Narrations/<narrador>` no jogo; o catálogo e os áudios base ficam na
-pasta de catálogo definida na configuração. Pastas de biblioteca anexadas
-conservam os arquivos no local escolhido. Anexar uma pasta examina todos os
+relativos à própria pasta do arquivo ou caminhos absolutos. O jogo mantém uma
+pasta por narrador em `Narrations/<narrador>` com apenas `profile.npack`,
+`profile.json`, `narrator.txt` e `portrait.png`. O projeto editável, textos,
+relatórios e cache de conversão ficam em `Narration Studio\Projetos`, fora do
+jogo. O catálogo e os áudios base ficam nas pastas próprias do pacote. Pastas de
+biblioteca anexadas conservam os arquivos no local escolhido. Anexar uma pasta examina todos os
 níveis de subpastas e lista arquivos WAV, MP3, FLAC, OGG e M4A. Transcrever a
 biblioteca produz arquivos `<audio.ext>.txt` ao lado de cada áudio e um
 `transcriptions.json` com todas as faixas em cada pasta anexada.

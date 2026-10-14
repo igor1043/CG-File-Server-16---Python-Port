@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools/narration_studio'))
 import core
 import editor_catalog
+import projects
 from audio_playback import MciAudio,prepare_preview
 from topics import topic
 
@@ -104,6 +105,17 @@ class EditorTests(unittest.TestCase):
                 self.assertIn('clip',editor_catalog.converted_keys('Custom'))
                 source.write_bytes(b'new longer recording')
                 self.assertNotIn('clip',editor_catalog.converted_keys('Custom'))
+
+    def test_install_copies_only_runtime_assets_into_game_narrations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);build=root/'project'/'build';build.mkdir(parents=True)
+            for filename in ('profile.npack','profile.json','narrator.txt','portrait.png','project.json','build_report.json'):
+                (build/filename).write_text(filename,encoding='utf8')
+            (build/'transcriptions').mkdir()
+            installed=projects.install_profile(build,'Vilani',root/'game')
+            self.assertEqual(installed,root/'game'/'Narrations'/'Vilani')
+            self.assertEqual({item.name for item in installed.iterdir()},
+                             {'profile.npack','profile.json','narrator.txt','portrait.png'})
 
     def test_named_competitions_venues_and_club_comments_are_separate(self):
         expected={'pPLAYER_NAMES':'Call names de jogadores','tLB_FOCUS_TEAM':'Nomes de clubes',

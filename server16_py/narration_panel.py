@@ -93,7 +93,7 @@ class NarrationPanel:
                 except (OSError,ValueError):pass
             text(116 if portrait else 72,r[1]+9,p['name'],17,bold=True);text(302,r[1]+12,p['commentator'],13,muted)
             if p['name']==self.runtime.current:text(485,r[1]+12,'Atual',13,blue)
-        if not self.options:text(24,115,'Crie os pacotes na pasta Narrations.',16,muted)
+        if not self.options:text(24,115,'Crie uma subpasta por narrador em Narrations.',16,muted)
         for f,r,label,key,pad in ((3,self.BACK,'Voltar','F2','B'),(4,self.APPLY,'Aplicar','F1','A')):
             draw.rounded_rectangle(r,10,fill=blue if f==4 else 'white',outline=blue)
             if self.focus==f:draw_focus_ring(draw,r)
