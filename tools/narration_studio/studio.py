@@ -34,7 +34,7 @@ class Studio(tk.Tk):
         self.geometry('1600x900'); self.minsize(1260,760)
         self.queue=queue.Queue(); self.busy=False; self.offset=0
         self.profile=tk.StringVar(value=initial_profile or 'Vilani')
-        self.original_search=tk.StringVar(); self.source_search=tk.StringVar(); self.topic_filter=tk.StringVar(value='Todos os assuntos')
+        self.original_search=tk.StringVar(); self.source_search=tk.StringVar(); self.topic_filter=tk.StringVar(value='Todos os tipos')
         self.state_filter=tk.StringVar(value='Todos')
         self.status=tk.StringVar(value='Selecione uma linha: original e sua narração ficam na mesma ocorrência.')
         self.progress=tk.StringVar(); self.original_count=tk.StringVar(); self.custom_count=tk.StringVar()
@@ -59,6 +59,7 @@ class Studio(tk.Tk):
         self.profile_box.pack(side='left'); self.profile_box.bind('<<ComboboxSelected>>',lambda e:self.change_profile())
         for label,fn in [('Criar narrador',self.new_profile),('Importar projeto…',self.open_project),('Configurar narrador…',self.edit_project)]:
             ttk.Button(bar,text=label,command=fn).pack(side='left',padx=(6,0))
+        ttk.Label(bar,text='Salvamento automático ativo',foreground='#34734a').pack(side='left',padx=(10,0))
         filters=ttk.Frame(self,padding=(14,0,14,8)); filters.pack(fill='x')
         ttk.Label(filters,text='Tipo de ocorrência (filtra as duas colunas):').pack(side='left',padx=(0,6))
         self.topic_box=ttk.Combobox(filters,textvariable=self.topic_filter,state='readonly',width=38)
@@ -238,13 +239,13 @@ class Studio(tk.Tk):
         self.request_data(recount=True)
 
     def display_coverage(self):
-        selected=self.category(); self.topic_labels={'Todos os assuntos':None}
-        values=['Todos os assuntos']
+        selected=self.category(); self.topic_labels={'Todos os tipos':None}
+        values=['Todos os tipos']
         for label in TOPICS:
             count=self.counts['topics'].get(label,{}).get('total',0)
             display=label if self.counts.get('loading') else f'{label} · {number(count)}'; self.topic_labels[display]=label; values.append(display)
         self.topic_box['values']=values
-        self.topic_filter.set(next((key for key,value in self.topic_labels.items() if value==selected),'Todos os assuntos'))
+        self.topic_filter.set(next((key for key,value in self.topic_labels.items() if value==selected),'Todos os tipos'))
         self.show_counts()
 
     def periodic_coverage(self):
