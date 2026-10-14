@@ -8,6 +8,10 @@ As transcrições são salvas automaticamente enquanto você digita nas três
 colunas. Para comparar as gravações, selecione uma ocorrência e use o player
 de cada coluna. Os filtros de ocorrência e situação mantêm as duas primeiras
 listas alinhadas; os navegadores mostram a página atual e o total de páginas.
+As três listas começam pela coluna “Nº”. Original e sua narração usam a mesma
+numeração; a biblioteca numera seus próprios áudios. A sequência continua nas
+páginas seguintes e acompanha a lista filtrada. Na lista central, o texto fica
+ao lado da aprovação; o nome do arquivo aparece nos detalhes do player.
 
 Na biblioteca, “Importar pasta inteira” copia WAV, MP3, FLAC, OGG e M4A,
 inclusive subpastas, para <FIFA>\Narrations\<narrador>\Studio\assets.

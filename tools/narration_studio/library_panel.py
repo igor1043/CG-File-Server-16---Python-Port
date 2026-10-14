@@ -56,9 +56,10 @@ class LibraryPanel(ttk.Frame):
         ordering=ttk.Combobox(organization,textvariable=self.sort_by,values=['Nome A–Z','Estilo','Mais usados','Menos usados'],state='readonly',width=13)
         ordering.pack(side='left');ordering.bind('<<ComboboxSelected>>',lambda e:self.refresh(reset=True))
         body=ttk.Frame(self);body.grid(row=7,column=0,sticky='nsew')
-        self.tree=ttk.Treeview(body,columns=('audio','uses','text'),show='headings',selectmode='browse')
-        for column,title,width in [('audio','Estilo',170),('uses','Uso',60),('text','Transcrição',240)]:
+        self.tree=ttk.Treeview(body,columns=('number','audio','uses','text'),show='headings',selectmode='browse')
+        for column,title,width in [('number','Nº',58),('audio','Estilo',150),('uses','Uso',80),('text','Transcrição',240)]:
             self.tree.heading(column,text=title);self.tree.column(column,width=width,minwidth=60)
+            if column=='number':self.tree.column(column,minwidth=58,stretch=False,anchor='center')
         scroll=ttk.Scrollbar(body,command=self.tree.yview);self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side='left',fill='both',expand=True);scroll.pack(side='right',fill='y')
         self.player=AudioPlayer(self,'Ouvir áudio da biblioteca',WORK/'preview_cache',FFMPEG,studio.pause_other,studio.status.set)
@@ -200,13 +201,13 @@ class LibraryPanel(ttk.Frame):
                 self.asset_style_box['values']=['(automático)',*values];self.import_style_box['values']=['(automático)',*values]
                 self.total=total;self.rows={r['key']:r for r in rows};self.tree.delete(*self.tree.get_children())
                 last_style=None
-                for r in rows:
+                for index,r in enumerate(rows,start=self.offset+1):
                     if self.grouping.get()=='Por estilo' and r['topic']!=last_style:
                         group_id=f"group:{generation}:{len(self.tree.get_children())}"
-                        self.tree.insert('','end',iid=group_id,values=('── '+(r['topic'] or 'Outros comentários')+' ──','',''))
+                        self.tree.insert('','end',iid=group_id,values=('','── '+(r['topic'] or 'Outros comentários')+' ──','',''))
                         last_style=r['topic']
                     label=r['topic'] or 'Outros comentários'
-                    self.tree.insert('','end',iid=r['key'],values=(label,'✓ '+str(r['uses'])+'×' if r['uses'] else 'Disponível',r['transcript'] or '[Pendente]'))
+                    self.tree.insert('','end',iid=r['key'],values=(f'{index:,}'.replace(',','.'),label,'✓ '+str(r['uses'])+'×' if r['uses'] else 'Disponível',r['transcript'] or '[Pendente]'))
                 if selected in self.rows:self.tree.selection_set(selected)
                 self.select_asset()
                 page=self.offset//200+1;pages=max(1,(total+199)//200)

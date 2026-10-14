@@ -99,8 +99,8 @@ class Studio(tk.Tk):
             ttk.Entry(search_bar,textvariable=variable).pack(side='left',fill='x',expand=True)
         self.original_search.trace_add('write',lambda *_:self.schedule_refresh())
         self.source_search.trace_add('write',lambda *_:self.schedule_refresh())
-        self.left=self.tree(left,('Fala / ocorrência','Transcrição original'),(210,310),row=3)
-        self.right=self.tree(right,('Aprovado','Seu áudio','Sua transcrição'),(70,210,310),columns=('reviewed','name','text'),row=3)
+        self.left=self.tree(left,('Nº','Fala / ocorrência','Transcrição original'),(58,170,310),columns=('number','name','text'),row=3)
+        self.right=self.tree(right,('Nº','Aprovado','Sua transcrição'),(58,80,440),columns=('number','reviewed','text'),row=3)
         self.right.tag_configure('approved',background='#ccebd3',foreground='#184b25')
         self.right.bind('<Button-1>',self.review_cell_click,add='+')
         self.left.bind('<<TreeviewSelect>>',lambda e:self.select_row(self.left))
@@ -212,6 +212,8 @@ class Studio(tk.Tk):
         tree=ttk.Treeview(frame,columns=columns,show='headings',selectmode='browse',height=5)
         for col,label,width in zip(columns,labels,widths):
             tree.heading(col,text=label); tree.column(col,width=width,minwidth=80)
+            if col=='number':tree.column(col,minwidth=58,stretch=False,anchor='center')
+            elif col=='reviewed':tree.column(col,stretch=False,anchor='center')
         scroll=ttk.Scrollbar(frame,orient='vertical',command=self.scroll_both)
         tree.configure(yscrollcommand=lambda first,last,t=tree:self.scrolled(t,first,last))
         tree.pack(side='left',fill='both',expand=True); scroll.pack(side='right',fill='y')
@@ -318,15 +320,12 @@ class Studio(tk.Tk):
         self.sources={row['key']:dict(key=row['source_key'],path=row['source_path'],transcript=row['source_transcript'] or '',duration=row['source_duration'] or 0,event=row['source_event'] or '',topic=row['source_topic'] or row['topic'],confidence=row['source_confidence']) for row in rows if row['source_key']}
         self.current_key=None
         self.left.delete(*self.left.get_children()); self.right.delete(*self.right.get_children())
-        for row in rows:
-            self.left.insert('','end',iid=row['key'],values=(f"{row['topic']} · {row['row']}",row['transcript'] or '[Transcrição pendente]'))
-            filename=Path(row['source_path']).name if row['source_path'] else '＋ Importar áudio'
-            uses=row.get('source_uses',0)
-            reuse=(' · Usado '+str(uses)+' vezes' if uses>1 else ' · Uso único' if uses else '')
+        for index,row in enumerate(rows,start=request['offset']+1):
+            self.left.insert('','end',iid=row['key'],values=(number(index),f"{row['topic']} · {row['row']}",row['transcript'] or '[Transcrição pendente]'))
             reviewed=bool(row.get('reviewed')) and bool(row['source_key'])
             check='☑' if reviewed else '☐' if row['source_key'] and request['name']!='Tiago Leifert' else '—'
             tags=('approved',) if reviewed else ()
-            self.right.insert('','end',iid=row['key'],values=(check,filename+reuse,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem substituto]')),tags=tags)
+            self.right.insert('','end',iid=row['key'],values=(number(index),check,row['source_transcript'] or ('[Transcrição pendente]' if row['source_key'] else '[Ainda sem substituto]')),tags=tags)
         page=self.offset//500+1;pages=max(1,(self.total_rows+499)//500)
         first=self.offset+1 if rows else 0;last=self.offset+len(rows)
         self.progress.set(f'Página {page} de {pages} · {number(first)}–{number(last)} de {number(self.total_rows)}')
@@ -351,7 +350,7 @@ class Studio(tk.Tk):
         else:self.page(direction*500)
 
     def review_cell_click(self,event):
-        if self.right.identify_region(event.x,event.y)!='cell' or self.right.identify_column(event.x)!='#1':return
+        if self.right.identify_region(event.x,event.y)!='cell' or self.right.identify_column(event.x)!='#2':return
         key=self.right.identify_row(event.y)
         if not key or key not in self.originals:return 'break'
         self.right.selection_set(key);self.right.focus(key);self.select_row(self.right)
@@ -737,6 +736,7 @@ class Studio(tk.Tk):
         self.after(100,self.poll)
 
     def close_app(self):
+        if self.closed:return
         if self.busy: messagebox.showinfo('Processando','Aguarde a tarefa terminar antes de fechar.'); return
         self.save_visible_texts()
         if self.autosave_timer:
@@ -755,7 +755,9 @@ class Studio(tk.Tk):
         self.data_requests.put_nowait(None)
         for player in self.players: player.shutdown()
         for callback in self.tk.splitlist(self.tk.call('after','info')):
-            try:self.after_cancel(callback)
+            # Child widgets own some callback commands. Cancel the timer only;
+            # their destroy() must remove those commands exactly once.
+            try:self.tk.call('after','cancel',callback)
             except tk.TclError:pass
         self.destroy()
 
@@ -771,7 +773,11 @@ if __name__=='__main__':
             while (not app.data_loaded or app.counts.get('loading')) and time.monotonic()<deadline:
                 app.update();time.sleep(.01)
             if not app.data_loaded or app.counts.get('loading'):raise ValueError('Catálogo ou contagem não ficaram disponíveis no teste de abertura.')
-            report=dict(projects=projects.names(),catalog=str(DB),original_rows=len(app.originals),paired_rows=list(app.left.get_children())==list(app.right.get_children()),review_column='reviewed' in app.right['columns'],independent_searches=hasattr(app,'original_search') and hasattr(app,'source_search'),counts=app.counts,status='ok')
+            trees=(app.left,app.right,app.library_panel.tree)
+            numbered=all(tree['columns'][0]=='number' for tree in trees)
+            paired_numbers=all(app.left.set(key,'number')==app.right.set(key,'number') for key in app.originals)
+            if not numbered or not paired_numbers:raise ValueError('A numeração das listas ficou inconsistente.')
+            report=dict(projects=projects.names(),catalog=str(DB),original_rows=len(app.originals),paired_rows=list(app.left.get_children())==list(app.right.get_children()),number_columns=numbered,paired_numbers=paired_numbers,custom_columns=[app.right.heading(column,'text') for column in app.right['columns']],review_column='reviewed' in app.right['columns'],independent_searches=hasattr(app,'original_search') and hasattr(app,'source_search'),counts=app.counts,status='ok')
             (APP_ROOT/'studio_smoke.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8'); app.close_app(); startup_checkpoint('smoke-complete')
         else:
             default=CONFIG.get('last_profile','Vilani')
