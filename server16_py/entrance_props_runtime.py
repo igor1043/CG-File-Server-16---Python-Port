@@ -13,6 +13,7 @@ from pathlib import Path
 from .ini_file import SessionIniFile
 from .match_presentation import MatchPresentation
 from .entrance_friendly import common_league_competition, no_competition
+from .stadium_catalog import prematch_page
 
 
 COMPETITION_SECTIONS = ('movies', 'Scoreboard', 'comp')
@@ -74,13 +75,16 @@ class EntrancePropsRuntime:
         self._last_selection = None
 
     @staticmethod
-    def _publish(destination: Path, payload: str):
+    def _publish(destination: Path, payload: str, valid=None):
         destination.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(prefix='entrance_selection_', suffix='.tmp', dir=destination.parent)
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as handle:
                 handle.write(payload)
+            if valid is not None and not valid():
+                return False
             os.replace(temporary, destination)
+            return True
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
@@ -93,7 +97,7 @@ class EntrancePropsRuntime:
         except OSError as exc:
             self.app.log('Entrance props context could not be cleared', exc)
 
-    def prepare_match(self):
+    def prepare_match(self, *, valid=None):
         app = self.app
         root = Path(app.exedir)
         competition, round_id = str(app.TOURNAME or ''), str(app.TOURROUNDID or '')
@@ -117,13 +121,15 @@ class EntrancePropsRuntime:
             context = dict(schema=1, process_id=pid, home=app.HID, away=app.AID,
                            competition=competition or '0', round=round_id or '0',
                            mode=mode if enabled and directory else 'none',
-                           league=league or '0', asset=selected or '0')
-            self._publish(root/'runtime/entrance_props_context.ini', '[selection]\n' + ''.join(f'{key}={value}\n' for key, value in context.items()))
+                           league=league or '0', asset=selected or '0',
+                           preview=int(prematch_page(getattr(app, 'lastpagename', ''))))
+            if not self._publish(root/'runtime/entrance_props_context.ini', '[selection]\n' + ''.join(f'{key}={value}\n' for key, value in context.items()), valid):
+                return None
             destination = root / 'runtime/entrance_props_selection.json'
             payload = dict(home=app.HID, away=app.AID, competition=competition, round=round_id,
                            enabled=enabled, asset=selected, status=status, source='FSW/settings.ini',
                            mode=mode, league=league, resolved_competition=resolved)
-            self._publish(destination, json.dumps(payload, ensure_ascii=False, indent=2))
+            self._publish(destination, json.dumps(payload, ensure_ascii=False, indent=2), valid)
             return directory
         except Exception as exc:
             app.log('Entrance props skipped; other match assets continue', exc)

@@ -9,7 +9,7 @@ void selector_initialize(void (*)(const char *)) {}
 void selector_tick(HWND,float,float) {}
 bool selector_visible() { return shared.visible!=0; }
 int wmain(int argc,wchar_t **argv) {
-    assert(argc==1 || argc==4 || argc==5);
+    assert(argc==1 || argc==2 || argc==4 || argc==5);
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     InitLog(); InitializeCriticalSection(&g_drawCs);
     HWND window=CreateWindowExW(0,L"STATIC",L"",WS_POPUP,0,0,1280,720,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
@@ -44,13 +44,17 @@ int wmain(int argc,wchar_t **argv) {
     wcscpy_s(loading.movie_name,L"Caze TV");
     wcscpy_s(loading.narration_name,L"Vilani");
     if(argc==5)wcscpy_s(loading.narration_image_path,argv[4]);
-    for(int mask=1;mask<16;++mask) {
+    wcscpy_s(loading.presentation_name,L"Carregando apresenta\u00e7\u00e3o");
+    wcscpy_s(loading.presentation_detail,L"Entradas: prontas\nPirotecnia: pronta\nVAR: aguardando cena\nM\u00e1quinas de fuma\u00e7a: prontas");
+    static_assert(sizeof(OverlayShared)==7208,"Python notification ABI");
+    for(int mask=1;mask<32;++mask) {
         loading.visible=mask&1;
         loading.scoreboard_visible=mask&2;
         loading.movie_visible=mask&4;
         loading.narration_visible=mask&8;
+        loading.presentation_visible=mask&16;
         for(LONG progress:{0L,100L,5500L,10000L}) {
-            loading.progress_x100=loading.scoreboard_progress_x100=loading.movie_progress_x100=loading.narration_progress_x100=progress;
+            loading.progress_x100=loading.scoreboard_progress_x100=loading.movie_progress_x100=loading.narration_progress_x100=loading.presentation_progress_x100=progress;
             DrawOverlay11(swap,device,context);
             ID3D11Buffer *restored=nullptr;
             context->IAGetVertexBuffers(0,1,&restored,&stride,&offset);
@@ -69,6 +73,38 @@ int wmain(int argc,wchar_t **argv) {
     assert(overlayBuffer.ByteWidth==sizeof(Vtx11)*kColoredVertexCapacity);
     g_data=nullptr;
     puts("All loading-card combinations and buffer boundary protection passed");
+    if(argc==2){
+        ID3D11Texture2D *back=nullptr,*readable=nullptr;
+        assert(SUCCEEDED(swap->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&back)));
+        ID3D11RenderTargetView *target=nullptr;assert(SUCCEEDED(device->CreateRenderTargetView(back,nullptr,&target)));
+        const float background[4]={.035f,.09f,.12f,1};context->ClearRenderTargetView(target,background);target->Release();
+        g_data=&loading;loading.visible=loading.narration_visible=loading.presentation_visible=1;
+        loading.scoreboard_visible=loading.movie_visible=0;
+        loading.progress_x100=7500;loading.narration_progress_x100=10000;loading.presentation_progress_x100=7500;
+        wcscpy_s(loading.presentation_detail,L"Entradas: pronto na cena 3D\nPirotecnia: pronto na cena 3D\nVAR: carregando cena 3D\nM\u00e1quinas de fuma\u00e7a: aguardando cena 3D");
+        DrawOverlay11(swap,device,context);g_data=nullptr;
+        D3D11_TEXTURE2D_DESC desc{};back->GetDesc(&desc);desc.Usage=D3D11_USAGE_STAGING;
+        desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+        assert(SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&readable)));
+        context->CopyResource(readable,back);back->Release();
+        D3D11_MAPPED_SUBRESOURCE pixels{};assert(SUCCEEDED(context->Map(readable,0,D3D11_MAP_READ,0,&pixels)));
+        IWICImagingFactory *factory=nullptr;IWICStream *stream=nullptr;IWICBitmapEncoder *encoder=nullptr;IWICBitmapFrameEncode *frame=nullptr;
+        assert(SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&factory))));
+        assert(SUCCEEDED(factory->CreateStream(&stream)));assert(SUCCEEDED(stream->InitializeFromFilename(argv[1],GENERIC_WRITE)));
+        assert(SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatPng,nullptr,&encoder)));
+        assert(SUCCEEDED(encoder->Initialize(stream,WICBitmapEncoderNoCache)));assert(SUCCEEDED(encoder->CreateNewFrame(&frame,nullptr)));
+        assert(SUCCEEDED(frame->Initialize(nullptr)));assert(SUCCEEDED(frame->SetSize(desc.Width,desc.Height)));
+        WICPixelFormatGUID format=GUID_WICPixelFormat32bppRGBA;assert(SUCCEEDED(frame->SetPixelFormat(&format)));
+        IWICBitmap *bitmap=nullptr;IWICFormatConverter *converter=nullptr;
+        assert(SUCCEEDED(factory->CreateBitmapFromMemory(desc.Width,desc.Height,GUID_WICPixelFormat32bppRGBA,
+            pixels.RowPitch,pixels.RowPitch*desc.Height,(BYTE*)pixels.pData,&bitmap)));
+        assert(SUCCEEDED(factory->CreateFormatConverter(&converter)));
+        assert(SUCCEEDED(converter->Initialize(bitmap,format,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)));
+        assert(SUCCEEDED(frame->WriteSource(converter,nullptr)));converter->Release();bitmap->Release();
+        assert(SUCCEEDED(frame->Commit()));assert(SUCCEEDED(encoder->Commit()));
+        frame->Release();encoder->Release();stream->Release();factory->Release();context->Unmap(readable,0);readable->Release();
+        puts("Native loading notification image exported");
+    }
     if(argc>=4) {
     shared.visible=1; shared.render_ready=1; shared.width=600; shared.height=600;
     wcscpy_s(shared.image_path,argv[1]);
