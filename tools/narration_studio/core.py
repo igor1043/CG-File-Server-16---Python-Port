@@ -7,18 +7,19 @@ import unicodedata
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from server16_py.narration_bank import BigArchive, HarmonyBank, sps_size
 from server16_py.narration_paths import narration_root
+from portable_setup import configuration_path
 
 APP_ROOT=Path(sys.executable).resolve().parent if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 RESOURCE_ROOT=Path(getattr(sys,'_MEIPASS',APP_ROOT))
 CODE_ROOT=Path(__file__).resolve().parent
-CONFIG_PATH=Path(os.environ.get('F16_NARRATION_CONFIG',str(APP_ROOT/'studio_config.json'))).resolve()
+CONFIG_PATH=configuration_path(APP_ROOT)
 CONFIG=json.loads(CONFIG_PATH.read_text(encoding='utf8')) if CONFIG_PATH.exists() else {}
 
 def configured_path(key, default):
     value=CONFIG.get(key)
     if value in (None,''): value=default
     path=Path(value)
-    if not path.is_absolute(): path=CONFIG_PATH.parent/path
+    if not path.is_absolute(): path=(APP_ROOT if getattr(sys,'frozen',False) else CONFIG_PATH.parent)/path
     return path.resolve()
 
 GAME=configured_path('game',str(APP_ROOT))

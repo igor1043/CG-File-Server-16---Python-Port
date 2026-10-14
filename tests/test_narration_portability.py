@@ -6,6 +6,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools/narration_studio'))
+from portable_setup import configuration_path
 
 
 def probe():
@@ -36,6 +40,14 @@ def probe():
 
 
 class NarrationPortabilityTests(unittest.TestCase):
+    def test_frozen_editor_keeps_machine_specific_config_outside_shared_folder(self):
+        with tempfile.TemporaryDirectory(prefix='f16_user_config_') as temporary:
+            with patch.dict(os.environ,{'LOCALAPPDATA':temporary},clear=False),patch.object(sys,'frozen',True,create=True):
+                self.assertEqual(configuration_path(Path(temporary)/'portable'),Path(temporary)/'FIFA16NarrationStudio'/'studio_config.json')
+                override=Path(temporary)/'test-config.json'
+                with patch.dict(os.environ,{'F16_NARRATION_CONFIG':str(override)},clear=False):
+                    self.assertEqual(configuration_path(),override.resolve())
+
     def test_relative_config_and_moved_catalog_paths(self):
         with tempfile.TemporaryDirectory(prefix='f16_portability_') as temporary:
             root=Path(temporary);app=root/'editor';app.mkdir()
