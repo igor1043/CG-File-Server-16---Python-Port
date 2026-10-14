@@ -17,7 +17,10 @@ def decode_status(raw, pid, now):
     result = {}
     for i, name in enumerate(NAMES):
         sequence, state, heartbeat, generation = words[2+i*4:6+i*4]
-        if sequence and not sequence & 1 and 1 <= state <= 5 and ((now-heartbeat) & 0xffffffff) <= 5000:
+        # Before the first SLE scene callback, a registered loader legitimately
+        # retains Waiting with no new heartbeat. Do not call that a missing DLL.
+        fresh = ((now-heartbeat) & 0xffffffff) <= 5000
+        if sequence and not sequence & 1 and 1 <= state <= 5 and (fresh or state == 1):
             result[name] = state
     return result
 

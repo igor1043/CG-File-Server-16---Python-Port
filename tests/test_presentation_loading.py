@@ -114,7 +114,7 @@ class PresentationLoadingTests(unittest.TestCase):
         bridge.read.assert_not_called()
         self.assertIsNone(runtime.thread)
 
-    def test_files_prepared_is_50_percent_until_native_scene_ack(self):
+    def test_preview_ready_then_native_ack_during_match_loading(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             app = self.fixture(root)
@@ -124,6 +124,7 @@ class PresentationLoadingTests(unittest.TestCase):
             app._show_asset_loading = Mock()
             app._update_asset_loading = Mock()
             app._hide_asset_loading = Mock()
+            app._finish_asset_loading = Mock()
             bridge = SimpleNamespace(read=Mock(return_value={}), close=Mock())
             runtime = PresentationLoading(app, bridge=bridge)
             with patch('server16_py.presentation_loading.threading.Thread') as worker, patch('server16_py.presentation_loading.time.monotonic', return_value=1):
@@ -131,14 +132,71 @@ class PresentationLoadingTests(unittest.TestCase):
                 worker.call_args.kwargs['target']()
             with patch('server16_py.presentation_loading.time.monotonic', return_value=2):
                 runtime.tick()
-            self.assertEqual(runtime.notice[2], 50)
-            app._hide_asset_loading.assert_not_called()
-            bridge.read.return_value = dict.fromkeys(NAMES, 3)
+            self.assertEqual(runtime.notice[2], 100)
+            self.assertEqual(runtime.notice[0], 'Pré-jogo preparado')
+            self.assertIn('VAR: Preparado para iniciar', runtime.notice[1])
+            app._hide_asset_loading.assert_called_once()
+            self.assertFalse(__import__('json').loads((root/'runtime/presentation_loading.json').read_text())['scene_confirmed'])
+            app.lastpagename = 'TV/bumper'
+            runtime._configuration_stamp = Mock(side_effect=AssertionError('Loading must not reread files'))
             with patch('server16_py.presentation_loading.time.monotonic', return_value=3):
                 runtime.tick()
-            self.assertEqual(runtime.notice[2], 100)
+            self.assertTrue(runtime.tracking)
+            self.assertEqual(runtime.notice[0], 'Carregando cena da partida')
+            self.assertEqual(runtime.notice[2], 50)
+            bridge.read.return_value = dict.fromkeys(NAMES, 3)
+            with patch('server16_py.presentation_loading.time.monotonic', return_value=4):
+                runtime.tick()
+            self.assertIsNone(runtime.key)
             self.assertTrue(runtime.completed)
-            app._hide_asset_loading.assert_called_once()
+            self.assertEqual(app._show_asset_loading.call_args.args[2], 'Apresentação carregada')
+            self.assertEqual(app._show_asset_loading.call_args.args[-1], 100)
+            bridge.read.reset_mock()
+            with patch('server16_py.presentation_loading.time.monotonic', return_value=5):
+                runtime.tick()
+            bridge.read.assert_not_called()
+            self.assertTrue(__import__('json').loads((root/'runtime/presentation_loading.json').read_text())['scene_confirmed'])
+
+    def test_registered_waiting_loader_survives_absent_scene_heartbeat(self):
+        words = [1, 1234]+[2, 1, 1000, 1]*4
+        self.assertEqual(decode_status(struct.pack('<18I', *words), 1234, 7000), dict.fromkeys(NAMES, 1))
+
+    def test_loading_poll_expires_and_leaves_no_gameplay_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self.fixture(Path(tmp))
+            app.lastpagename = ''
+            app.memory.is_open = lambda: True
+            app.STADID = '176'
+            app._show_asset_loading = Mock()
+            app._update_asset_loading = Mock()
+            app._hide_asset_loading = Mock()
+            app._finish_asset_loading = Mock()
+            bridge = SimpleNamespace(read=Mock(return_value={}), close=Mock())
+            runtime = PresentationLoading(app, bridge=bridge)
+            runtime.key = (str(app.exedir), 1234, 1, '1043', '567')
+            runtime.rows = [('prepared', 'Arquivos preparados')]*4
+            with patch('server16_py.presentation_loading.time.monotonic', return_value=1):
+                runtime.tick()
+            self.assertTrue(runtime.tracking)
+            with patch('server16_py.presentation_loading.time.monotonic', return_value=17):
+                runtime.tick()
+            self.assertIsNone(runtime.key)
+            self.assertEqual(app._show_asset_loading.call_args.args[2], 'Confirmação incompleta')
+            bridge.read.reset_mock()
+            with patch('server16_py.presentation_loading.time.monotonic', return_value=18):
+                runtime.tick()
+            bridge.read.assert_not_called()
+
+    def test_loading_stops_on_exit_or_another_fixture(self):
+        for page, home in (('game/screens/career/Hub', '1043'), ('', '1')):
+            app = SimpleNamespace(memory=SimpleNamespace(is_open=lambda: True, process_id=1234),
+                                  lastpagename=page, HID=home, AID='567', _finish_asset_loading=Mock())
+            bridge = SimpleNamespace(read=Mock(), close=Mock())
+            runtime = PresentationLoading(app, bridge=bridge)
+            runtime.key = ('root', 1234, 1, '1043', '567')
+            runtime.tick()
+            self.assertIsNone(runtime.key)
+            bridge.read.assert_not_called()
 
     def test_presentation_card_has_separate_memory_from_narrator_and_stadium(self):
         inj = D3DOverlayInjector.__new__(D3DOverlayInjector)

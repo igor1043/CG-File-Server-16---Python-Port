@@ -14,6 +14,7 @@ from .entrance_props_runtime import EntrancePropsRuntime
 from .match_presentation import MatchPresentation
 from .presentation_bridge import PresentationBridge, NAMES
 from .stadium_catalog import prematch_page
+from .match_state import pause_page
 
 LABELS = ('Entradas', 'Pirotecnia', 'VAR', 'Máquinas de fumaça')
 
@@ -130,6 +131,20 @@ class PresentationLoading:
         self.visible = False
         self.completed = False
         self.thread = None
+        self.tracking = False
+        self.track_deadline = 0.0
+
+    def _stop(self, *, hide=True):
+        self.cancelled.set()
+        self.generation += 1
+        self.key = None
+        self.tracking = False
+        self.track_deadline = 0.0
+        self.notice = None
+        if hide and self.visible:
+            self.app._finish_asset_loading('presentation')
+        self.visible = False
+        self.bridge.close()
 
     def _snapshot(self, pid):
         app = self.app
@@ -156,16 +171,33 @@ class PresentationLoading:
         app = self.app
         preview = app.memory.is_open() and prematch_page(app.lastpagename)
         if not preview:
-            if self.key is not None:
+            if self.key is None:
+                return  # Settled gameplay: no files, workers or native polling.
+            page = (app.lastpagename or '').casefold()
+            loading = not page or page in ('tv/bumper', 'game/screens/tv/bumper') or 'loading' in page or 'ingame' in page or pause_page(page)
+            pid = int(getattr(app.memory, 'process_id', 0) or 0)
+            changed_clubs = any(str(getattr(app, field, '') or '') not in ('', self.key[index])
+                                for field, index in (('HID', 3), ('AID', 4)))
+            if not app.memory.is_open() or pid != self.key[1] or changed_clubs or not loading or getattr(app, '_match_audio_ended', False):
+                self._stop()
+                return
+            now = time.monotonic()
+            if not self.tracking:
                 self.cancelled.set()
                 self.generation += 1
-                self.key = None
+                self.tracking = True
+                self.track_deadline = now+15
                 self.notice = None
-                if self.visible:
-                    app._finish_asset_loading('presentation')
-                self.visible = False
-                self.bridge.close()
-            return  # No configuration reads, files, thread or native polls in gameplay.
+                self.visible = self.completed = False
+                self.next_tick = 0
+            if now < self.next_tick:
+                return
+            self.next_tick = now+.5
+            native = self.bridge.read(pid)
+            done = self._render(native, starting=True, timed_out=now >= self.track_deadline)
+            if done:
+                self._stop(hide=False)  # The final notice owns its bounded hide timer.
+            return
         now = time.monotonic()
         if now < self.next_tick:
             return
@@ -185,6 +217,8 @@ class PresentationLoading:
             self.cancelled = threading.Event()
             self.generation += 1
             self.key = key
+            self.tracking = False
+            self.track_deadline = 0.0
             self.rows = [('pending', 'Aguardando preparação')]*4
             self.completed = False
             snapshot, cancelled, generation = self._snapshot(pid), self.cancelled, self.generation
@@ -205,15 +239,25 @@ class PresentationLoading:
                 break
             if generation == self.generation:
                 self.rows[index] = state, text
-        native = self.bridge.read(pid)
+        self._render(self.bridge.read(pid))
+
+    def _render(self, native, *, starting=False, timed_out=False):
+        app = self.app
         lines, units, terminal, errors = [], 0, True, False
         for i, (state, text) in enumerate(self.rows):
-            if state == 'prepared':
+            if state == 'prepared' or (starting and state in ('pending', 'loading')):
                 status = native.get(NAMES[i], 0)
-                text = {0:'Aguardando módulo', 1:'Aguardando cena 3D', 2:'Carregando cena 3D',
-                        3:'Pronto na cena 3D', 4:'Sem uso nesta partida', 5:'Falha na cena 3D'}[status]
-                units += 2 if status in (3, 4, 5) else 1
-                terminal = terminal and status in (3, 4, 5)
+                if starting:
+                    text = {0:'Aguardando confirmação do jogo', 1:'Aguardando cena 3D', 2:'Carregando cena 3D',
+                            3:'Pronto no jogo', 4:'Sem uso nesta partida', 5:'Falha na cena 3D'}[status]
+                    if timed_out and status in (0, 1, 2):
+                        text = 'Sem confirmação da cena'
+                    units += 2 if status in (3, 4, 5) else 1
+                    terminal = terminal and status in (3, 4, 5)
+                else:
+                    text = {0:'Preparado para iniciar', 1:'Preparado para iniciar', 2:'Preparado; carregando cena',
+                            3:'Pronto na cena 3D', 4:'Sem uso nesta partida', 5:'Falha na cena 3D'}[status]
+                    units += 2  # Preview progress measures file preparation.
                 errors = errors or status == 5
             elif state in ('skipped', 'error'):
                 units += 2
@@ -221,7 +265,12 @@ class PresentationLoading:
             else:
                 terminal = False
             lines.append(f'{LABELS[i]}: {text}')
-        title = 'Recursos com pendências' if terminal and errors else 'Recursos preparados' if terminal else 'Carregando apresentação'
+        done = terminal or timed_out
+        title = ('Confirmação incompleta' if timed_out and not terminal else
+                 'Recursos com pendências' if terminal and errors else
+                 'Apresentação carregada' if starting and terminal else
+                 'Pré-jogo preparado' if terminal else
+                 'Carregando cena da partida' if starting else 'Preparando apresentação')
         detail = '\n'.join(lines)
         notice = (title, detail, units*12.5)
         if self.completed and not terminal:
@@ -238,16 +287,20 @@ class PresentationLoading:
                 app._update_asset_loading('presentation', units*12.5, detail)
             self.notice = notice
             app.log('Presentation preload: '+detail.replace('\n', '; '))
-            if terminal:
-                app._hide_asset_loading('presentation', delay_ms=4000 if errors else 1800)
-        if terminal and not self.completed:
+            if done:
+                app._hide_asset_loading('presentation', delay_ms=4000 if errors or timed_out else 1800)
+        if done and not self.completed:
             self.completed = True
-            payload = dict(process_id=pid, home=app.HID, away=app.AID, stadium=app.STADID,
-                           resources=dict(zip(NAMES, lines)), prepared=not errors)
+            payload = dict(process_id=self.key[1], home=app.HID, away=app.AID, stadium=app.STADID,
+                           phase='match_loading' if starting else 'preview',
+                           resources=dict(zip(NAMES, lines)), native_states=native,
+                           files_prepared=all(state in ('prepared', 'skipped') for state, text in self.rows),
+                           scene_confirmed=starting and terminal and not errors)
             try:
-                EntrancePropsRuntime._publish(root/'runtime/presentation_loading.json', json.dumps(payload, ensure_ascii=False, indent=2))
+                EntrancePropsRuntime._publish(Path(app.exedir)/'runtime/presentation_loading.json', json.dumps(payload, ensure_ascii=False, indent=2))
             except OSError as exc:
                 app.log('Presentation diagnostic could not be saved', exc)
+        return done
 
     def close(self):
         self.cancelled.set()

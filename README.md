@@ -29,7 +29,7 @@ As abas **Próxima Partida**, **Meu Time** e **Competição**, a cabine do VAR, 
 
 As opções de apresentação ficam em `ModCarrerMode/config/match_presentation.ini`. A competição e a fase usam os IDs de `FSW/settings.ini`; o Server valida e seleciona os assets locais em `data/sceneassets/entrance_props/`. A pasta local `runtime/` guarda diagnósticos da sessão.
 
-O aviso de apresentação só chega à prontidão da cena quando o carregador nativo confirma os recursos. Arquivos ausentes ou inválidos aparecem como pendências; itens desativados mantêm a configuração do usuário. A prévia prepara os recursos sem disparar fogos ou exibir a entrada. Ao começar a partida, a preparação e a consulta de progresso do Server param. Use as quatro DLLs atualizadas junto com o novo EXE; o EXE sozinho não atualiza os carregadores do V12. Modelos e texturas do VAR continuam sendo recursos locais separados.
+O aviso da prévia mede a preparação dos arquivos: recursos validados aparecem como **Preparado para iniciar**, mesmo quando o jogo ainda não criou a cena 3D. Ao entrar na partida, o aviso acompanha somente as confirmações nativas, sem reler arquivos ou criar novos workers, e termina quando os recursos ficam prontos ou após 15 segundos. Depois disso, não há consulta de progresso durante gameplay. Arquivos ausentes ou inválidos aparecem como pendências; itens desativados mantêm a configuração do usuário. A prévia prepara os recursos sem disparar fogos ou exibir a entrada. Use as quatro DLLs atualizadas junto com o novo EXE; o EXE sozinho não atualiza os carregadores do V12. Modelos e texturas do VAR continuam sendo recursos locais separados.
 
 ## Executar pelos fontes
 
