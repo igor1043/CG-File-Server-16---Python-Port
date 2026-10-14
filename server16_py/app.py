@@ -30,6 +30,7 @@ from .assignment_runtime import AssignmentRuntime
 from .camera_runtime import CameraPreset, CameraRuntime
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
 from .entrance_runtime import TeamEntranceRuntime
+from .entrance_props_runtime import EntrancePropsRuntime
 from .discord_rpc_runtime import DiscordRPCRuntime, StadiumPreviewUploader
 from .fifa_db import FifaDatabase
 from .gamepad_runtime import (
@@ -314,6 +315,7 @@ class Server16App(tk.Tk):
         self.stadium_runtime = StadiumRuntime(self)
         self.chants_runtime = ChantsRuntime(self)
         self.entrance_runtime = TeamEntranceRuntime(self)
+        self.entrance_props_runtime = EntrancePropsRuntime(self)
         self.assignment_runtime = AssignmentRuntime(self)
         self.camera_runtime = CameraRuntime(self)
         # Initialize DiscordRPC (loads from settings.json)
@@ -1364,7 +1366,7 @@ class Server16App(tk.Tk):
                 fifa_width = rect.right - rect.left
                 fifa_height = rect.bottom - rect.top
                 # Center horizontally, position near top of FIFA window
-                modal_w, modal_h = 340, 274
+                modal_w, modal_h = min(340,max(1,fifa_width-32)), min(274,max(1,fifa_height-80))
                 x = rect.left + (fifa_width - modal_w) // 2
                 y = rect.top + 40
                 self.stadium_loading_modal.geometry(f"{modal_w}x{modal_h}+{x}+{y}")
@@ -1514,11 +1516,23 @@ class Server16App(tk.Tk):
             return
         self._stadium_loading_image = None
         image_path = self._resolve_stadium_preview_path(stadium_name)
-        photo = self._load_preview_photo(image_path, (300, 138))
+        # Reserve room for title/details/progress at the current Windows DPI.
+        # Placeholder padding is not part of an actual image's height.
+        label.pack_configure(ipady=0)
+        self.stadium_loading_modal.update_idletasks()
+        window_height = self.stadium_loading_modal.winfo_height()
+        window_height = window_height if window_height > 1 else 274
+        reserved = label.master.winfo_reqheight() - label.winfo_reqheight()
+        preview_height = min(138, max(32, window_height - reserved - 6))
+        photo = self._load_preview_photo(image_path, (300, preview_height))
         if photo is None:
+            label.pack_configure(ipady=24)
             label.configure(image="", text="STADIUM\nPREVIEW", compound="center")
             return
         self._stadium_loading_image = photo
+        # The image already supplies its height; extra placeholder padding would
+        # push the progress bar below the fallback window.
+        label.pack_configure(ipady=0)
         label.configure(image=photo, text="", compound="center")
 
     def prepare_floating_window(self) -> tk.Misc:
@@ -4041,6 +4055,7 @@ class Server16App(tk.Tk):
     def apply_all_runtime(self) -> None:
         self.log(f"Applying runtime HID={self.HID} AID={self.AID} TOUR={self.TOURNAME} ROUND={self.TOURROUNDID} STAD={self.STADID}")
         self._set_progress(5, "Applying runtime")
+        self.entrance_props_runtime.prepare_match()
         if self.module_enabled("Stadium"):
             self.apply_stadium_runtime()
         else:

@@ -37,6 +37,22 @@ class LibraryTests(unittest.TestCase):
             db=original_connect(catalog)
             self.assertEqual(db.execute('SELECT transcript FROM sources').fetchone()[0],'Edição manual');db.close()
 
+    def test_managed_audio_collection_copies_nested_files_and_transcripts_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);source=root/'download'/'Villani pack';nested=source/'por_br'/'abertura';nested.mkdir(parents=True)
+            audio=nested/'inicio.mp3';audio.write_bytes(b'voice data')
+            audio.with_suffix('.mp3.txt').write_text('Começa a partida.',encoding='utf8')
+            (nested/'leia-me.md').write_text('not audio',encoding='utf8')
+            managed=root/'shared'/'Vilani'
+            target,count=core.copy_audio_collection(source,managed)
+            self.assertEqual(count,1)
+            copied=target/'por_br'/'abertura'/'inicio.mp3'
+            self.assertEqual(copied.read_bytes(),audio.read_bytes())
+            self.assertEqual(Path(str(copied)+'.txt').read_text(encoding='utf8'),'Começa a partida.')
+            repeated,count=core.copy_audio_collection(source,managed)
+            self.assertEqual((repeated,count),(target,1))
+            self.assertEqual(len(list(managed.iterdir())),1)
+
     def test_existing_transcripts_export_beside_audio_without_loading_ai(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);audio=root/'recordings'/'fala.mp3';audio.parent.mkdir();audio.write_bytes(b'unchanged')

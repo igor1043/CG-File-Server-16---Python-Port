@@ -10,6 +10,24 @@ import test_match_audio_panel as audio_fixtures
 
 
 class PresentationTests(unittest.TestCase):
+    def test_opening_props_default_cancel_and_apply_independently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            selector = fixtures.PrematchTests().selector(Path(tmp))
+            try:
+                selector.open(hub=True); selector.handle(16, 3)
+                panel = selector.prematch_panel
+                self.assertTrue(panel.options.entrance_props)
+                selector.handle(8, (280 << 16) | 500)
+                self.assertFalse(panel.options.entrance_props)
+                selector.handle(16, 2)
+                self.assertTrue(MatchPresentation(tmp).load().entrance_props)
+                selector.handle(16, 3)
+                selector.prematch_panel.activate(4)
+                selector.handle(16, 1)
+                self.assertFalse(MatchPresentation(tmp).load().entrance_props)
+            finally:
+                selector.shutdown()
+
     def test_defaults_atomic_save_reload_and_other_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = MatchPresentation(tmp)
@@ -58,7 +76,7 @@ class PresentationTests(unittest.TestCase):
                 selector.handle(16, 1)
                 self.assertEqual(panel.store.load(), PresentationOptions(True, True, True, False))
                 self.assertFalse(selector.prematch_panel.crowd)
-                selector.handle(16, 4)
+                selector.handle(16, 5)  # Back follows the narration card in the current hub.
                 self.assertFalse(selector.opened)
             finally:
                 selector.shutdown()

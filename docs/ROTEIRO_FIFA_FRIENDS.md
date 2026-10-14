@@ -257,3 +257,9 @@ estádio, aplicação segura, RAR, ponte de público e ciclos de vida da partida
 6. Use `Aplicar geral` para o padrão ou `Aplicar específico` para aquele confronto.
 7. Feche o Server somente depois de sair do jogo, se quiser que ele restaure os
    assets nativos corretamente.
+
+## Objetos de abertura da competição
+
+Em **Configurações da partida**, a opção **Objetos de abertura da competição** começa em **Sim**. Aplicar salva a escolha; Voltar cancela. O Server seleciona o pacote pelo ID da competição e da fase antes do estádio e placar. Pacote ausente ou inválido deixa a partida sem os objetos.
+
+O módulo V12 mantém o conjunto nos hinos e escalações. Modelo e escudos compartilham a retirada no fim da apresentação, inclusive quando ela é avançada. Os escudos são escolhidos pelos clubes da partida e preservam o fundo transparente. A pausa não inicia uma nova apresentação.

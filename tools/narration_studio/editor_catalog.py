@@ -25,11 +25,20 @@ def converted_keys(name):
         entries = json.loads(report.read_text(encoding='utf8'))
     except (ValueError, OSError):
         return {}
+    # Source files can move with a portable package. The catalog is the current
+    # authority for each occurrence's asset path; report paths may still name
+    # the machine where the package was built.
+    db=connect()
+    try:
+        current_paths={row['clip']:row['path'] for row in db.execute('''
+            SELECT m.clip,s.path FROM mappings m JOIN sources s ON s.key=m.source
+            WHERE m.profile=?''',(name,))}
+    finally:db.close()
     signatures = {}
     requested=collections.defaultdict(set)
     for item in entries:
         if 'error' not in item and item.get('source'):
-            path=Path(item['source']);requested[path.parent].add(path.name)
+            path=Path(current_paths.get(item.get('clip'),item['source']));requested[path.parent].add(path.name)
     # Windows directory enumeration already carries size and timestamp.
     # Avoid thousands of separate network/USB file-stat requests on opening.
     for directory,names in requested.items():
@@ -46,7 +55,7 @@ def converted_keys(name):
     for item in entries:
         if 'error' in item:
             continue
-        path = item.get('source', '')
+        path = current_paths.get(item.get('clip'),item.get('source',''))
         if path not in signatures:
             try:
                 signatures[path] = source_signature(path)
@@ -58,7 +67,15 @@ def converted_keys(name):
         # Existing releases predate source_signature; their build timestamp is
         # the only available freshness evidence. New builds record both fields.
         saved = item.get('source_signature')
-        valid = signature == saved if saved else signature['mtime_ns'] <= package_time
+        if saved:
+            # Copying a portable library through an archive can round NTFS
+            # timestamps; file size plus a two-second tolerance preserves the
+            # freshness check while surviving that ordinary move.
+            valid=signature==saved or (
+                signature['size']==saved.get('size') and
+                abs(signature['mtime_ns']-saved.get('mtime_ns',signature['mtime_ns']))<=2_000_000_000
+            )
+        else:valid = signature['mtime_ns'] <= package_time
         if valid:
             result[item['clip']] = path
     return result

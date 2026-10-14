@@ -106,6 +106,20 @@ class EditorTests(unittest.TestCase):
                 source.write_bytes(b'new longer recording')
                 self.assertNotIn('clip',editor_catalog.converted_keys('Custom'))
 
+    def test_conversion_report_uses_relocated_catalog_source_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);source=root/'new library'/'voice.wav';source.parent.mkdir();source.write_bytes(b'converted voice')
+            catalog=root/'catalog.sqlite';db=core.connect(catalog)
+            db.execute("INSERT INTO sources(key,narrator,path,transcript,topic) VALUES (?,?,?,?,?)",('source','Custom',str(source),'voice','Outros comentários'))
+            db.execute("INSERT INTO mappings VALUES ('Custom','clip','source','manual',1)");db.commit();db.close()
+            game=root/'game';profile=game/'Narrations'/'Custom';profile.mkdir(parents=True)
+            (profile/'profile.npack').write_bytes(b'package')
+            signature=editor_catalog.source_signature(source)
+            (profile/'build_report.json').write_text(json.dumps([dict(clip='clip',source=r'C:\old\library\voice.wav',source_signature=signature)]),encoding='utf8')
+            original_connect=editor_catalog.connect
+            with patch.object(editor_catalog,'connect',lambda:original_connect(catalog)),patch.object(editor_catalog,'PROJECTS',root/'projects'),patch.object(editor_catalog,'GAME',game):
+                self.assertEqual(editor_catalog.converted_keys('Custom'),{'clip':str(source)})
+
     def test_install_copies_only_runtime_assets_into_game_narrations(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);build=root/'project'/'build';build.mkdir(parents=True)

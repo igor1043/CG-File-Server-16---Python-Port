@@ -14,8 +14,9 @@ MAPPING_NAME = 'Local\\FIFA16_IntroMusic_v1'
 class IntroMusicShared(ctypes.Structure):
     _fields_ = [(name, ctypes.c_uint32) for name in (
         'version', 'owner', 'heartbeat', 'command', 'ack', 'ready',
-        'phase', 'status', 'error', 'reads', 'replaced',
-    )] + [('package', ctypes.c_wchar * 1024)]
+        'phase', 'status', 'error', 'reads', 'replaced', 'hook_calls',
+        'description_reads', 'sbs_paths', 'music_paths',
+    )] + [('last_path', ctypes.c_wchar * 256), ('package', ctypes.c_wchar * 1024)]
 
 
 def _settings(path: Path) -> dict:
@@ -52,6 +53,7 @@ class IntroMusicRuntime:
         self._last_setting = None
         self._last_attempt = 0.0
         self._diagnostics = None
+        self._diagnostics_logged_at = 0.0
 
     def tick(self, prematch: bool):
         self.shared.heartbeat = ctypes.windll.kernel32.GetTickCount() & 0xffffffff
@@ -68,15 +70,19 @@ class IntroMusicRuntime:
         if self.pending and self.shared.ack == self.shared.command:
             self.pending = False
             if self.shared.status == 2:
-                self.app.log('Intro music: external profile active; original BIG banks unchanged')
+                self.app.log('Intro music: profile loaded in memory; audio switch awaits playback confirmation')
             else:
                 self.app.log(f'Intro music profile rejected (error {self.shared.error})')
 
         diagnostics = (self.shared.ready, self.shared.status, self.shared.error,
-                       self.shared.reads, self.shared.replaced)
-        if diagnostics != self._diagnostics:
+                       self.shared.hook_calls, self.shared.description_reads,
+                       self.shared.sbs_paths, self.shared.music_paths,
+                       self.shared.reads, self.shared.replaced, self.shared.last_path)
+        now = time.monotonic()
+        if diagnostics != self._diagnostics and now - self._diagnostics_logged_at >= 2.0:
             self._diagnostics = diagnostics
-            self.app.log('Intro music: ready={} status={} error={} reads={} replaced={}'.format(*diagnostics))
+            self._diagnostics_logged_at = now
+            self.app.log('Intro music trace: ready={} status={} error={} calls={} descriptions={} sbs_paths={} intro_paths={} reads={} replaced={} last_path={!r}'.format(*diagnostics))
 
         configuration = _settings(self.settings_path)
         enabled = configuration.get('enabled', False) is True

@@ -5,13 +5,14 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 import threading, queue, subprocess, shutil, hashlib, json,sqlite3
 from portable_setup import ensure_game_config
 ensure_game_config()
-from core import connect, WORK, DB, GAME, APP_ROOT, PROJECTS, FFMPEG, CONFIG_PATH, import_sources,RESOURCE_ROOT,CODE_ROOT,SOURCE_ROOT,WHISPER_MODEL
+from core import connect, WORK, DB, GAME, APP_ROOT, PROJECTS, USER_AUDIO_ROOT, FFMPEG, CONFIG_PATH, CONFIG, import_sources,RESOURCE_ROOT,CODE_ROOT,SOURCE_ROOT,WHISPER_MODEL
 from profiles import assign
 from topics import TOPICS, topic
 from audio_playback import AudioPlayer
 from editor_catalog import paired_page, coverage, converted_keys
 import projects
 from server16_py.narration_competitions import competitions
+from startup_wizard import choose_profile
 
 
 def startup_checkpoint(stage):
@@ -26,13 +27,13 @@ def number(value):
 
 
 class Studio(tk.Tk):
-    def __init__(self):
+    def __init__(self,initial_profile='Vilani'):
         startup_checkpoint('creating-window')
         super().__init__()
         self.title('FIFA 16 · Narration Studio')
-        self.geometry('1440x880'); self.minsize(1100,740)
+        self.geometry('1600x900'); self.minsize(1260,760)
         self.queue=queue.Queue(); self.busy=False; self.offset=0
-        self.profile=tk.StringVar(value='Vilani')
+        self.profile=tk.StringVar(value=initial_profile or 'Vilani')
         self.original_search=tk.StringVar(); self.source_search=tk.StringVar(); self.topic_filter=tk.StringVar(value='Todos os assuntos')
         self.state_filter=tk.StringVar(value='Todos')
         self.status=tk.StringVar(value='Selecione uma linha: original e sua narração ficam na mesma ocorrência.')
@@ -44,21 +45,22 @@ class Studio(tk.Tk):
         self.counts=dict(total=0,linked=0,converted=0,transcribed=0,topics={});self.converted={}
         self.loaded_profile=self.profile.get();self.closed=False
         self.write_requests=queue.Queue();self.write_results=queue.Queue();self.local_original_text={};self.local_source_text={}
+        self.autosave_timer=None;self.autosave_requested=None;self.autosave_running=False;self.autosave_results=queue.Queue()
         style=ttk.Style(self); style.theme_use('clam')
         style.configure('Treeview',rowheight=28,font=('Segoe UI',10))
         style.configure('Treeview.Heading',font=('Segoe UI',10,'bold'))
         style.configure('TButton',padding=6)
         top=ttk.Frame(self,padding=(14,10)); top.pack(fill='x')
         ttk.Label(top,text='FIFA 16 Narration Studio',font=('Segoe UI',21,'bold')).pack(side='left')
-        ttk.Button(top,text='Converter e instalar no jogo',command=self.build_project).pack(side='right')
+        ttk.Button(top,text='Gerar áudio e instalar no jogo',command=self.build_project).pack(side='right')
         bar=ttk.Frame(self,padding=(14,0,14,8)); bar.pack(fill='x')
-        ttk.Label(bar,text='Projeto:').pack(side='left',padx=(0,6))
+        ttk.Label(bar,text='Narrador ativo:').pack(side='left',padx=(0,6))
         self.profile_box=ttk.Combobox(bar,textvariable=self.profile,values=projects.names(),width=20,state='readonly')
         self.profile_box.pack(side='left'); self.profile_box.bind('<<ComboboxSelected>>',lambda e:self.change_profile())
-        for label,fn in [('Novo narrador',self.new_profile),('Abrir projeto',self.open_project),('Salvar projeto',self.save_project),('Narrador, competições e foto',self.edit_project)]:
+        for label,fn in [('Criar narrador',self.new_profile),('Importar projeto…',self.open_project),('Configurar narrador…',self.edit_project)]:
             ttk.Button(bar,text=label,command=fn).pack(side='left',padx=(6,0))
         filters=ttk.Frame(self,padding=(14,0,14,8)); filters.pack(fill='x')
-        ttk.Label(filters,text='Assunto:').pack(side='left',padx=(0,6))
+        ttk.Label(filters,text='Tipo de ocorrência (filtra as duas colunas):').pack(side='left',padx=(0,6))
         self.topic_box=ttk.Combobox(filters,textvariable=self.topic_filter,state='readonly',width=38)
         self.topic_box.pack(side='left'); self.topic_box.bind('<<ComboboxSelected>>',lambda e:self.refresh_original())
         ttk.Label(filters,text='Mostrar:').pack(side='left',padx=(10,6))
@@ -75,7 +77,8 @@ class Studio(tk.Tk):
         pane.add(left,weight=1); pane.add(right,weight=1)
         self.pane=pane
         self.library_panel=None
-        ttk.Button(nav,text='Mostrar / ocultar biblioteca',command=self.toggle_library).pack(side='right',padx=6)
+        self.library_button=ttk.Button(nav,text='Ocultar assets',command=self.toggle_library)
+        self.library_button.pack(side='right',padx=6)
         for frame in (left,right):
             frame.columnconfigure(0,weight=1); frame.rowconfigure(3,weight=1)
         ttk.Label(left,text='Original · Tiago Leifert / Caio Ribeiro',font=('Segoe UI',14,'bold')).grid(row=0,column=0,sticky='w',pady=6)
@@ -140,6 +143,7 @@ class Studio(tk.Tk):
             height=max(frame.grid_bbox(0,row)[3] for frame in self.column_frames)
             for frame in self.column_frames: frame.rowconfigure(row,minsize=height)
         self.protocol('WM_DELETE_WINDOW',self.close_app)
+        self.show_library()
 
     def request_data(self,recount=False):
         self.data_generation+=1
@@ -343,6 +347,7 @@ class Studio(tk.Tk):
                 sql='INSERT INTO narration_reviews(profile,clip,reviewed) VALUES (?,?,1) ON CONFLICT(profile,clip) DO UPDATE SET reviewed=1,updated_at=CURRENT_TIMESTAMP'
             else:sql='DELETE FROM narration_reviews WHERE profile=? AND clip=?'
             self.write_requests.put([(sql,(name,key))])
+            self.schedule_autosave(name)
             self.status.set('Áudio aprovado e destacado em verde.' if reviewed else 'Aprovação removida.')
         return 'break'
 
@@ -368,6 +373,36 @@ class Studio(tk.Tk):
     def change_profile(self):
         self.save_visible_texts();self.request_data(recount=True)
         if self.library_panel:self.library_panel.refresh(reset=True)
+        try:
+            config=json.loads(CONFIG_PATH.read_text(encoding='utf8')) if CONFIG_PATH.is_file() else dict(CONFIG)
+            config['last_profile']=self.profile.get()
+            temporary=CONFIG_PATH.with_suffix('.tmp')
+            temporary.write_text(json.dumps(config,ensure_ascii=False,indent=2),encoding='utf8')
+            temporary.replace(CONFIG_PATH)
+        except OSError as exc:self.status.set('Não consegui salvar o último narrador escolhido: '+str(exc))
+
+    def schedule_autosave(self,name=None):
+        name=name or self.loaded_profile or self.profile.get()
+        if not name or name=='Tiago Leifert':return
+        self.autosave_requested=name
+        if self.autosave_timer:
+            try:self.after_cancel(self.autosave_timer)
+            except tk.TclError:pass
+        self.autosave_timer=self.after(900,self._start_autosave)
+
+    def _start_autosave(self):
+        self.autosave_timer=None
+        if not self.autosave_requested:return
+        if self.busy or self.autosave_running:
+            self.autosave_timer=self.after(500,self._start_autosave);return
+        name=self.autosave_requested;self.autosave_requested=None;self.autosave_running=True
+        def save():
+            try:
+                self.write_requests.join()
+                projects.save(name)
+                self.autosave_results.put((name,None))
+            except Exception as exc:self.autosave_results.put((name,str(exc)))
+        threading.Thread(target=save,daemon=True).start()
 
     def show_library(self):
         if self.library_panel is None:
@@ -375,11 +410,13 @@ class Studio(tk.Tk):
             self.library_panel=LibraryPanel(self.pane,self)
         if str(self.library_panel) not in self.pane.panes():
             self.pane.add(self.library_panel,weight=1)
+        if hasattr(self,'library_button'):self.library_button.configure(text='Ocultar assets')
         self.library_panel.refresh()
 
     def toggle_library(self):
         if self.library_panel and str(self.library_panel) in self.pane.panes():
             self.pane.forget(self.library_panel)
+            if hasattr(self,'library_button'):self.library_button.configure(text='Mostrar assets')
         else:self.show_library()
 
     def refresh_sources(self):
@@ -446,13 +483,21 @@ class Studio(tk.Tk):
         paths=filedialog.askopenfilenames(title='Importar áudio para esta ocorrência',filetypes=[('Áudio','*.wav *.mp3 *.flac *.ogg *.m4a'),('Todos','*.*')])
         if not paths: return
         def task():
-            folder=projects.folder(name)/'source'; folder.mkdir(parents=True,exist_ok=True)
+            folder=USER_AUDIO_ROOT/projects.safe_name(name)/'Áudios individuais'; folder.mkdir(parents=True,exist_ok=True)
             imported=[]
             for path in paths:
-                source=Path(path); target=folder/(hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:8]+'_'+source.name)
-                if source.resolve()!=target.resolve(): shutil.copy2(source,target)
+                source=Path(path).expanduser().resolve()
+                try:source.relative_to(USER_AUDIO_ROOT.resolve());managed=True
+                except ValueError:managed=False
+                target=source if managed else folder/(hashlib.sha256(str(source).encode()).hexdigest()[:8]+'_'+source.name)
+                if not managed:
+                    shutil.copy2(source,target)
+                    for sidecar in (Path(str(source)+'.txt'),source.with_suffix('.txt')):
+                        if sidecar.is_file():
+                            side_target=Path(str(target)+'.txt') if sidecar==Path(str(source)+'.txt') else target.with_suffix('.txt')
+                            if not side_target.exists():shutil.copy2(sidecar,side_target)
                 imported.append(str(target))
-            import_sources(name,folder)
+                import_sources(name,target)
             if len(imported)==1:
                 db=connect(); row=db.execute('SELECT key FROM sources WHERE narrator=? AND path=?',(name,imported[0])).fetchone(); db.close()
                 assign(name,original['key'],row['key']); result='Áudio importado e colocado nesta ocorrência. Você já pode ouvir sua narração.'
@@ -550,11 +595,13 @@ class Studio(tk.Tk):
                 if item['key']==source['key']:
                     item['transcript']=text
                     if self.right.exists(key): self.right.set(key,'text',text)
-        if queries:self.write_requests.put(queries)
+        if queries:
+            self.write_requests.put(queries)
+            self.schedule_autosave(self.loaded_profile)
         self.original_text.edit_modified(False); self.source_text.edit_modified(False)
 
     def open_project(self):
-        path=filedialog.askdirectory(title='Abra a pasta do projeto ou da narração instalada',initialdir=str(PROJECTS))
+        path=filedialog.askdirectory(title='Importe um projeto ou selecione Narrations\\<narrador>',initialdir=str(GAME/'Narrations'))
         if path: self.job(lambda:dict(opened=projects.open_project(path)))
 
     def edit_project(self):
@@ -640,6 +687,13 @@ class Studio(tk.Tk):
                 if not ok:self.status.set('Salvando quando o catálogo ficar disponível… '+error)
         except queue.Empty:pass
         try:
+            while True:
+                name,error=self.autosave_results.get_nowait();self.autosave_running=False
+                if error:self.status.set('Falha no salvamento automático: '+error)
+                elif name==self.profile.get():self.status.set(f'Edição salva automaticamente em Narrations\\{name}\\Studio. Use “Gerar áudio e instalar no jogo” para atualizar a voz da partida.')
+                if self.autosave_requested and not self.autosave_timer:self.autosave_timer=self.after(300,self._start_autosave)
+        except queue.Empty:pass
+        try:
             ok,result=self.queue.get_nowait(); self.busy=False
             if isinstance(result,dict) and 'opened' in result:
                 self.profile_box['values']=projects.names(); self.profile.set(result['opened']); result='Projeto aberto: '+result['opened']
@@ -654,6 +708,13 @@ class Studio(tk.Tk):
     def close_app(self):
         if self.busy: messagebox.showinfo('Processando','Aguarde a tarefa terminar antes de fechar.'); return
         self.save_visible_texts()
+        if self.autosave_timer:
+            try:self.after_cancel(self.autosave_timer)
+            except tk.TclError:pass
+            self.autosave_timer=None
+        if self.autosave_requested and not self.autosave_running:self._start_autosave()
+        if self.autosave_running or self.autosave_requested:
+            self.status.set('Salvando a edição em Narrations antes de fechar…');self.after(100,self.close_app);return
         if self.write_requests.unfinished_tasks:
             self.status.set('Salvando suas últimas alterações antes de fechar…');self.after(100,self.close_app);return
         self.closed=True
@@ -668,8 +729,8 @@ class Studio(tk.Tk):
 if __name__=='__main__':
     import sys
     try:
-        app=Studio()
         if '--smoke' in sys.argv:
+            app=Studio()
             startup_checkpoint('smoke-verifying')
             import time
             app.withdraw();deadline=time.monotonic()+60
@@ -678,7 +739,13 @@ if __name__=='__main__':
             if not app.data_loaded or app.counts.get('loading'):raise ValueError('Catálogo ou contagem não ficaram disponíveis no teste de abertura.')
             report=dict(projects=projects.names(),catalog=str(DB),original_rows=len(app.originals),paired_rows=list(app.left.get_children())==list(app.right.get_children()),review_column='reviewed' in app.right['columns'],independent_searches=hasattr(app,'original_search') and hasattr(app,'source_search'),counts=app.counts,status='ok')
             (APP_ROOT/'studio_smoke.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf8'); app.close_app(); startup_checkpoint('smoke-complete')
-        else: app.mainloop()
+        else:
+            default=CONFIG.get('last_profile','Vilani')
+            profile,create_new=choose_profile(projects.names(),GAME,DB,default)
+            if profile is None and not create_new:raise SystemExit(0)
+            app=Studio(profile or 'Tiago Leifert')
+            if create_new:app.after(250,app.new_profile)
+            app.mainloop()
     except Exception:
         import traceback
         (APP_ROOT/'studio_error.log').write_text(traceback.format_exc(),encoding='utf8')

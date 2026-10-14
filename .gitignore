@@ -72,3 +72,17 @@ runtime/NarrationRelease/
 runtime/backups/
 *.npack
 *.sps
+
+# Local packaging and media editing outputs are separate from source releases.
+dist_*/
+build_*.log
+compdata_patcher.log
+entrance_props_test_results.txt
+runtime/cgfs16_overlay.dll
+tools/intro_music/output/
+tools/video_abertura/*.exe
+tools/video_abertura/*.mp4
+tools/video_abertura/*.avi
+tools/narration_studio/*_portrait.jpg
+tools/narration_studio/generic_backup_path.txt
+code-release/

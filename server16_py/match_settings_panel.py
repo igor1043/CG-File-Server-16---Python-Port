@@ -7,10 +7,10 @@ from .panel_navigation import move_focus
 
 
 class MatchSettingsPanel:
-    WIDTH, HEIGHT = 600, 390
+    WIDTH, HEIGHT = 600, 435
     ROWS = ((24, 85, 576, 123), (24, 130, 576, 168),
-            (48, 175, 576, 213), (48, 220, 576, 258))
-    BACK, APPLY = (24, 278, 292, 320), (308, 278, 576, 320)
+            (48, 175, 576, 213), (48, 220, 576, 258), (24, 265, 576, 303))
+    BACK, APPLY = (24, 323, 292, 365), (308, 323, 576, 365)
 
     def __init__(self, selector):
         self.selector = selector
@@ -33,9 +33,9 @@ class MatchSettingsPanel:
         return focus not in (2, 3) or self.options.pyrotechnics
 
     def activate(self, focus):
-        if focus == 4:
+        if focus == len(self.ROWS):
             self.selector.show_menu()
-        elif focus == 5:
+        elif focus == len(self.ROWS) + 1:
             if self.load_error:
                 return
             if self.selector.context != self.selector._context():
@@ -64,12 +64,12 @@ class MatchSettingsPanel:
             return
         if kind == 16:
             if value == 1:
-                self.activate(5)
+                self.activate(len(self.ROWS) + 1)
             return
-        focuses = [i for i in range(6) if self.enabled(i)]
+        focuses = [i for i in range(len(self.ROWS) + 2) if self.enabled(i)]
         if kind in (4, 5, 9, 2, 3):
             targets=[(i,r) for i,r in enumerate((*self.ROWS,self.BACK,self.APPLY)) if i in focuses]
-            self.focus = move_focus(self.focus,kind,targets,5)
+            self.focus = move_focus(self.focus,kind,targets,len(self.ROWS) + 1)
         elif kind == 6:
             self.activate(self.focus)
             return
@@ -90,8 +90,8 @@ class MatchSettingsPanel:
         ink, muted, blue = '#344651', '#8797ab', '#0968f8'
         draw.rounded_rectangle((0, 0, self.WIDTH-1, self.HEIGHT-1), 18, fill='white', outline='#e0e6ee')
         draw.text((24, 22), 'Configurações da partida', font=self.selector.font(23, True), fill=ink)
-        draw.text((24, 58), 'Mascotes e efeitos dos mods instalados.', font=self.selector.font(15), fill=muted)
-        labels = ('Habilitar mascotes', 'Efeitos pirotécnicos', 'Na abertura da partida', 'Após o gol')
+        draw.text((24, 58), 'Apresentação e efeitos no gramado.', font=self.selector.font(15), fill=muted)
+        labels = ('Habilitar mascotes', 'Efeitos pirotécnicos', 'Na abertura da partida', 'Após o gol', 'Objetos de abertura da competição')
         for i, (key, label, rect) in enumerate(zip(self.store.KEYS, labels, self.ROWS)):
             active, enabled = getattr(self.options, key), self.enabled(i)
             if self.focus == i:
@@ -102,8 +102,8 @@ class MatchSettingsPanel:
             cx = 513 if active else 491
             draw.ellipse((cx-9, cy-9, cx+9, cy+9), fill='white')
             draw.text((535, cy-9), 'Sim' if active else 'Não', font=self.selector.font(12), fill=ink if enabled else muted)
-        for focus, rect, label, key, button in ((4, self.BACK, 'Voltar', 'F2', 'B'), (5, self.APPLY, 'Aplicar', 'F1', 'A')):
-            primary = focus == 5
+        for focus, rect, label, key, button in ((len(self.ROWS), self.BACK, 'Voltar', 'F2', 'B'), (len(self.ROWS) + 1, self.APPLY, 'Aplicar', 'F1', 'A')):
+            primary = focus == len(self.ROWS) + 1
             draw.rounded_rectangle(rect, 10, fill=FOCUSED_PRIMARY if primary and self.focus == focus else blue if primary else 'white', outline='#c9d3df')
             if self.focus == focus:
                 draw_focus_ring(draw, rect)

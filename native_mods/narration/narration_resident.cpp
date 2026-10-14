@@ -18,7 +18,8 @@ struct Shared {
 };
 struct MusicShared {
     DWORD version, owner, heartbeat, command, ack, ready, phase, status, error;
-    DWORD reads, replaced;
+    DWORD reads, replaced, hook_calls, description_reads, sbs_paths, music_paths;
+    wchar_t last_path[256];
     wchar_t package[1024];
 };
 using AudioAsset=std::shared_ptr<std::vector<BYTE>>;
@@ -44,19 +45,32 @@ static std::wstring bank_path(const void *address){
     for(;length<sizeof(bytes)-1;++length){if(!read_memory((const BYTE *)address+length,bytes+length,1))return L"";if(!bytes[length])break;}
     if(length==sizeof(bytes)-1)return L"";
     std::wstring path;
-    for(size_t i=0;i<length;++i){unsigned char c=bytes[i];if(c>=128)return L"";path+=c=='\\'?L'/':wchar_t(c);}
+    for(size_t i=0;i<length;++i){unsigned char c=bytes[i];if(c>=128 || (c && (c<32 || c>126)))return L"";path+=c=='\\'?L'/':wchar_t(c);}
     path=lower(path);
     auto speech=path.find(L"audiodata/speechdata/por_br/");
     auto music=path.find(L"audiodata/sfx/intromusic_");
-    if(speech==std::wstring::npos && music==std::wstring::npos)return L"";
-    auto pos=speech==std::wstring::npos?music:music==std::wstring::npos?speech:std::min(speech,music);
-    return path.substr(pos);
+    if(speech!=std::wstring::npos || music!=std::wstring::npos){
+        auto pos=speech==std::wstring::npos?music:music==std::wstring::npos?speech:std::min(speech,music);
+        return path.substr(pos);
+    }
+    return path;
 }
 static void *__fastcall redirected_playback(void *description,void *arg2,void *arg3,void *player,DWORD arg5,float arg6,BYTE arg7){
+    if(music_alive())InterlockedIncrement((LONG *)&g_music_shared->hook_calls);
     BYTE copy[80];
     if(read_memory(description,copy,sizeof(copy))){
         const void *path=nullptr;uint64_t offset=0;memcpy(&path,copy+0x30,8);memcpy(&offset,copy+8,8);
         auto key=bank_path(path);
+        if(music_alive()){
+            InterlockedIncrement((LONG *)&g_music_shared->description_reads);
+            if(key.find(L".sbs")!=std::wstring::npos)InterlockedIncrement((LONG *)&g_music_shared->sbs_paths);
+            if(key.find(L"intromusic")!=std::wstring::npos){
+                InterlockedIncrement((LONG *)&g_music_shared->music_paths);
+                size_t n=std::min<size_t>(key.size(),255);
+                for(size_t i=0;i<n;++i)g_music_shared->last_path[i]=key[i];
+                g_music_shared->last_path[n]=0;
+            }
+        }
         if(key.rfind(L"audiodata/sfx/intromusic_",0)==0){
             auto profile=current_music();
             if(music_alive() && profile){
@@ -203,7 +217,7 @@ static DWORD WINAPI worker(void *){
                         auto profile=load(g_music_shared->package,true);
                         if(profile->banks.empty())throw 9;
                         {std::lock_guard<std::mutex> lock(g_mutex);g_music_profile=profile;}
-                        g_music_shared->status=2;log_line("Intro music profile selected; external SPS assets active");
+                        g_music_shared->status=2;log_line("Intro music profile loaded; playback redirection must be confirmed by counters");
                     }
                 }catch(int error){g_music_shared->error=error;g_music_shared->status=3;log_line("Intro music profile rejected");}
                  catch(...){g_music_shared->error=20;g_music_shared->status=3;log_line("Intro music profile load failed");}

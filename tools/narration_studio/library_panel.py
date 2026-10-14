@@ -3,19 +3,20 @@ from pathlib import Path
 import json,queue,threading
 import tkinter as tk
 from tkinter import ttk,filedialog,messagebox
-from core import connect,import_sources,WORK,PROJECTS,FFMPEG
+from core import connect,import_sources,copy_audio_collection,WORK,USER_AUDIO_ROOT,FFMPEG
 from audio_playback import AudioPlayer
+from projects import folder as project_folder,safe_name
 
 class LibraryPanel(ttk.Frame):
     def __init__(self,pane,studio):
         super().__init__(pane,padding=(8,0,0,0));self.studio=studio
-        self.results=queue.Queue();self.generation=0;self.rows={};self.offset=0;self.total=0;self.refresh_timer=None
-        self.query=tk.StringVar();self.filter=tk.StringVar(value='Todos');self.info=tk.StringVar(value='Anexe uma pasta de áudios deste narrador.')
+        self.results=queue.Queue();self.copy_progress=queue.Queue();self.generation=0;self.rows={};self.offset=0;self.total=0;self.refresh_timer=None
+        self.query=tk.StringVar();self.filter=tk.StringVar(value='Todos');self.info=tk.StringVar(value='Adicione uma pasta de áudios à biblioteca deste narrador.')
         self.columnconfigure(0,weight=1);self.rowconfigure(4,weight=1)
-        ttk.Label(self,text='Biblioteca de áudios',font=('Segoe UI',14,'bold')).grid(row=0,column=0,sticky='w',pady=6)
+        ttk.Label(self,text='Assets de áudio deste narrador',font=('Segoe UI',14,'bold')).grid(row=0,column=0,sticky='w',pady=6)
         actions=ttk.Frame(self);actions.grid(row=1,column=0,sticky='ew')
-        ttk.Button(actions,text='Anexar pasta',command=self.attach).pack(side='left')
-        ttk.Button(actions,text='Transcrever pasta com IA',command=self.transcribe).pack(side='left',padx=4)
+        ttk.Button(actions,text='＋ Adicionar pasta de áudios',command=self.attach).pack(side='left')
+        ttk.Button(actions,text='Transcrever biblioteca com IA',command=self.transcribe).pack(side='left',padx=4)
         self.progress=ttk.Progressbar(self,mode='determinate',maximum=100)
         self.progress.grid(row=2,column=0,sticky='ew',pady=5)
         filters=ttk.Frame(self);filters.grid(row=3,column=0,sticky='ew',pady=4)
@@ -77,6 +78,12 @@ class LibraryPanel(ttk.Frame):
         if self.studio.closed:return
         try:
             while True:
+                done,total=self.copy_progress.get_nowait()
+                self.progress.configure(maximum=max(1,total),value=done)
+                self.info.set(f'Copiando áudios para a biblioteca… {done:,} / {total:,}')
+        except queue.Empty:pass
+        try:
+            while True:
                 generation,rows,total,error=self.results.get_nowait()
                 if generation!=self.generation:continue
                 if error:self.info.set(error);continue
@@ -97,17 +104,24 @@ class LibraryPanel(ttk.Frame):
     def attach(self):
         name=self.studio.profile.get()
         if name=='Tiago Leifert':messagebox.showinfo('Biblioteca','Crie ou selecione um narrador personalizado.');return
-        folder=filedialog.askdirectory(title='Pasta dos áudios completos · '+name)
-        if not folder:return
-        folder=str(Path(folder).expanduser().resolve())
+        selected=filedialog.askdirectory(title='Escolha uma pasta de áudios · '+name)
+        if not selected:return
+        folder=str(Path(selected).expanduser().resolve())
+        managed=USER_AUDIO_ROOT/safe_name(name)
+        self.info.set('Copiando os áudios para a biblioteca organizada…')
+        self.progress['value']=0
         def task():
-            count=import_sources(name,folder)
-            path=PROJECTS/name/'library_folders.json';path.parent.mkdir(parents=True,exist_ok=True)
+            library,count=copy_audio_collection(folder,managed,progress=lambda done,total:self.copy_progress.put((done,total)))
+            indexed=import_sources(name,library)
+            path=project_folder(name)/'library_folders.json';path.parent.mkdir(parents=True,exist_ok=True)
             folders=[str(Path(item).expanduser().resolve()) for item in json.loads(path.read_text(encoding='utf8'))] if path.exists() else []
-            if folder not in folders:folders.append(folder)
+            library=str(Path(library).resolve())
+            if library not in folders:folders.append(library)
             path.write_text(json.dumps(folders,ensure_ascii=False,indent=2),encoding='utf8')
-            found=f'{count:,}'.replace(',','.')
-            return f'{found} áudios encontrados na pasta e nas subpastas. Abra a biblioteca para escolher os arquivos.'
+            from projects import save
+            save(name)
+            found=f'{indexed:,}'.replace(',','.')
+            return f'{found} áudios copiados e indexados em {library}. Abra a biblioteca para ouvir e associar.'
         self.studio.job(task)
 
     def use(self):

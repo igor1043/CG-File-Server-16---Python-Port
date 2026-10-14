@@ -13,10 +13,23 @@ def safe_name(name):
 
 def folder(name):return PROJECTS/safe_name(name)
 
+def game_project_folder(name,game_root=None):
+    """Editable sidecar saved beside the installed narrator profile."""
+    return profile_directory(Path(game_root or GAME),safe_name(name))/'Studio'
+
 def metadata(name):
-    for path in (folder(name)/'project.json',profile_directory(GAME,name)/'profile.json'):
+    for path in (folder(name)/'project.json',game_project_folder(name)/'project.json',profile_directory(GAME,name)/'profile.json'):
         if path.exists():return json.loads(path.read_text(encoding='utf8'))
     return dict(name=name,commentator='',competitions=[])
+
+def _mirror_editable_project(name,dest):
+    target=game_project_folder(name);target.mkdir(parents=True,exist_ok=True)
+    for relative in ('project.json','narrator.txt','portrait.png','library_folders.json','transcriptions/audio.json','transcriptions/audio.txt','transcriptions/original.txt','transcriptions/library.json'):
+        source=dest/relative
+        if not source.is_file():continue
+        output=target/relative;output.parent.mkdir(parents=True,exist_ok=True)
+        temporary=output.with_suffix(output.suffix+'.tmp')
+        shutil.copy2(source,temporary);temporary.replace(output)
 
 def save(name,commentator=None,competitions=None,portrait=None):
     dest=folder(name);dest.mkdir(parents=True,exist_ok=True)
@@ -39,7 +52,7 @@ def save(name,commentator=None,competitions=None,portrait=None):
         originals=db.execute('SELECT key,event,wav,transcript FROM clips ORDER BY event,row').fetchall()
         (texts/'original.txt').write_text('\n'.join(f"{r['key']}\t{r['event']}\t{r['wav']}\t{r['transcript'] or '[pendente]'}" for r in originals),encoding='utf8')
     (dest/'narrator.txt').write_text(f"Narrador={name}\nComentarista={data.get('commentator','')}\nCompeticoes={','.join(data.get('competitions',[]))}\n",encoding='utf8')
-    db.close();return dest
+    db.close();_mirror_editable_project(name,dest);return dest
 
 def new(name,commentator='',competitions=None):
     dest=folder(name)
@@ -128,9 +141,12 @@ def unpack(package):
 
 def open_project(path):
     src=Path(path);src=src.parent if src.is_file() else src
+    if (src/'Studio'/'project.json').is_file():src=src/'Studio'
     manifest=src/'project.json';meta=src/'profile.json'
     data=json.loads((manifest if manifest.exists() else meta).read_text(encoding='utf8'))
     name=safe_name(data['name']);dest=folder(name);dest.mkdir(parents=True,exist_ok=True)
+    folder_index=src/'library_folders.json'
+    if folder_index.is_file():shutil.copy2(folder_index,dest/'library_folders.json')
     if manifest.exists() and all(Path(r['path']).exists() for r in data.get('mappings',[])):
         db=connect()
         for r in data.get('mappings',[]):
@@ -138,7 +154,10 @@ def open_project(path):
             if db.execute('SELECT 1 FROM clips WHERE key=?',(r['clip'],)).fetchone():db.execute('INSERT OR REPLACE INTO mappings VALUES (?,?,?,?,?)',(name,r['clip'],r['source'],r.get('method','manual'),r.get('score',1)))
         db.commit();db.close()
     else:
-        package=src/data.get('package','profile.npack');media=dest/'source/recovered';media.mkdir(parents=True,exist_ok=True)
+        package=src/data.get('package','profile.npack')
+        if not Path(package).is_absolute():package=src/package
+        if not Path(package).is_file() and (src.parent/'profile.npack').is_file():package=src.parent/'profile.npack'
+        media=dest/'source/recovered';media.mkdir(parents=True,exist_ok=True)
         entries=[];unique={}
         for bank,offset,payload in unpack(package):
             token=hashlib.sha256(payload).hexdigest()[:24];sps=media/(token+'.sps');wav=sps.with_suffix('.wav')

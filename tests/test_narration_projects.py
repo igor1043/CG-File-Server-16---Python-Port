@@ -55,4 +55,25 @@ class ProjectTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT reviewed FROM narration_reviews WHERE profile='Custom' AND clip='clip'").fetchone()[0],1)
                 db.close()
 
+    def test_editable_project_is_autosaved_beside_game_profile_and_can_be_reopened(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);catalog=root/'catalog.sqlite';audio=root/'voice.wav';audio.write_bytes(b'voice')
+            db=core.connect(catalog)
+            db.execute("INSERT INTO clips(key,event,row,wav,status,transcript,topic) VALUES ('clip','INTRO',0,'original.wav','decoded','Original','Abertura e apresentação')")
+            db.execute("INSERT INTO sources(key,narrator,path,event,variant,transcript,duration,topic) VALUES ('source','Custom',?,'INTRO',0,'Minha apresentação',1.0,'Abertura e apresentação')",(str(audio),))
+            db.execute("INSERT INTO mappings(profile,clip,source,method,score) VALUES ('Custom','clip','source','manual',1)")
+            db.commit();db.close()
+            projects_root=root/'projects';game=root/'game'
+            with patch.object(projects,'connect',lambda:core.connect(catalog)),patch.object(projects,'PROJECTS',projects_root),patch.object(projects,'GAME',game):
+                projects.save('Custom')
+                installed=game/'Narrations'/'Custom';sidecar=installed/'Studio'/'project.json'
+                self.assertTrue(sidecar.is_file())
+                saved=json.loads(sidecar.read_text(encoding='utf8'))
+                self.assertEqual(saved['mappings'][0]['source'],'source')
+                db=core.connect(catalog);db.execute("DELETE FROM mappings WHERE profile='Custom'");db.commit();db.close()
+                projects.open_project(installed)
+                db=core.connect(catalog)
+                self.assertEqual(db.execute("SELECT source FROM mappings WHERE profile='Custom' AND clip='clip'").fetchone()[0],'source')
+                db.close()
+
 if __name__=='__main__':unittest.main()

@@ -723,8 +723,11 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     ctx->IASetVertexBuffers(0,1,&g_vb,&stride,&offset);
 
     Vtx11 verts[kColoredVertexCapacity]; int n=0;
-    const float loadingScale=1.f;
-    const float loadingX=px;
+    const int assetCount=(scoreboardVisible?1:0)+(movieVisible?1:0)+(narrationVisible?1:0);
+    const float stackHeight=(stadiumVisible?PH:0.f)+(assetCount?(stadiumVisible?10.f:0.f)+assetCount*76.f-10.f:0.f);
+    auto noticeLayout=loading_layout(vpW,vpH,PW,std::max(1.f,stackHeight));
+    const float loadingScale=noticeLayout.scale;
+    const float loadingX=noticeLayout.x;
     auto DrawTexQuad=[&](ID3D11DeviceContext* context,float x,float y,float w,float h,
         float vw,float vh,ID3D11ShaderResourceView* texture,float alpha=1.f,
         float u0=0.f,float v0=0.f,float u1=1.f,float v1=1.f) {
@@ -786,16 +789,16 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
             LONG canvasWidth=g_selector_draw_width,canvasHeight=g_selector_draw_height;
             auto layout=selector_layout(vpW,vpH,canvasWidth,canvasHeight);
             float offset=layout.keyboard ? 200.f : 0.f;
-            DrawTexQuad(ctx,layout.card_x,layout.card_y,layout.card_width*layout.card_scale,layout.card_height*layout.card_scale,
+            ::DrawTexQuad(ctx,layout.card_x,layout.card_y,layout.card_width*layout.card_scale,layout.card_height*layout.card_scale,
                 vpW,vpH,g_previewSRV,1.f,offset/canvasWidth,0.f,(offset+layout.card_width)/canvasWidth,layout.card_height/canvasHeight);
             if (layout.keyboard) {
-                DrawTexQuad(ctx,layout.keyboard_x,layout.keyboard_y,1000.f*layout.keyboard_scale,230.f*layout.keyboard_scale,
+                ::DrawTexQuad(ctx,layout.keyboard_x,layout.keyboard_y,1000.f*layout.keyboard_scale,230.f*layout.keyboard_scale,
                     vpW,vpH,g_previewSRV,1.f,0.f,600.f/canvasHeight,1.f,1.f);
             }
             if (g_previousPhoto) {
                 float progress=photo_fade((DWORD)(GetTickCount()-g_photoFadeStarted));
                 if (progress<1.f && g_previousWidth==canvasWidth && g_previousHeight==canvasHeight) {
-                    DrawTexQuad(ctx,layout.card_x+24.f*layout.card_scale,layout.card_y+130.f*layout.card_scale,
+                    ::DrawTexQuad(ctx,layout.card_x+24.f*layout.card_scale,layout.card_y+130.f*layout.card_scale,
                         552.f*layout.card_scale,232.f*layout.card_scale,vpW,vpH,g_previousPhoto,1.f-progress,
                         (offset+24.f)/g_previousWidth,130.f/g_previousHeight,(offset+576.f)/g_previousWidth,362.f/g_previousHeight);
                 } else { g_previousPhoto->Release(); g_previousPhoto=nullptr; }

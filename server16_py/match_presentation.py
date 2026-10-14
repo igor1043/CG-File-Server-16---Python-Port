@@ -14,11 +14,12 @@ class PresentationOptions:
     pyrotechnics: bool = False
     entrance: bool = False
     goal: bool = False
+    entrance_props: bool = True
 
 
 class MatchPresentation:
     """Only the dedicated mod configuration is edited; no FIFA assets or loader."""
-    KEYS = ('mascots', 'pyrotechnics', 'entrance', 'goal')
+    KEYS = ('mascots', 'pyrotechnics', 'entrance', 'goal', 'entrance_props')
 
     def __init__(self, game_root):
         self.path = Path(game_root) / 'ModCarrerMode' / 'config' / 'match_presentation.ini'

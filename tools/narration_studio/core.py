@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, json, sqlite3, subprocess, os, hashlib, struct, wave, zlib
+import sys, json, sqlite3, subprocess, os, hashlib, struct, wave, zlib, shutil
 from pathlib import Path, PureWindowsPath
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
@@ -25,9 +25,10 @@ GAME=configured_path('game',str(APP_ROOT))
 LOCAL_GAME=(GAME/'fifa16.exe').is_file()
 TOOL=configured_path('audio_tool',str(APP_ROOT/'FIFA16AudioTool'))
 NARRATIONS=narration_root(GAME)
-WORK=configured_path('catalog_root',str(GAME/'NarrationStudio/Catalog' if LOCAL_GAME else APP_ROOT/'Projects/.studio'))
-PROJECTS=configured_path('projects',str(GAME/'NarrationStudio/Projects' if LOCAL_GAME else APP_ROOT/'Projects'))
-SOURCE_ROOT=configured_path('source_root',str(CONFIG_PATH.parent))
+WORK=configured_path('catalog_root',str(APP_ROOT/'Dados FIFA 16/Catálogo editável/.studio'))
+PROJECTS=configured_path('projects',str(APP_ROOT/'Projetos'))
+SOURCE_ROOT=configured_path('source_root',str(APP_ROOT.parent/'Áudios Originais dos Narradores/01 - Acervos originais'))
+USER_AUDIO_ROOT=configured_path('user_audio_root',str(APP_ROOT.parent/'Áudios Originais dos Narradores/02 - Áudios adicionados pelo usuário'))
 WHISPER_MODEL=configured_path('whisper_model',str(RESOURCE_ROOT/'models/faster-whisper-small'))
 DB = WORK/'catalog.sqlite'
 VGM = RESOURCE_ROOT/'bin/vgmstream-cli.exe' if (RESOURCE_ROOT/'bin/vgmstream-cli.exe').exists() else APP_ROOT/'bin/vgmstream-cli.exe' if (APP_ROOT/'bin/vgmstream-cli.exe').exists() else TOOL/'vgmstream-cli.exe'
@@ -99,6 +100,7 @@ def connect(path=DB):
     ''')
     db.execute('CREATE TABLE IF NOT EXISTS narration_reviews (profile TEXT, clip TEXT, reviewed INTEGER NOT NULL DEFAULT 1, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(profile,clip))')
     db.execute('CREATE INDEX IF NOT EXISTS narration_reviews_profile_state ON narration_reviews(profile,reviewed)')
+    db.execute('CREATE INDEX IF NOT EXISTS sources_narrator_path ON sources(narrator,path)')
     from topics import update_topics
     ready=('topic_metadata' in tables and db.execute('SELECT 1 FROM topic_metadata WHERE version=4').fetchone()
            and all('topic' in {row[1] for row in db.execute('PRAGMA table_info('+table+')')} for table in ('clips','sources')))
@@ -265,6 +267,67 @@ def iter_source_audio(root):
             path=Path(folder)/filename
             if path.suffix.lower() in SOURCE_AUDIO_EXTENSIONS and path.is_file(): yield path.resolve()
 
+def safe_audio_folder_name(value):
+    """Make a readable Windows folder name for an imported audio collection."""
+    name=''.join('_' if char in '<>:"/\\|?*' or ord(char)<32 else char for char in str(value or '').strip())
+    name=name.rstrip('. ')
+    if not name or name.upper() in {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}:
+        name='Coleção de áudios'
+    return name
+
+def _inside_directory(path, root):
+    try:Path(path).resolve().relative_to(Path(root).resolve());return True
+    except (ValueError,OSError):return False
+
+def copy_audio_collection(source_root, destination_parent, progress=None):
+    """Copy a selected audio tree into the managed narrator library.
+
+    Folder structure and adjacent TXT transcripts are kept. Re-attaching a
+    folder already in the managed library indexes it in place instead of
+    making another copy.
+    """
+    source=Path(source_root).expanduser().resolve()
+    parent=Path(destination_parent).expanduser().resolve()
+    if not source.is_dir():raise NotADirectoryError('Selecione uma pasta de áudios válida: '+str(source))
+    if _inside_directory(source,parent):
+        count=sum(1 for _ in iter_source_audio(source))
+        return source,count
+    parent.mkdir(parents=True,exist_ok=True)
+    base=safe_audio_folder_name(source.name)
+    target=parent/base
+    index=2
+    while target.exists():
+        marker=target/'.narration-library.json'
+        try:
+            if json.loads(marker.read_text(encoding='utf8')).get('source')==str(source):
+                return target,sum(1 for _ in iter_source_audio(target))
+        except (OSError,ValueError,AttributeError):pass
+        target=parent/f'{base} ({index})';index+=1
+    total=sum(1 for _ in iter_source_audio(source))
+    copied=0
+    target.mkdir(parents=True)
+    try:
+        for path in iter_source_audio(source):
+            relative=path.relative_to(source)
+            destination=target/relative
+            destination.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(path,destination)
+            for sidecar in (Path(str(path)+'.txt'),path.with_suffix('.txt')):
+                if sidecar.is_file():
+                    side_relative=sidecar.relative_to(source)
+                    side_destination=target/side_relative
+                    side_destination.parent.mkdir(parents=True,exist_ok=True)
+                    if not side_destination.exists():shutil.copy2(sidecar,side_destination)
+            copied+=1
+            if progress and (copied==total or copied%25==0):progress(copied,total)
+        (target/'.narration-library.json').write_text(
+            json.dumps({'source':str(source),'audio_files':copied},ensure_ascii=False,indent=2),encoding='utf8')
+    except Exception:
+        # Leave the partial import visible for recovery instead of deleting user data.
+        (target/'.import_incomplete').write_text(f'Origem: {source}\nCopiados: {copied}/{total}\n',encoding='utf8')
+        raise
+    return target,copied
+
 def import_sources(narrator, root):
     import re
     db=connect(); count=0
@@ -273,12 +336,18 @@ def import_sources(narrator, root):
             match=re.match(r'(.+)_(\d+)_(\d+)$',p.stem)
             event,variant=(match[1],int(match[2])) if match else ('',-1)
             duration=0
-            key=narrator+':'+hashlib.sha256(str(p).encode()).hexdigest()[:20]
-            from topics import topic
+            existing=db.execute('SELECT key,transcript FROM sources WHERE narrator=? AND path=?',(narrator,str(p))).fetchone()
             transcript=''
             for text_path in (p.with_suffix(p.suffix+'.txt'),p.with_suffix('.txt')):
                 if text_path.is_file():
                     transcript=text_path.read_text(encoding='utf-8-sig').strip();break
+            if existing:
+                if transcript and not existing['transcript']:
+                    db.execute('UPDATE sources SET transcript=? WHERE key=?',(transcript,existing['key']))
+                count+=1
+                continue
+            key=narrator+':'+hashlib.sha256(str(p).encode()).hexdigest()[:20]
+            from topics import topic
             db.execute('INSERT OR IGNORE INTO sources (key,narrator,path,event,variant,duration,topic,transcript) VALUES (?,?,?,?,?,?,?,?)',(key,narrator,str(p),event,variant,duration,topic(event,str(p),transcript),transcript)); count+=1
             if count%200==0: db.commit()
         db.commit()
