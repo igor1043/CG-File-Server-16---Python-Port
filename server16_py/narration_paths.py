@@ -3,8 +3,11 @@
 The FIFA-facing layout intentionally stays simple:
     <game root>/Narrations/<narrator>/profile.npack
 
-Editable projects, the source-audio library, and the original-game catalogue
-live beside the game instead of inside its runtime narration directory.
+An editable snapshot and managed imported audio may also live in each
+narrator's Studio subdirectory. The shared original-game catalogue and the
+external source-audio libraries remain beside the editor. Only profile.json,
+the referenced native package, narrator metadata and portrait are loaded by
+the game server.
 """
 from __future__ import annotations
 

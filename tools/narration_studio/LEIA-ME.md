@@ -4,6 +4,23 @@ Na primeira abertura, selecione a pasta que contém fifa16.exe. Depois escolha
 um narrador existente ou crie outro. O editor tem três colunas: referência
 original, sua narração e biblioteca de áudios do narrador ativo.
 
+## O que copiar para o jogo
+
+Copie a pasta Narrations de “Coloque no FIFA 16” para a raiz que contém
+fifa16.exe, mesclando as subpastas. O Server16 atualizado carrega os perfis
+dessa pasta do jogo. A cópia em “Coloque no FIFA 16” serve para distribuição;
+ela não é consultada durante a partida nem se atualiza sozinha após edições.
+
+Cada narrador tem profile.json, narrator.txt e profile.npack, além da foto
+quando disponível. profile.npack é o pacote de áudio do mod, não um vídeo MP4
+nem um ZIP para extrair. Ele reúne os áudios convertidos e as associações às
+falas do FIFA; gravações reutilizadas são guardadas uma vez. Preserve o nome
+e a extensão. A pasta Studio contém os dados de edição e áudios importados.
+Outras pastas de trabalho, como encoded, não substituem o pacote de reprodução.
+O perfil Tiago Leifert usa os bancos originais já instalados no FIFA.
+
+## Editar e ouvir
+
 As transcrições são salvas automaticamente enquanto você digita nas três
 colunas. Para comparar as gravações, selecione uma ocorrência e use o player
 de cada coluna. Os filtros de ocorrência e situação mantêm as duas primeiras
