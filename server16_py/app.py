@@ -31,7 +31,6 @@ from .camera_runtime import CameraPreset, CameraRuntime
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
 from .entrance_runtime import TeamEntranceRuntime
 from .entrance_props_runtime import EntrancePropsRuntime
-from .presentation_loading import PresentationLoading
 from .discord_rpc_runtime import DiscordRPCRuntime, StadiumPreviewUploader
 from .fifa_db import FifaDatabase
 from .gamepad_runtime import (
@@ -317,7 +316,6 @@ class Server16App(tk.Tk):
         self.chants_runtime = ChantsRuntime(self)
         self.entrance_runtime = TeamEntranceRuntime(self)
         self.entrance_props_runtime = EntrancePropsRuntime(self)
-        self.presentation_loading = PresentationLoading(self)
         self.assignment_runtime = AssignmentRuntime(self)
         self.camera_runtime = CameraRuntime(self)
         # Initialize DiscordRPC (loads from settings.json)
@@ -1097,42 +1095,27 @@ class Server16App(tk.Tk):
         self.stadium_loading_bar.pack(fill="x", pady=(2, 0))
         modal.geometry("340x274")
 
+    def _withdraw_stadium_loading_fallback(self) -> None:
+        # A Tk window shown before injection must never survive the switch to D3D.
+        if self._stadium_loading_hwnd:
+            try:
+                self.user32.ShowWindow(self._stadium_loading_hwnd, SW_HIDE)
+            except Exception:
+                pass
+        if self.stadium_loading_modal is not None:
+            self.stadium_loading_bar.stop()
+            self.stadium_loading_modal.withdraw()
+
     def _show_stadium_loading_modal(self, stadium_name: str, detail: str = "Preparing stadium assets", progress: float = 0.0, title: str | None = None, use_d3d: bool = True) -> None:
-        if not self.show_stadium_loading_var.get() and title != 'Narração aplicada':
-            self._stadium_loading_visible = False
-            self._stadium_loading_restore_fullscreen = False
+        self._withdraw_stadium_loading_fallback()
+        if not self.show_stadium_loading_var.get():
             return
         self._cancel_stadium_loading_hide()
-        title = title or self.tr("stadium_modal.title")
-        if self.stadium_loading_title is not None:
-            self.stadium_loading_title.configure(text=title)
-        # ── D3D injection overlay (visible in fullscreen) ─────────────────────
         if use_d3d and self._try_d3d_overlay_show(stadium_name, detail, progress, narration=title=='Narração aplicada'):
             return
-        # ── Tkinter modal fallback ────────────────────────────────────────────
-        if self.stadium_loading_modal is None:
-            return
-        self.stadium_loading_modal.configure(cursor="arrow")
-        self._update_stadium_loading_preview(stadium_name)
-        if self.stadium_loading_name is not None:
-            self.stadium_loading_name.configure(text=stadium_name or "-")
-        if self.stadium_loading_detail is not None:
-            self.stadium_loading_detail.configure(text=detail or self.tr("stadium_modal.preparing"))
-        if self.stadium_loading_value is not None:
-            self.stadium_loading_value.set(max(0, min(100, progress)))
-        self._stadium_loading_restore_fullscreen = self._is_probable_fullscreen_window(self._fifa_hwnd)
-        self._stadium_loading_visible = True
-        self._position_stadium_loading_modal()
-        self.stadium_loading_modal.deiconify()
-        self.stadium_loading_bar.stop()
-        self.stadium_loading_modal.update_idletasks()
-        self._stadium_loading_hwnd = self.stadium_loading_modal.winfo_id()
-        self._apply_noactivate_window_style(self._stadium_loading_hwnd)
-        try:
-            self.user32.ShowWindow(self._stadium_loading_hwnd, SW_SHOWNOACTIVATE)
-        except Exception:
-            pass
-        self.after(10, self._focus_fifa_window)
+        # Keep the main Server16 status available while the game renderer starts.
+        # Only the native overlay may display loading notices over the FIFA window.
+        self.log(f"Stadium loading notification awaiting native overlay: {stadium_name}")
 
     def show_narration_applied(self, name: str) -> None:
         self.log(f'Narration applied: {name}; selection modal closed')
@@ -1162,6 +1145,7 @@ class Server16App(tk.Tk):
         inj = self._d3d_injector
         if inj is None:
             return False
+        self._withdraw_stadium_loading_fallback()
         inj.show(('[Narração aplicada] '+stadium_name) if narration else stadium_name, detail or self.tr("stadium_modal.preparing"), progress,
                  image_path=str(self._resolve_stadium_preview_path(stadium_name) or ""))
         self._d3d_overlay_shown_at = time.monotonic()
@@ -1220,6 +1204,7 @@ class Server16App(tk.Tk):
             self._cancel_stadium_loading_hide()
             self._stadium_loading_hide_job = self.after(delay_ms, self._hide_stadium_loading_modal)
             return
+        self._withdraw_stadium_loading_fallback()
         if self._stadium_loading_hide_job is not None:
             try:
                 self.after_cancel(self._stadium_loading_hide_job)
@@ -1290,7 +1275,7 @@ class Server16App(tk.Tk):
             self.stadium_loading_modal.update_idletasks()
 
     def _show_asset_loading(self, kind: str, title: str, name: str, detail: str, progress: float, image_path: str = '') -> None:
-        if kind not in ('narration', 'presentation') and not self.show_stadium_loading_var.get():
+        if kind != 'narration' and not self.show_stadium_loading_var.get():
             return
         previous = self._asset_loading_hide_jobs.pop(kind, None)
         if previous is not None:
@@ -1299,62 +1284,14 @@ class Server16App(tk.Tk):
             except Exception:
                 pass
         self._asset_loading_started_at[kind] = time.monotonic()
-        if self._d3d_injector is not None and self._d3d_injector.is_injected():
-            self._asset_loading_fallback.discard(kind)
-            if kind=='presentation':
-                self._presentation_native=True
-                if getattr(self,'_presentation_notice',None) is not None:self._presentation_notice.withdraw()
+        self._withdraw_stadium_loading_fallback()
+        self._asset_loading_fallback.discard(kind)
+        if self._ensure_d3d_overlay_injected():
             self._d3d_injector.show_asset(kind, name, detail, progress, image_path=image_path)
-            return
-        if kind=='presentation':
-            self._presentation_native=False
-            modal=getattr(self,'_presentation_notice',None)
-            if modal is None:
-                modal=tk.Toplevel(self);modal.withdraw();modal.overrideredirect(True)
-                modal.attributes('-topmost',True);modal.attributes('-disabled',True)
-                frame=ttk.Frame(modal,padding=14);frame.pack(fill='both',expand=True)
-                self._presentation_notice_title=ttk.Label(frame,font=('Bahnschrift',11,'bold'))
-                self._presentation_notice_title.pack(anchor='w')
-                self._presentation_notice_detail=ttk.Label(frame,justify='left',wraplength=390)
-                self._presentation_notice_detail.pack(fill='x',pady=(5,8))
-                self._presentation_notice_bar=ttk.Progressbar(frame,maximum=100)
-                self._presentation_notice_bar.pack(fill='x')
-                self._presentation_notice=modal
-            self._presentation_notice_title.configure(text=name)
-            self._presentation_notice_detail.configure(text=detail)
-            self._presentation_notice_bar.configure(value=progress)
-            fifa=self._find_fifa_window_handle();rect=RECT()
-            if fifa and self.user32.GetWindowRect(fifa,ctypes.byref(rect)):
-                modal.geometry(f'420x160+{max(rect.left,rect.right-436)}+{rect.top+16}')
-            else:
-                modal.geometry('420x160+30+200')
-            modal.deiconify()
-            return
-        if kind=='narration':
-            # Dedicated fallback window; never overwrite an active stadium.
-            modal=getattr(self,'_narration_notice',None)
-            if modal is None:
-                modal=tk.Toplevel(self);modal.withdraw();modal.overrideredirect(True);modal.attributes('-topmost',True)
-                frame=ttk.Frame(modal,padding=14);frame.pack(fill='both',expand=True)
-                photo=ttk.Label(frame);photo.pack(side='left',padx=(0,12));self._narration_notice_photo=photo
-                label=ttk.Label(frame,wraplength=270);label.pack(side='left',fill='both',expand=True);self._narration_notice=modal;self._narration_notice_label=label
-            self._narration_notice_photo.configure(image='');self._narration_notice_photo.image=None
-            if image_path:
-                try:
-                    from PIL import Image,ImageTk
-                    with Image.open(image_path) as source:photo=ImageTk.PhotoImage(source.resize((52,52)),master=modal)
-                    self._narration_notice_photo.configure(image=photo);self._narration_notice_photo.image=photo
-                except (OSError,ValueError):pass
-            self._narration_notice_label.configure(text=f'{title}\n{name}\n{detail}')
-            modal.geometry('400x110+30+340');modal.deiconify()
-            return
-        self._asset_loading_fallback.add(kind)
-        self._show_stadium_loading_modal(name, detail, progress, title=title, use_d3d=False)
+        else:
+            self.log(f"{kind} loading notification awaiting native overlay: {name}")
 
     def _update_asset_loading(self, kind: str, progress: float, detail: str) -> None:
-        if kind=='presentation' and getattr(self,'_presentation_notice',None) is not None:
-            self._presentation_notice_detail.configure(text=detail)
-            self._presentation_notice_bar.configure(value=progress)
         if kind in self._asset_loading_fallback:
             self._update_stadium_loading_modal(progress, detail)
         elif self._d3d_injector is not None and self._d3d_injector.is_injected():
@@ -1377,15 +1314,9 @@ class Server16App(tk.Tk):
         self._finish_asset_loading(kind)
 
     def _finish_asset_loading(self, kind: str) -> None:
-        previous = self._asset_loading_hide_jobs.pop(kind, None)
-        if previous is not None:
-            try:
-                self.after_cancel(previous)
-            except Exception:
-                pass
+        self._asset_loading_hide_jobs.pop(kind, None)
         self._asset_loading_started_at.pop(kind, None)
         if kind=='narration' and getattr(self,'_narration_notice',None) is not None:self._narration_notice.withdraw()
-        if kind=='presentation' and getattr(self,'_presentation_notice',None) is not None:self._presentation_notice.withdraw()
         if kind in self._asset_loading_fallback:
             self._asset_loading_fallback.discard(kind)
             if not self._stadium_task_running and not self._asset_loading_fallback:
@@ -3080,7 +3011,6 @@ class Server16App(tk.Tk):
         if self._closing:
             return
         try:
-            self.presentation_loading.tick()
             if self._stadium_selector is not None:
                 self._stadium_selector.tick()
                 if self._stadium_selector.opened:
@@ -4270,7 +4200,6 @@ class Server16App(tk.Tk):
         if self._closing:
             return
         self._closing = True
-        self.presentation_loading.close()
         if self._stadium_selector is not None:
             self._stadium_selector.shutdown()
             self._stadium_selector = None

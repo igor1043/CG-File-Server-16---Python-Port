@@ -40,7 +40,7 @@
 // ---------------------------------------------------------------------------
 // Shared memory (same layout as Python _OverlayShared)
 // ---------------------------------------------------------------------------
-#define SHMEM_NAME  L"Local\\CGFS16_Overlay_v4"
+#define SHMEM_NAME  L"Local\\CGFS16_Overlay_v3"
 #define MAX_STR     256
 #define MAX_IMG     512
 
@@ -63,10 +63,6 @@ struct OverlayShared {
     wchar_t narration_name[MAX_STR];
     wchar_t narration_detail[MAX_STR];
     wchar_t narration_image_path[MAX_IMG];
-    volatile LONG presentation_visible;
-    volatile LONG presentation_progress_x100;
-    wchar_t presentation_name[MAX_STR];
-    wchar_t presentation_detail[MAX_STR];
 };
 
 static HANDLE        g_hMap  = NULL;
@@ -165,7 +161,7 @@ static ID3D11SamplerState    *g_samp = nullptr;
 
 // Colored quad vertex
 struct Vtx11 { float x, y; float r, g, b, a; };
-static constexpr size_t kColoredVertexCapacity = 2048;
+static constexpr size_t kColoredVertexCapacity = 1024;
 
 // Textured quad vertex
 struct VtxT { float x, y, u, v, opacity; };
@@ -190,8 +186,6 @@ static TextTex g_ttMovieName;
 static TextTex g_ttMovieDetail;
 static TextTex g_ttNarrationName;
 static TextTex g_ttNarrationDetail;
-static TextTex g_ttPresentationTitle;
-static TextTex g_ttPresentationRows[4];
 
 // ---------------------------------------------------------------------------
 // Stadium preview image (WIC -> D3D11)
@@ -538,13 +532,11 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     // ── Read shared memory ─────────────────────────────────────────────────
     wchar_t stadium[MAX_STR]={}, detail[MAX_STR]={}, imgPath[MAX_IMG]={};
     float pct=0.f;
-    bool stadiumVisible=false, scoreboardVisible=false, movieVisible=false,narrationVisible=false,presentationVisible=false;
+    bool stadiumVisible=false, scoreboardVisible=false, movieVisible=false,narrationVisible=false;
     float scoreboardPct=0.f, moviePct=0.f,narrationPct=0.f;
     wchar_t scoreboardName[MAX_STR]={}, scoreboardDetail[MAX_STR]={};
     wchar_t movieName[MAX_STR]={}, movieDetail[MAX_STR]={};
     wchar_t narrationName[MAX_STR]={},narrationDetail[MAX_STR]={},narrationImage[MAX_IMG]={};
-    wchar_t presentationName[MAX_STR]={},presentationDetail[MAX_STR]={};
-    float presentationPct=0.f;
     if (g_data) {
         stadiumVisible=InterlockedCompareExchange(&g_data->visible,0,0)!=0;
         wcsncpy_s(stadium, g_data->stadium_name, MAX_STR-1);
@@ -564,10 +556,6 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         wcsncpy_s(narrationName,g_data->narration_name,MAX_STR-1);
         wcsncpy_s(narrationDetail,g_data->narration_detail,MAX_STR-1);
         wcsncpy_s(narrationImage,g_data->narration_image_path,MAX_IMG-1);
-        presentationVisible=InterlockedCompareExchange(&g_data->presentation_visible,0,0)!=0;
-        presentationPct=(float)InterlockedCompareExchange(&g_data->presentation_progress_x100,0,0)/100.f;
-        wcsncpy_s(presentationName,g_data->presentation_name,MAX_STR-1);
-        wcsncpy_s(presentationDetail,g_data->presentation_detail,MAX_STR-1);
     }
     bool selecting=selector_visible() && g_selector;
     LONG revision=selecting ? InterlockedCompareExchange(&g_selector->render_ready,0,0) : 0;
@@ -655,16 +643,6 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     const int narrationTextWidth=assetTextWidth-(g_narrationPortraitSRV?58:0);
     UpdateTextTex(dev,g_ttNarrationName,narrationTitle,13,true,RGB(0x34,0x46,0x51),narrationTextWidth);
     UpdateTextTex(dev,g_ttNarrationDetail,narrationDetail,11,false,RGB(0x87,0x97,0xAB),narrationTextWidth);
-    if(presentationVisible){
-        UpdateTextTex(dev,g_ttPresentationTitle,presentationName,13,true,RGB(0x34,0x46,0x51),assetTextWidth);
-        const wchar_t* cursor=presentationDetail;
-        for(int i=0;i<4;++i){
-            wchar_t line[MAX_STR]{};size_t length=0;
-            while(*cursor&&*cursor!=L'\n'&&length+1<MAX_STR)line[length++]=*cursor++;
-            if(*cursor==L'\n')++cursor;
-            UpdateTextTex(dev,g_ttPresentationRows[i],line,11,false,RGB(0x87,0x97,0xAB),assetTextWidth);
-        }
-    }
 
     // ── Update preview image (WIC) ─────────────────────────────────────────
     bool changed=wcscmp(imgPath,g_previewLoadedPath)!=0 || (selecting && revision!=g_loadedSelectorRevision) || (!selecting && g_selectorTexture);
@@ -746,9 +724,7 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
 
     Vtx11 verts[kColoredVertexCapacity]; int n=0;
     const int assetCount=(scoreboardVisible?1:0)+(movieVisible?1:0)+(narrationVisible?1:0);
-    const float otherHeight=(stadiumVisible?PH:0.f)+(assetCount?(stadiumVisible?10.f:0.f)+assetCount*76.f-10.f:0.f);
-    const float stackHeight=otherHeight+(presentationVisible?(otherHeight>0.f?10.f:0.f)+120.f:0.f);
-    const float presentationY=assetBaseY+assetCount*76.f;
+    const float stackHeight=(stadiumVisible?PH:0.f)+(assetCount?(stadiumVisible?10.f:0.f)+assetCount*76.f-10.f:0.f);
     auto noticeLayout=loading_layout(vpW,vpH,PW,std::max(1.f,stackHeight));
     const float loadingScale=noticeLayout.scale;
     const float loadingX=noticeLayout.x;
@@ -794,13 +770,6 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
         if(scoreboardVisible) drawAssetCard(assetBaseY,scoreboardPct);
         if(movieVisible) drawAssetCard(assetBaseY+(scoreboardVisible?76.f:0.f),moviePct);
         if(narrationVisible) drawAssetCard(assetBaseY+(scoreboardVisible?76.f:0.f)+(movieVisible?76.f:0.f),narrationPct);
-        if(presentationVisible){
-            Round(px,presentationY,PW,120.f,10.f,0xFFDFE6EF);
-            Round(px+1.f,presentationY+1.f,PW-2.f,118.f,9.f,0xFFFFFFFF);
-            Round(px+14.f,presentationY+103.f,PW-28.f,6.f,3.f,0xFFEDF2F7);
-            const float fill=std::max(0.f,std::min(100.f,presentationPct))/100.f;
-            if(fill>0.f)Round(px+14.f,presentationY+103.f,(PW-28.f)*fill,6.f,3.f,0xFF0968F8);
-        }
     }
 
     D3D11_MAPPED_SUBRESOURCE ms={};
@@ -872,12 +841,6 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
             if(g_ttNarrationName.srv)DrawTexQuad(ctx,textX,y+9.f,(float)g_ttNarrationName.width,(float)g_ttNarrationName.height,vpW,vpH,g_ttNarrationName.srv);
             if(g_ttNarrationDetail.srv)DrawTexQuad(ctx,textX,y+27.f,(float)g_ttNarrationDetail.width,(float)g_ttNarrationDetail.height,vpW,vpH,g_ttNarrationDetail.srv);
         }
-        if(presentationVisible){
-            if(g_ttPresentationTitle.srv)DrawTexQuad(ctx,px+14.f,presentationY+8.f,(float)g_ttPresentationTitle.width,(float)g_ttPresentationTitle.height,vpW,vpH,g_ttPresentationTitle.srv);
-            for(int i=0;i<4;++i){const auto& row=g_ttPresentationRows[i];
-                if(row.srv)DrawTexQuad(ctx,px+14.f,presentationY+29.f+i*17.f,(float)row.width,(float)row.height,vpW,vpH,row.srv);
-            }
-        }
     }
 
     // FIFA can hide its cursor while our modal owns input. Draw a pointer
@@ -945,8 +908,7 @@ static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT 
     if ((g_data && (InterlockedCompareExchange(&g_data->visible,0,0) != 0
         || InterlockedCompareExchange(&g_data->scoreboard_visible,0,0) != 0
         || InterlockedCompareExchange(&g_data->movie_visible,0,0) != 0
-        || InterlockedCompareExchange(&g_data->narration_visible,0,0) != 0
-        || InterlockedCompareExchange(&g_data->presentation_visible,0,0) != 0)) || selector_visible()) {
+        || InterlockedCompareExchange(&g_data->narration_visible,0,0) != 0)) || selector_visible()) {
         ID3D11Device *dev=nullptr;
         if (SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device),(void**)&dev))) {
             ID3D11DeviceContext *ctx=nullptr;

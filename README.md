@@ -8,7 +8,6 @@ Painel para configurar partidas do FIFA 16, escolher estádios e administrar apr
 |---|---|
 | **Configurações da partida** | Liga ou desliga mascotes, pirotecnia, fogos na entrada, fogos nos gols e objetos de abertura da competição. Aplicar salva; Voltar cancela. |
 | **Objetos de abertura** | Prepara o conjunto pelo ID da competição e da fase. Em amistosos, dois clubes da mesma liga usam a entrada dessa liga. O padrão é Sim; modelo ausente ou inválido deixa a partida sem o conjunto. |
-| **Carregamento da apresentação** | Prepara entradas, pirotecnia, VAR e máquinas de fumaça em segundo plano, com os avisos de progresso ocultos. |
 | **Estádio** | Escolha para o confronto com busca, prévia e navegação por teclado, mouse ou controle. |
 | **Placar e TV** | Usa os pacotes associados à competição e à fase. |
 | **Público** | Ajusta a ocupação quando o módulo nativo confirma a comunicação. |
@@ -28,8 +27,6 @@ As abas **Próxima Partida**, **Meu Time** e **Competição**, a cabine do VAR, 
 5. Depois de trocar o executável ou uma DLL, reinicie os programas envolvidos.
 
 As opções de apresentação ficam em `ModCarrerMode/config/match_presentation.ini`. A competição e a fase usam os IDs de `FSW/settings.ini`; o Server valida e seleciona os assets locais em `data/sceneassets/entrance_props/`. A pasta local `runtime/` guarda diagnósticos da sessão.
-
-Os avisos de carregamento da apresentação estão ocultos. A preparação dos arquivos e as confirmações das DLLs continuam em segundo plano, com diagnóstico em `runtime/presentation_loading.json`. Ao entrar na partida, o acompanhamento termina quando os recursos confirmam prontidão ou após 15 segundos, sem reler arquivos nem criar novos workers. Depois disso, não há consulta de progresso durante gameplay. A prévia prepara os recursos sem disparar fogos ou exibir a entrada. Use as quatro DLLs atualizadas junto com o novo EXE; o EXE sozinho não atualiza os carregadores do V12. Modelos e texturas do VAR continuam sendo recursos locais separados.
 
 ## Executar pelos fontes
 
