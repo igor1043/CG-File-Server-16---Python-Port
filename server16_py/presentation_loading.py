@@ -1,4 +1,4 @@
-"""Prepare scene assets in the preview; never fire effects or change options."""
+"""Prepare scene assets silently in the preview; retain background diagnostics."""
 from __future__ import annotations
 import configparser
 import json
@@ -128,22 +128,18 @@ class PresentationLoading:
         self.next_tick = self.next_stamp = 0.0
         self.stamp = ()
         self.notice = None
-        self.visible = False
         self.completed = False
         self.thread = None
         self.tracking = False
         self.track_deadline = 0.0
 
-    def _stop(self, *, hide=True):
+    def _stop(self):
         self.cancelled.set()
         self.generation += 1
         self.key = None
         self.tracking = False
         self.track_deadline = 0.0
         self.notice = None
-        if hide and self.visible:
-            self.app._finish_asset_loading('presentation')
-        self.visible = False
         self.bridge.close()
 
     def _snapshot(self, pid):
@@ -188,7 +184,7 @@ class PresentationLoading:
                 self.tracking = True
                 self.track_deadline = now+15
                 self.notice = None
-                self.visible = self.completed = False
+                self.completed = False
                 self.next_tick = 0
             if now < self.next_tick:
                 return
@@ -196,7 +192,7 @@ class PresentationLoading:
             native = self.bridge.read(pid)
             done = self._render(native, starting=True, timed_out=now >= self.track_deadline)
             if done:
-                self._stop(hide=False)  # The final notice owns its bounded hide timer.
+                self._stop()
             return
         now = time.monotonic()
         if now < self.next_tick:
@@ -274,21 +270,13 @@ class PresentationLoading:
         detail = '\n'.join(lines)
         notice = (title, detail, units*12.5)
         if self.completed and not terminal:
-            self.visible = False
             self.completed = False
             self.notice = None
-        injector = getattr(app, '_d3d_injector', None)
-        move_to_native = bool(self.visible and injector is not None and injector.is_injected() and not getattr(app, '_presentation_native', False))
-        if notice != self.notice or move_to_native:
-            if not self.visible or title != (self.notice or ('',))[0] or move_to_native:
-                app._show_asset_loading('presentation', title, title, detail, units*12.5)
-                self.visible = True
-            else:
-                app._update_asset_loading('presentation', units*12.5, detail)
+        # Keep preload and bounded scene acknowledgements active without
+        # showing a D3D card, a fallback window, or scheduling hide timers.
+        if notice != self.notice:
             self.notice = notice
             app.log('Presentation preload: '+detail.replace('\n', '; '))
-            if done:
-                app._hide_asset_loading('presentation', delay_ms=4000 if errors or timed_out else 1800)
         if done and not self.completed:
             self.completed = True
             payload = dict(process_id=self.key[1], home=app.HID, away=app.AID, stadium=app.STADID,

@@ -135,7 +135,7 @@ class PresentationLoadingTests(unittest.TestCase):
             self.assertEqual(runtime.notice[2], 100)
             self.assertEqual(runtime.notice[0], 'Pré-jogo preparado')
             self.assertIn('VAR: Preparado para iniciar', runtime.notice[1])
-            app._hide_asset_loading.assert_called_once()
+            app._hide_asset_loading.assert_not_called()
             self.assertFalse(__import__('json').loads((root/'runtime/presentation_loading.json').read_text())['scene_confirmed'])
             app.lastpagename = 'TV/bumper'
             runtime._configuration_stamp = Mock(side_effect=AssertionError('Loading must not reread files'))
@@ -149,8 +149,10 @@ class PresentationLoadingTests(unittest.TestCase):
                 runtime.tick()
             self.assertIsNone(runtime.key)
             self.assertTrue(runtime.completed)
-            self.assertEqual(app._show_asset_loading.call_args.args[2], 'Apresentação carregada')
-            self.assertEqual(app._show_asset_loading.call_args.args[-1], 100)
+            app._show_asset_loading.assert_not_called()
+            app._update_asset_loading.assert_not_called()
+            app._hide_asset_loading.assert_not_called()
+            app._finish_asset_loading.assert_not_called()
             bridge.read.reset_mock()
             with patch('server16_py.presentation_loading.time.monotonic', return_value=5):
                 runtime.tick()
@@ -181,7 +183,10 @@ class PresentationLoadingTests(unittest.TestCase):
             with patch('server16_py.presentation_loading.time.monotonic', return_value=17):
                 runtime.tick()
             self.assertIsNone(runtime.key)
-            self.assertEqual(app._show_asset_loading.call_args.args[2], 'Confirmação incompleta')
+            app._show_asset_loading.assert_not_called()
+            app._update_asset_loading.assert_not_called()
+            app._hide_asset_loading.assert_not_called()
+            app._finish_asset_loading.assert_not_called()
             bridge.read.reset_mock()
             with patch('server16_py.presentation_loading.time.monotonic', return_value=18):
                 runtime.tick()
