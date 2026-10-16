@@ -1,5 +1,14 @@
 """Code-drawn Xbox glyphs; no external images or font-symbol dependency."""
 
+PANEL_FUNCTION_KEYS = ('F3', 'F4', 'F5', 'F8', 'F9')
+
+
+def panel_function_key(action):
+    """Match native action slots; F6/F7 remain the cloth controls."""
+    if not 1 <= action <= len(PANEL_FUNCTION_KEYS):
+        raise ValueError('Unknown panel action')
+    return PANEL_FUNCTION_KEYS[action - 1]
+
 
 def controller_connected(selector):
     return bool(getattr(selector, 'controller_connected', False))

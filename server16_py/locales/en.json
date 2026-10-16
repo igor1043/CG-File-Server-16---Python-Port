@@ -328,5 +328,7 @@
   "progress.database_failed": "Database load failed, continuing",
   "progress.applying_runtime": "Applying runtime",
   "progress.runtime_ready": "Runtime ready",
-  "message.warning.missing_fifa_settings": "The Server 16 configuration was not found:\n\n{path}\n\nKeep Server16Python.exe beside fifa16.exe and restore the FSW folder from your installation. No empty INI will be created in place of the original."
+  "message.warning.missing_fifa_settings": "The Server 16 configuration was not found:\n\n{path}\n\nKeep Server16Python.exe beside fifa16.exe and restore the FSW folder from your installation. No empty INI will be created in place of the original.",
+  "module.cloth_physics": "Cloth physics",
+  "module.cloth_physics_note": "Cloth physics: applies live and to future matches."
 }

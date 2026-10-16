@@ -10,6 +10,7 @@ Painel para configurar partidas do FIFA 16, escolher estádios e administrar apr
 | **Objetos de abertura** | Prepara o conjunto pelo ID da competição e da fase. Em amistosos, dois clubes da mesma liga usam a entrada dessa liga. O padrão é Sim; modelo ausente ou inválido deixa a partida sem o conjunto. |
 | **Estádio** | Escolha para o confronto com busca, prévia e navegação por teclado, mouse ou controle. |
 | **Placar e TV** | Usa os pacotes associados à competição e à fase. |
+| **Física de roupas** | Desativada por padrão; salva a escolha do usuário nas próximas aberturas. No pré-jogo, Configurações da partida > Física de roupas > Aplicar. Durante a partida, F12 > Ajustes da partida permite ligar/desligar imediatamente, com confirmação do jogo. Controla camisa e calção. |
 | **Público** | Ajusta a ocupação quando o módulo nativo confirma a comunicação. |
 | **Cânticos e hinos** | Usa os áudios dos clubes, perfis de volume e cânticos de rivalidade. |
 | **Narração** | Escolhe os perfis externos disponíveis; os bancos de áudio são separados. |
@@ -27,6 +28,26 @@ As abas **Próxima Partida**, **Meu Time** e **Competição**, a cabine do VAR, 
 5. Depois de trocar o executável ou uma DLL, reinicie os programas envolvidos.
 
 As opções de apresentação ficam em `ModCarrerMode/config/match_presentation.ini`. A competição e a fase usam os IDs de `FSW/settings.ini`; o Server valida e seleciona os assets locais em `data/sceneassets/entrance_props/`. A pasta local `runtime/` guarda diagnósticos da sessão.
+
+Os atalhos dos botões começam em **F3**. Configurações, público, estádio e
+narração usam **F3 para Aplicar** e **F4 para Voltar/Cancelar**. No áudio,
+**F3** aplica o volume geral, **F4** aplica o específico e **F5** cancela.
+No menu inicial: **F3** público, **F4** estádio, **F5** configurações,
+**F8** narradores e **F9** fechar. **F6/F7** continuam reservados à física.
+Os comandos do controle e do mouse permanecem os mesmos. Reinicie o Server
+e o FIFA depois de atualizar o executável e a DLL do painel.
+
+A física usa `ModCarrerMode/mods/cloth_motion/cloth_motion.ini`. Desativar
+seleciona a física original e mantém a ponte de controle disponível para
+reativação durante a mesma partida. Após instalar a atualização 0.8.1 da DLL,
+reinicie o FIFA e o Server uma vez. F6 também alterna a física.
+
+Ao fechar o Server, timers, áudio, conexões e mapas de memória são liberados
+mesmo se uma etapa falhar. Operações de escrita de estádio/BH terminam antes
+da saída; leitores de banco iniciados pelo próprio Server são encerrados.
+No executável, o processo sai após a limpeza sem aguardar finalizadores de
+bibliotecas que poderiam deixá-lo oculto no Gerenciador de Tarefas. O FIFA e
+outros processos não são encerrados. O log registra as etapas de `Shutdown`.
 
 ## Executar pelos fontes
 

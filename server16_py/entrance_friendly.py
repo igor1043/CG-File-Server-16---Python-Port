@@ -23,7 +23,7 @@ def common_league_competition(game_root: Path, home: str, away: str, database, s
     """Return (competition node, database league, status), never guess by name.
 
     compobj's competition object C7 connects the database league 7 to node
-    1615. Only an exact, unambiguous node already present in settings.ini is
+    1738. Only an exact, unambiguous node already present in settings.ini is
     accepted. This is game data, not a second editable model mapping.
     """
     root = Path(game_root)

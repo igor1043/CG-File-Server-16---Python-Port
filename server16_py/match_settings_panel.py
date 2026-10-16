@@ -1,16 +1,17 @@
 from PIL import Image
 
-from .input_hints import action_label, navigation_hint, footer_y
+from .input_hints import action_label, navigation_hint, footer_y, panel_function_key
 from .match_presentation import MatchPresentation, PresentationOptions
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
 from .panel_navigation import move_focus
+from .cloth_motion_switch import ClothMotionSwitch, _atomic
 
 
 class MatchSettingsPanel:
-    WIDTH, HEIGHT = 600, 435
+    WIDTH, HEIGHT = 600, 480
     ROWS = ((24, 85, 576, 123), (24, 130, 576, 168),
-            (48, 175, 576, 213), (48, 220, 576, 258), (24, 265, 576, 303))
-    BACK, APPLY = (24, 323, 292, 365), (308, 323, 576, 365)
+            (48, 175, 576, 213), (48, 220, 576, 258), (24, 265, 576, 303), (24, 310, 576, 348))
+    BACK, APPLY = (24, 368, 292, 410), (308, 368, 576, 410)
 
     def __init__(self, selector):
         self.selector = selector
@@ -18,6 +19,8 @@ class MatchSettingsPanel:
         self.message = ''
         self.load_error = False
         self.store = MatchPresentation(getattr(selector.app, 'exedir', selector.app.base_dir))
+        self.cloth = ClothMotionSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
+        self.cloth_enabled = self.cloth_original = self.cloth.enabled()
         try:
             self.options = self.store.load()
         except Exception as exc:
@@ -30,6 +33,8 @@ class MatchSettingsPanel:
         pass
 
     def enabled(self, focus):
+        if focus == 5:
+            return self.cloth.available()
         return focus not in (2, 3) or self.options.pyrotechnics
 
     def activate(self, focus):
@@ -42,7 +47,17 @@ class MatchSettingsPanel:
                 self.selector.close()
                 return
             try:
+                previous = self.store.path.read_bytes() if self.store.path.exists() else None
                 self.store.save(self.options)
+                try:
+                    if self.cloth_enabled != self.cloth_original:
+                        self.cloth.set_enabled(self.cloth_enabled)
+                except Exception:
+                    if previous is None:
+                        self.store.path.unlink(missing_ok=True)
+                    else:
+                        _atomic(self.store.path, previous)
+                    raise
             except Exception as exc:
                 self.message = 'Não foi possível aplicar. Confira a permissão da pasta.'
                 self.selector.app.log('Match presentation could not be saved', exc)
@@ -51,8 +66,11 @@ class MatchSettingsPanel:
             self.selector.app.log(f'Match presentation applied: {self.options}')
             self.selector.show_menu()
         elif self.enabled(focus):
-            key = self.store.KEYS[focus]
-            setattr(self.options, key, not getattr(self.options, key))
+            if focus == 5:
+                self.cloth_enabled = not self.cloth_enabled
+            else:
+                key = self.store.KEYS[focus]
+                setattr(self.options, key, not getattr(self.options, key))
             self.selector.render()
 
     def handle(self, kind, value):
@@ -90,10 +108,11 @@ class MatchSettingsPanel:
         ink, muted, blue = '#344651', '#8797ab', '#0968f8'
         draw.rounded_rectangle((0, 0, self.WIDTH-1, self.HEIGHT-1), 18, fill='white', outline='#e0e6ee')
         draw.text((24, 22), 'Configurações da partida', font=self.selector.font(23, True), fill=ink)
-        draw.text((24, 58), 'Apresentação e efeitos no gramado.', font=self.selector.font(15), fill=muted)
-        labels = ('Habilitar mascotes', 'Efeitos pirotécnicos', 'Na abertura da partida', 'Após o gol', 'Objetos de abertura da competição')
-        for i, (key, label, rect) in enumerate(zip(self.store.KEYS, labels, self.ROWS)):
-            active, enabled = getattr(self.options, key), self.enabled(i)
+        draw.text((24, 58), 'Apresentação, efeitos e física das roupas.', font=self.selector.font(15), fill=muted)
+        labels = ('Habilitar mascotes', 'Efeitos pirotécnicos', 'Na abertura da partida', 'Após o gol', 'Objetos de abertura da competição', 'Física de roupas · camisa e calção')
+        for i, (label, rect) in enumerate(zip(labels, self.ROWS)):
+            active = self.cloth_enabled if i == 5 else getattr(self.options, self.store.KEYS[i])
+            enabled = self.enabled(i)
             if self.focus == i:
                 draw_focus_ring(draw, rect, 8)
             draw.text((rect[0]+12, rect[1]+8), label, font=self.selector.font(16, i < 2), fill=ink if enabled else muted)
@@ -102,7 +121,7 @@ class MatchSettingsPanel:
             cx = 513 if active else 491
             draw.ellipse((cx-9, cy-9, cx+9, cy+9), fill='white')
             draw.text((535, cy-9), 'Sim' if active else 'Não', font=self.selector.font(12), fill=ink if enabled else muted)
-        for focus, rect, label, key, button in ((len(self.ROWS), self.BACK, 'Voltar', 'F2', 'B'), (len(self.ROWS) + 1, self.APPLY, 'Aplicar', 'F1', 'A')):
+        for focus, rect, label, key, button in ((len(self.ROWS), self.BACK, 'Voltar', panel_function_key(2), 'B'), (len(self.ROWS) + 1, self.APPLY, 'Aplicar', panel_function_key(1), 'A')):
             primary = focus == len(self.ROWS) + 1
             draw.rounded_rectangle(rect, 10, fill=FOCUSED_PRIMARY if primary and self.focus == focus else blue if primary else 'white', outline='#c9d3df')
             if self.focus == focus:

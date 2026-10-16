@@ -67,7 +67,12 @@ static bool keyboard_shortcut_edge(const bool *keys,const bool *previous) {
     return keys[VK_F12] && !previous[VK_F12];
 }
 static LONG function_action_edge(const bool *keys,const bool *previous) {
-    for (int key=VK_F1;key<=VK_F5;++key) if (keys[key] && !previous[key]) return key-VK_F1+1;
+    // Keep F1/F2 out of panel actions and F6/F7 for the cloth comparison/reload.
+    static constexpr int action_keys[]={VK_F3,VK_F4,VK_F5,VK_F8,VK_F9};
+    for (int action=0;action<5;++action) {
+        const int key=action_keys[action];
+        if (keys[key] && !previous[key]) return action+1;
+    }
     return 0;
 }
 static LONG audio_pad_action(bool audio,WORD pressed) {

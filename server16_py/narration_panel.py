@@ -1,6 +1,6 @@
 from PIL import Image,ImageDraw,ImageOps
 from .overlay_canvas import OverlayDraw, draw_focus_ring
-from .input_hints import action_label,navigation_hint,footer_y
+from .input_hints import action_label,navigation_hint,footer_y, panel_function_key
 from .narrator_portrait import portrait_image
 from .narration_runtime import narration_runtime
 from .panel_navigation import move_focus
@@ -94,7 +94,7 @@ class NarrationPanel:
             text(116 if portrait else 72,r[1]+9,p['name'],17,bold=True);text(302,r[1]+12,p['commentator'],13,muted)
             if p['name']==self.runtime.current:text(485,r[1]+12,'Atual',13,blue)
         if not self.options:text(24,115,'Crie uma subpasta por narrador em Narrations.',16,muted)
-        for f,r,label,key,pad in ((3,self.BACK,'Voltar','F2','B'),(4,self.APPLY,'Aplicar','F1','A')):
+        for f,r,label,key,pad in ((3,self.BACK,'Voltar',panel_function_key(2),'B'),(4,self.APPLY,'Aplicar',panel_function_key(1),'A')):
             draw.rounded_rectangle(r,10,fill=blue if f==4 else 'white',outline=blue)
             if self.focus==f:draw_focus_ring(draw,r)
             action_label(draw,self.selector,r,label,key,pad,'white' if f==4 else ink)

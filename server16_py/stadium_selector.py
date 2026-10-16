@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .stadium_catalog import COUNTRIES, COUNTRY_FLAGS, build_catalog, filter_catalog, normalize, prematch_page
 from .file_tools import STADIUM_ARCHIVE_SUFFIXES
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
+from .input_hints import panel_function_key
 from .match_audio_panel import MatchAudioPanel
 from .match_state import pause_page
 from .crowd_control import CrowdControl
@@ -132,6 +133,14 @@ class StadiumSelector:
 
     def tick(self):
         app = self.app
+        if time.monotonic() >= getattr(self,'_next_cloth_sync',0):
+            from .cloth_motion_switch import ClothMotionSwitch
+            switch=ClothMotionSwitch(getattr(app,'exedir',app.base_dir))
+            enabled=switch.enabled()
+            var=getattr(app,'module_vars',{}).get('ClothPhysics')
+            if var is not None and var.get()!=enabled:var.set(enabled)
+            getattr(app,'module_states',{})['ClothPhysics']=enabled
+            self._next_cloth_sync=time.monotonic()+1
         shared = self.shared
         shared.heartbeat = ctypes.windll.kernel32.GetTickCount()
         prematch_eligible = app.memory.is_open() and prematch_page(app.lastpagename)
@@ -162,6 +171,8 @@ class StadiumSelector:
         self._drain_images()
         if self.opened and self.prematch_panel:
             self.prematch_panel.tick()
+        if self.opened and self.audio_panel:
+            self.audio_panel.tick()
         if self.opened and not self.audio_panel and not self.prematch_panel and (self._preview_loading or self.loading) and time.monotonic()>=self._next_loader:
             self.render()
         if self.applying and not app._stadium_task_running:
@@ -720,8 +731,8 @@ class StadiumSelector:
             text(96,390,'Selecione um estádio',21,color=muted,max_width=370)
             text(576-draw.textlength(self.position_label(),font=self.font(13)),438,self.position_label(),13,color=muted,max_width=150)
         draw.line((1,467,598,467),fill='#e9eef4',width=1)
-        button((24,481,292,529),'Voltar · F2 / B' if self.return_to_menu else 'Cancelar · F2 / B','cancel',self.focus==4)
-        button((308,481,576,529),'Aplicar · F1','apply',self.focus==3,primary=True)
+        button((24,481,292,529),f'Voltar · {panel_function_key(2)} / B' if self.return_to_menu else f'Cancelar · {panel_function_key(2)} / B','cancel',self.focus==4)
+        button((308,481,576,529),f'Aplicar · {panel_function_key(1)}','apply',self.focus==3,primary=True)
         if self.message:
             text(24,554,self.message,13,color='#8c5b24',max_width=552)
         else:

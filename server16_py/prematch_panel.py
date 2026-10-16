@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from PIL import Image
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
-from .input_hints import action_label, navigation_hint, controller_connected, footer_y
+from .input_hints import action_label, navigation_hint, controller_connected, footer_y, panel_function_key
 from .match_settings_panel import MatchSettingsPanel
 from .narration_panel import NarrationPanel
 from .panel_navigation import move_focus
@@ -174,8 +174,8 @@ class PrematchPanel:
                 for row,label in enumerate(labels):
                     draw.text((rect[0]+108,rect[1]+29+row*22),label,font=font,fill=ink)
                 if not controller_connected(self.selector):
-                    text(rect[0]+108,rect[1]+80,f'F{i+1}',13,muted)
-            button(self.BACK,'Fechar',4,'F5','B')
+                    text(rect[0]+108,rect[1]+80,panel_function_key(i+1),13,muted)
+            button(self.BACK,'Fechar',4,panel_function_key(5),'B')
         else:
             shared=self.selector.crowd_control.shared
             text(40,104,'Ocupação do estádio',19,bold=True)
@@ -189,8 +189,8 @@ class PrematchPanel:
             text(40,205,'0%',12,muted); text(524,205,'100%',12,muted)
             automatic=f'Regra atual do mod: {shared.automatic_percent}%' if shared.automatic_percent>=0 else 'Aguardando o valor atual do mod de torcida...'
             text(40,230,automatic,14,muted)
-            button((24,278,292,320),'Voltar',1,'F2','B')
-            button((308,278,576,320),'Aplicar',2,'F1','A',True)
+            button((24,278,292,320),'Voltar',1,panel_function_key(2),'B')
+            button((308,278,576,320),'Aplicar',2,panel_function_key(1),'A',True)
         if self.message:
             text(24,footer_y(self.HEIGHT),self.message,11,muted)
         else:

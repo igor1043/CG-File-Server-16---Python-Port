@@ -28,6 +28,8 @@ from .db_patcher import restore_stadium_names
 from .match_string_patcher import patch_match_string
 from .assignment_runtime import AssignmentRuntime
 from .camera_runtime import CameraPreset, CameraRuntime
+from .cloth_motion_switch import ClothMotionSwitch
+from .shutdown import cleanup_step, bounded_cleanup, finish_frozen_process, close_owned_readers
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
 from .entrance_runtime import TeamEntranceRuntime
 from .entrance_props_runtime import EntrancePropsRuntime
@@ -556,9 +558,12 @@ class Server16App(tk.Tk):
             "Chants": "module.chants",
             "TeamEntrance": "module.team_entrance",
             "DiscordRPC": "module.discord_rpc",
+            "ClothPhysics": "module.cloth_physics",
         }
         for name, check in self.module_checks.items():
             check.configure(text=self.tr(module_map.get(name, name)))
+        if hasattr(self,"cloth_physics_note"):
+            self.cloth_physics_note.configure(text=self.tr("module.cloth_physics_note"))
 
     def _apply_camera_localization(self) -> None:
         if self.camera_select_button is not None:
@@ -1707,7 +1712,7 @@ class Server16App(tk.Tk):
     def _build_modules_card(self, parent: tk.Misc, row: int) -> None:
         card = self._card(parent, "card.modules.title", "card.modules.subtitle")
         card.grid(row=row, column=0, sticky="ew")
-        card.configure(height=328)
+        card.configure(height=384)
         card.grid_propagate(False)
         modules = tk.Frame(card, bg=self.card)
         modules.pack(fill="x", padx=12, pady=(6, 12))
@@ -1724,6 +1729,7 @@ class Server16App(tk.Tk):
             "AwayClubSong",
             "TeamEntrance",
             "DiscordRPC",
+            "ClothPhysics",
         ]
         for idx, name in enumerate(module_names):
             initial = self._discord_rpc_enabled if name == "DiscordRPC" else False
@@ -1738,6 +1744,10 @@ class Server16App(tk.Tk):
             )
             check.grid(row=idx // 2, column=idx % 2, padx=6, pady=4, sticky="w")
             self.module_checks[name] = check
+
+        self.cloth_physics_note=tk.Label(modules,text=self.tr("module.cloth_physics_note"),bg=self.card,fg=self.muted,font=("Segoe UI",8))
+        self.cloth_physics_note.grid(
+            row=7,column=0,columnspan=2,padx=6,pady=(0,4),sticky="w")
 
         notification_switch = ttk.Checkbutton(
             card,
@@ -2655,6 +2665,7 @@ class Server16App(tk.Tk):
                 self.settings_ini.write("DiscordRPC", "1" if self._discord_rpc_enabled else "0", "Modules")
                 self.settings_ini.save()
         self.module_states["DiscordRPC"] = self._discord_rpc_enabled
+        self.module_states["ClothPhysics"] = ClothMotionSwitch(self.exedir).enabled()
         loaded = ", ".join(
             f"{name}={'1' if enabled else '0'}"
             for name, enabled in self.module_states.items()
@@ -2672,6 +2683,8 @@ class Server16App(tk.Tk):
             discord_var.set(self._discord_rpc_enabled)
 
     def module_enabled(self, name: str) -> bool:
+        if name == "ClothPhysics":
+            return ClothMotionSwitch(self.exedir).enabled()
         if name == "DiscordRPC":
             return self._discord_rpc_enabled
         if not hasattr(self, "settings_ini") or self.settings_ini is None:
@@ -3472,6 +3485,18 @@ class Server16App(tk.Tk):
     def _on_module_toggle(self, name: str, var: tk.BooleanVar) -> None:
         """Called when user clicks a module toggle. Saves state to settings.ini."""
         enabled = var.get()
+        if name == "ClothPhysics":
+            switch=ClothMotionSwitch(self.exedir)
+            try:
+                switch.set_enabled(enabled)
+            except (OSError,ValueError) as exc:
+                var.set(switch.enabled())
+                self.log("Cloth physics pre-launch switch failed",exc)
+                messagebox.showerror(self.tr("module.cloth_physics"),str(exc),parent=self)
+                return
+            self.module_states[name]=enabled
+            self.log(f"Cloth physics {'enabled' if enabled else 'disabled'}; live control and next launch updated")
+            return
         self.settings_ini.write(name, "1" if enabled else "0", "Modules")
         self.settings_ini.save()
         self.module_states[name] = enabled
@@ -4199,77 +4224,56 @@ class Server16App(tk.Tk):
     def on_close(self) -> None:
         if self._closing:
             return
+        # Do not interrupt a BIG/BH or stadium write to force the UI closed.
+        if getattr(self, '_stadium_task_running', False) or getattr(self, '_bh_regen_running', False):
+            if not getattr(self, '_close_pending', False):
+                self._close_pending = True
+                self.log("Shutdown: waiting for the current file operation")
+                self.after(100, self._retry_close)
+            return
         self._closing = True
-        if self._stadium_selector is not None:
-            self._stadium_selector.shutdown()
-            self._stadium_selector = None
-        if self._ui_event_job is not None:
-            self.after_cancel(self._ui_event_job)
-        self._dismiss_launch_splash()
-        closing_splash = self._show_closing_splash()
-        self._hide_crowd_volume_popup()
-        self._chants_stop.set()
-        self._reset_team_entrance()
-        self._reset_chants_state()
-        if not self._is_target_process_running():
-            self._restore_native_runtime_assets()
-        # Disconnect DiscordRPC and clear presence
-        try:
-            self.discord_rpc.disconnect()
-        except Exception:
-            pass
-        try:
-            if self._poll_job is not None:
-                self.after_cancel(self._poll_job)
-        except Exception:
-            pass
-        try:
-            if self._stats_job is not None:
-                self.after_cancel(self._stats_job)
-        except Exception:
-            pass
-        try:
-            if self._overlay_job is not None:
-                self.after_cancel(self._overlay_job)
-        except Exception:
-            pass
-        try:
-            if self._kickoff_retry_job is not None:
-                self.after_cancel(self._kickoff_retry_job)
-        except Exception:
-            pass
-        try:
-            if self._worker_poll_job is not None:
-                self.after_cancel(self._worker_poll_job)
-        except Exception:
-            pass
-        try:
-            self._cancel_stadium_loading_hide()
-        except Exception:
-            pass
-        try:
-            restore_stadium_names(self)
-        except Exception:
-            pass
-        try:
-            if self._d3d_injector is not None:
-                self._d3d_injector.destroy()
-        except Exception:
-            pass
-        try:
-            self.memory.close()
-        except Exception:
-            pass
-        if closing_splash is not None:
-            try:
-                closing_splash.close(min_visible=0.7)
-            except Exception:
-                pass
-        try:
-            self.quit()
-        except Exception:
-            pass
-        self.destroy()
+        def step(label, action):
+            return cleanup_step(label, action, self.log)
+        step('start log', lambda:self.log("Shutdown: starting cleanup"))
+        # Cancel all Tk timers, including optional panels, before releasing maps.
+        def cancel_jobs():
+            for job in self.tk.call('after', 'info'):
+                step('cancel timer', lambda job=job:self.after_cancel(job))
+        step('timers', cancel_jobs)
+        step('startup splash', self._dismiss_launch_splash)
+        closing_splash = step('closing splash creation', self._show_closing_splash)
+        step('volume popup', self._hide_crowd_volume_popup)
+        step('audio stop signal', self._chants_stop.set)
+        step('database reader processes', close_owned_readers)
+        selector, self._stadium_selector = self._stadium_selector, None
+        if selector is not None:
+            step('match panels and shared memory', selector.shutdown)
+        def audio_cleanup():
+            step('entrance audio', self._reset_team_entrance)
+            step('chants audio', self._reset_chants_state)
+        bounded_cleanup('audio', audio_cleanup, self.log)
+        # Network disconnects must not keep the hidden Tk root alive.
+        bounded_cleanup('discord', self.discord_rpc.disconnect, self.log)
+        if step('game process state', self._is_target_process_running) is False:
+            step('native runtime assets', self._restore_native_runtime_assets)
+        step('stadium names', lambda:restore_stadium_names(self))
+        if self._d3d_injector is not None:
+            step('overlay mapping', self._d3d_injector.destroy)
+        step('game process handle', self.memory.close)
+        # Frozen builds own the process; after cleanup, do not enter Tcl/CLR
+        # destruction/finalization that can leave the hidden process alive.
+        if closing_splash is not None and not getattr(sys, 'frozen', False):
+            step('closing splash', lambda:closing_splash.close(min_visible=0.7))
+        step('quit event loop', self.quit)
+        if not getattr(sys, 'frozen', False):
+            step('destroy windows', self.destroy)
+        self._shutdown_complete = True
+        step('completion log', lambda:self.log("Shutdown: cleanup complete"))
+        finish_frozen_process()
+
+    def _retry_close(self) -> None:
+        self._close_pending = False
+        self.on_close()
 
 
 def main(splash=None) -> None:
@@ -4284,6 +4288,14 @@ def main(splash=None) -> None:
             pass
     app = Server16App(splash=splash)
     if app._closing:
+        if getattr(app, '_shutdown_complete', False):
+            finish_frozen_process()
         return
     app.after(150, app._dismiss_launch_splash)
-    app.mainloop()
+    try:
+        app.mainloop()
+    finally:
+        if not app._closing:
+            app.on_close()
+        if getattr(app, '_shutdown_complete', False):
+            finish_frozen_process()

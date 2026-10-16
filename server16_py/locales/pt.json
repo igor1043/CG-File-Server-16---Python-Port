@@ -267,5 +267,7 @@
   "progress.database_failed": "Falha no banco, continuando",
   "progress.applying_runtime": "Aplicando runtime",
   "progress.runtime_ready": "Runtime pronto",
-  "message.warning.missing_fifa_settings": "Não foi encontrada a configuração do Server 16:\n\n{path}\n\nMantenha o Server16Python.exe ao lado do fifa16.exe e restaure a pasta FSW da sua instalação. Nenhum INI vazio será criado no lugar do original."
+  "message.warning.missing_fifa_settings": "Não foi encontrada a configuração do Server 16:\n\n{path}\n\nMantenha o Server16Python.exe ao lado do fifa16.exe e restaure a pasta FSW da sua instalação. Nenhum INI vazio será criado no lugar do original.",
+  "module.cloth_physics": "Física de roupas",
+  "module.cloth_physics_note": "Física de roupas: aplica no jogo aberto e nas próximas partidas."
 }

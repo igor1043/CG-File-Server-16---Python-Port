@@ -94,9 +94,9 @@ class MatchAudioTests(unittest.TestCase):
                 self.assertEqual(selector.audio_panel.values[1],95)
                 selector.handle(12,(248<<16)|40)
                 self.assertEqual(selector.audio_panel.values[1],0)
-                selector.handle(12,(330<<16)|300)
+                selector.handle(12,(389<<16)|300)
                 self.assertTrue(selector.opened) # Dragging never clicks Apply.
-                selector.handle(8,(330<<16)|300)
+                selector.handle(8,(389<<16)|300)
                 self.assertFalse(selector.opened)
                 self.assertEqual(selector.app._crowd_master_volume,.5)
                 self.assertEqual(selector.app._goal_master_volume,0)
@@ -201,13 +201,13 @@ class MatchAudioTests(unittest.TestCase):
             try:
                 selector.open(audio=True)
                 values=list(selector.audio_panel.values)
-                selector.handle(15,(330<<16)|440)
+                selector.handle(15,(389<<16)|440)
                 self.assertEqual(selector.audio_panel.focus,4)
                 with Image.open(selector.shared.image_path) as card:
-                    self.assertEqual(card.getpixel((430*2,320*2))[:3],(18,61,134))
-                    self.assertEqual(card.getpixel((401*2,330*2))[:3],(0,82,204))
+                    self.assertEqual(card.getpixel((430*2,375*2))[:3],(18,61,134))
+                    self.assertEqual(card.getpixel((401*2,385*2))[:3],(0,82,204))
                 serial=selector.serial
-                selector.handle(15,(330<<16)|441)
+                selector.handle(15,(389<<16)|441)
                 self.assertEqual(selector.serial,serial)
                 selector.handle(15,(248<<16)|80)
                 self.assertEqual(selector.audio_panel.focus,1)

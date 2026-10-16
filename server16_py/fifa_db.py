@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, Optional
+from .shutdown import run_owned_reader
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -100,7 +101,7 @@ class FifaDatabase:
         try:
             worker_env = dict(__import__("os").environ)
             worker_env["PYTHONNOUSERSITE"] = "1"
-            result = subprocess.run(
+            result = run_owned_reader(
                 [str(python32), str(worker), str(dll), str(self.db_path), str(self.xml_path)],
                 capture_output=True,
                 text=True,

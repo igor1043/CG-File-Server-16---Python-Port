@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
+import time
+from pathlib import Path
 from PIL import Image
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
 from .audio_profiles import audio_profiles, match_key
-from .input_hints import action_label, navigation_hint, footer_y
+from .input_hints import action_label, navigation_hint, footer_y, panel_function_key
+from .cloth_motion_switch import ClothMotionSwitch
 
 
 def percentage(value, maximum=100):
@@ -16,11 +19,12 @@ def percentage(value, maximum=100):
 
 
 class MatchAudioPanel:
-    WIDTH, HEIGHT = 600, 440
+    WIDTH, HEIGHT = 600, 495
     SLIDERS = ((40, 126, 560, 160), (40, 231, 560, 265))
-    CANCEL = (24, 310, 196, 358)
-    GENERAL = (214, 310, 386, 358)
-    MATCH = (404, 310, 576, 358)
+    CLOTH = (24, 300, 576, 340)
+    CANCEL = (24, 365, 196, 413)
+    GENERAL = (214, 365, 386, 413)
+    MATCH = (404, 365, 576, 413)
 
     def __init__(self, selector):
         self.selector = selector
@@ -30,6 +34,44 @@ class MatchAudioPanel:
         self._load_values(self.runtime.sync(force=True))
         self.focus = 0
         self.message = 'Arquivo de perfis indisponível; usando o volume geral.' if self.runtime.error else ''
+        self.cloth = ClothMotionSwitch(getattr(app, 'exedir', getattr(app, 'base_dir', Path.cwd())))
+        self.cloth_enabled = self.cloth.enabled()
+        self.cloth_pending = None
+        self.cloth_deadline = 0
+        self.cloth_next_tick = 0
+
+    def tick(self):
+        now=time.monotonic()
+        if now<self.cloth_next_tick:return
+        self.cloth_next_tick=now+.25
+        resolver=getattr(self.selector.app,'_resolve_fifa_pid',None)
+        pid=resolver() if callable(resolver) else None
+        live=self.cloth.live_enabled(pid=pid)
+        if self.cloth_pending is not None:
+            if live==self.cloth_pending:
+                self.message='Física de roupas ativada.' if live else 'Física de roupas desativada.'
+                self.cloth_pending=None;self.selector.render()
+            elif now>=self.cloth_deadline:
+                self.message='Opção salva. Reabra o FIFA para carregar o controle atualizado.'
+                self.cloth_pending=None;self.selector.render()
+        elif live is not None and live!=self.cloth_enabled:
+            self.cloth_enabled=live;self.selector.render()
+
+    def toggle_cloth(self):
+        if not self.cloth.available():return
+        if not self.selector.match_eligible() or self.selector.context!=self.selector._context():
+            self.selector.close();return
+        try:
+            self.cloth.set_enabled(not self.cloth_enabled)
+        except (OSError,ValueError) as exc:
+            self.message='Não foi possível alterar a física de roupas.'
+            self.selector.app.log('Cloth physics live switch failed',exc)
+        else:
+            self.cloth_enabled=not self.cloth_enabled
+            self.cloth_pending=self.cloth_enabled
+            self.cloth_deadline=time.monotonic()+3
+            self.message='Aplicando física de roupas…'
+        self.selector.render()
 
     def _load_values(self, volumes):
         self.original_volumes = tuple(volumes)
@@ -72,6 +114,8 @@ class MatchAudioPanel:
         selector.close()
 
     def activate(self, focus):
+        if focus==5:
+            self.toggle_cloth();return
         if focus not in [item[0] for item in self.buttons()]:
             return
         if focus == 2:
@@ -88,13 +132,14 @@ class MatchAudioPanel:
             if value in (1,2,3):
                 self.activate({1:3,2:4,3:2}[value])
             return
-        focuses = [0, 1] + [focus for focus, rect, label in self.buttons()]
+        focuses = [0, 1] + ([5] if self.cloth.available() else []) + [focus for focus, rect, label in self.buttons()]
         if self.focus not in focuses:
             self.focus = 0
         if kind==15:
             x,y=value&65535,(value>>16)&65535
             targets=[(i,(rect[0]-10,rect[1]-15,rect[2]+10,rect[3]+15)) for i,rect in enumerate(self.SLIDERS)]
             targets.extend((focus, rect) for focus, rect, label in self.buttons())
+            if self.cloth.available():targets.append((5,self.CLOTH))
             focus=next((focus for focus,rect in targets if rect[0]<=x<=rect[2] and rect[1]<=y<=rect[3]),None)
             if focus is not None and focus!=self.focus:
                 self.focus=focus; self.selector.render()
@@ -107,6 +152,8 @@ class MatchAudioPanel:
         elif kind in (2, 3):
             if self.focus < 2:
                 self.values[self.focus] = max(0, min(self.maximums[self.focus], self.values[self.focus] + (-5 if kind == 2 else 5)))
+            elif self.focus==5:
+                self.toggle_cloth();return
             else:
                 focuses = [focus for focus, rect, label in self.buttons()]
                 self.focus = focuses[(focuses.index(self.focus) + (-1 if kind == 2 else 1)) % len(focuses)]
@@ -116,6 +163,8 @@ class MatchAudioPanel:
                 return
         elif kind in (8, 12):
             x, y = value & 65535, (value >> 16) & 65535
+            if kind==8 and self.CLOTH[0]<=x<=self.CLOTH[2] and self.CLOTH[1]<=y<=self.CLOTH[3]:
+                self.focus=5;self.toggle_cloth();return
             for i, rect in enumerate(self.SLIDERS):
                 if rect[0]-10 <= x <= rect[2]+10 and rect[1]-15 <= y <= rect[3]+15:
                     self.focus = i
@@ -143,8 +192,8 @@ class MatchAudioPanel:
             while len(label) > 1 and draw.textlength(label, font=font) > 550:
                 label = label[:-2].rstrip('…') + '…'
             return label
-        text(24, 22, 'Áudio da partida', 23, bold=True)
-        text(390, 30, 'Áudios personalizados', 13, muted)
+        text(24, 22, 'Ajustes da partida', 23, bold=True)
+        text(388, 30, 'Áudio e física de roupas', 13, muted)
         app = self.selector.app
         key = match_key(getattr(app, 'HID', ''), getattr(app, 'AID', ''))
         names = []
@@ -167,13 +216,19 @@ class MatchAudioPanel:
                 draw_focus_ring(draw,(28, rect[1]-9, 572, rect[3]+1))
             text(40, rect[3]+8, '0', 12, muted)
             text(530, rect[3]+8, str(self.maximums[i]), 12, muted)
+        rect=self.CLOTH;active=self.cloth_enabled;available=self.cloth.available()
+        if self.focus==5:draw_focus_ring(draw,rect,8)
+        text(36,311,'Física de roupas · aplica agora',16,ink if available else muted)
+        draw.rounded_rectangle((479,308,525,332),12,fill=blue if active and available else '#d6dee9')
+        cx=513 if active else 491;draw.ellipse((cx-9,311,cx+9,329),fill='white')
+        text(535,311,'Sim' if active else 'Não',12,ink if available else muted)
         for focus, rect, label in self.buttons():
             primary = focus == 4
             fill=FOCUSED_PRIMARY if primary and self.focus==focus else blue if primary else 'white'
             draw.rounded_rectangle(rect, 10, fill=fill, outline=blue if self.focus == focus else '#c9d3df', width=2)
             if self.focus == focus:
                 draw_focus_ring(draw,rect)
-            key, pad_button = {2:('F3','B'),3:('F1','X'),4:('F2','Y')}[focus]
+            key, pad_button = {2:(panel_function_key(3),'B'),3:(panel_function_key(1),'X'),4:(panel_function_key(2),'Y')}[focus]
             action_label(draw,self.selector,rect,label,key,pad_button,'white' if primary else ink,size=12)
         if self.message:
             text(24,footer_y(self.HEIGHT),self.message,12,muted)

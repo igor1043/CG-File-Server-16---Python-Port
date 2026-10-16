@@ -175,7 +175,7 @@ para que o fallback possa ser restaurado.
 - `Start`: faz a mesma função do `F12` quando o overlay está pronto.
 - `Select/Back + Start`: abre o painel de áudio durante a partida.
 - `Esc` ou `B`: volta/cancela na tela atual.
-- `F1`, `F2` e `F3`: confirmam as ações principais quando a tela indica esses botões.
+- `F3`, `F4` e `F5`: executam as ações indicadas nos botões. O menu inicial também usa `F8` para narradores e `F9` para fechar; `F6/F7` ficam reservados à física de roupas.
 - `Enter` ou `A`: confirma o item selecionado.
 - `Espaço`: alterna o overlay geral do Server quando o FIFA está ativo.
 

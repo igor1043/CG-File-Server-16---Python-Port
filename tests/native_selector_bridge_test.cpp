@@ -24,13 +24,20 @@ int main() {
     bool keys[256]={},old_keys[256]={};
     keys['M']=true;
     assert(!keyboard_shortcut_edge(keys,old_keys));
-    for (int key=VK_F1;key<=VK_F4;++key) {
+    const int panel_keys[]={VK_F3,VK_F4,VK_F5,VK_F8,VK_F9};
+    for (int action=0;action<5;++action) {
+        const int key=panel_keys[action];
         memset(keys,0,sizeof(keys)); memset(old_keys,0,sizeof(old_keys));
         keys[key]=true;
-        assert(function_action_edge(keys,old_keys)==key-VK_F1+1);
+        assert(function_action_edge(keys,old_keys)==action+1);
         old_keys[key]=true;
         assert(function_action_edge(keys,old_keys)==0);
     }
+    for (int key:{VK_F1,VK_F2,VK_F6,VK_F7}) {
+        memset(keys,0,sizeof(keys));memset(old_keys,0,sizeof(old_keys));
+        keys[key]=true;assert(function_action_edge(keys,old_keys)==0);
+    }
+    puts("Panel function keys F3/F4/F5/F8/F9: all action edges, held keys and F1/F2/F6/F7 exclusion passed");
     keys[VK_F12]=true;
     assert(keyboard_shortcut_edge(keys,old_keys));
     old_keys[VK_F12]=true;
