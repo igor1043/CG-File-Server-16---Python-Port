@@ -43,6 +43,11 @@ class ShutdownTests(unittest.TestCase):
         bounded_cleanup('fixture',release.wait,Mock(),timeout=.02)
         self.assertLess(time.monotonic()-start,.5);release.set()
 
+    def test_icon_import_finishes_before_cleanup(self):
+        app=self.app();app.competition_icons=SimpleNamespace(busy=True);app.on_close()
+        self.assertFalse(app._closing);app.memory.close.assert_not_called()
+        app.competition_icons.busy=False;app._retry_close();self.assertTrue(app._shutdown_complete)
+
     def test_owned_database_reader_cannot_be_orphaned(self):
         import server16_py.shutdown as shutdown
         errors=[]

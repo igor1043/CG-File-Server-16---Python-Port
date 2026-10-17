@@ -29,6 +29,7 @@ from .match_string_patcher import patch_match_string
 from .assignment_runtime import AssignmentRuntime
 from .camera_runtime import CameraPreset, CameraRuntime
 from .cloth_motion_switch import ClothMotionSwitch
+from .competition_icons import CompetitionIconService
 from .shutdown import cleanup_step, bounded_cleanup, finish_frozen_process, close_owned_readers
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
 from .entrance_runtime import TeamEntranceRuntime
@@ -398,6 +399,7 @@ class Server16App(tk.Tk):
         except Exception as exc:
             self.log('Stadium selector initialization failed',exc)
         self.setuppaths()
+        self.competition_icons = CompetitionIconService(self.log)
         if not self._check_fifa_location():
             return
         if self.fifaEXE != "default":
@@ -409,6 +411,7 @@ class Server16App(tk.Tk):
         self._poll_job = self.after(500, self.poll_process)
         self._stats_job = self.after(250, self.stats_loop)
         self._overlay_job = self.after(40, self.overlay_loop)
+        self.after(100, self._sync_competition_icons)
         self.after(3000, lambda: self.check_updates(silent=True))
         if self.module_enabled("Chants"):
             self._start_chants_runtime()
@@ -3016,8 +3019,19 @@ class Server16App(tk.Tk):
         if self._is_target_process_running():
             self.log(f"FIFA process already running: {self.fifaEXE}")
             return
+        self.competition_icons.prepare(self.exedir, force=True)
         subprocess.Popen([self.fifaEXE], shell=False)
         self.log(f"Launched FIFA executable: {self.fifaEXE}")
+
+    def _sync_competition_icons(self) -> None:
+        if self._closing:
+            return
+        try:
+            if self.fifaEXE != 'default':
+                self.competition_icons.poll(self.exedir, self._is_target_process_running())
+        except Exception as exc:
+            self.log('Ícones da carreira: não foi possível verificar a instalação', exc)
+        self.after(3000, self._sync_competition_icons)
 
     def overlay_loop(self) -> None:
         self._overlay_job = None
@@ -4225,7 +4239,8 @@ class Server16App(tk.Tk):
         if self._closing:
             return
         # Do not interrupt a BIG/BH or stadium write to force the UI closed.
-        if getattr(self, '_stadium_task_running', False) or getattr(self, '_bh_regen_running', False):
+        if (getattr(self, '_stadium_task_running', False) or getattr(self, '_bh_regen_running', False)
+                or (getattr(self, 'competition_icons', None) is not None and self.competition_icons.busy)):
             if not getattr(self, '_close_pending', False):
                 self._close_pending = True
                 self.log("Shutdown: waiting for the current file operation")

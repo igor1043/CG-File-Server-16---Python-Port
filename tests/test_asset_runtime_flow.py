@@ -166,10 +166,12 @@ class AssetRuntimeFlowTests(unittest.TestCase):
     def test_launch_does_not_stage_or_require_intro_files(self):
         self.app.fifaEXE = str(self.root / "fifa16.exe")
         self.app._is_target_process_running = Mock(return_value=False)
+        self.app.competition_icons = Mock()
         with patch.object(app_module.subprocess, "Popen") as launch, \
              patch.object(app_module, "copy_if_exists", side_effect=AssertionError("launch must not copy assets")):
             Server16App.launch_fifa(self.app)
         launch.assert_called_once_with([self.app.fifaEXE], shell=False)
+        self.app.competition_icons.prepare.assert_called_once_with(self.root, force=True)
 
     def test_bootstrap_preserves_original_movies_enabled_and_disabled_branches(self):
         self.app.fifaEXE = str(self.root / "fifa16.exe")
