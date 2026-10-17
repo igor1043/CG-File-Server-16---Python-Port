@@ -19,7 +19,7 @@ class CompetitionIconsTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.game = Path(self.temp.name)
         for path, text in ((COMP_OBJ, '1738,3,C999,TrophyName_Abbr15_9,0\n1741,3,C83,Other,0\n'),
-                           (ICON_MAP, '# official\n1738|7\n'),
+                           (ICON_MAP, '# official\n1738|7|C999|TrophyName_Abbr15_9\n'),
                            (Path('FSW/settings.ini'), '[movies]\n1738=BRA - Brasileirão Série A\n1741=BRA - Serie B\n')):
             target = self.game / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +99,9 @@ class CompetitionIconsTests(unittest.TestCase):
 
     def test_ambiguous_name_and_shared_visual_duplicates_are_rejected(self):
         with (self.game / ICON_MAP).open('a') as file:
-            file.write('2000|83\n')
+            file.write('2000|83|C700|Custom\n')
+        with (self.game / COMP_OBJ).open('a') as file:
+            file.write('2000,3,C700,Custom,0\n')
         with (self.game / 'FSW/settings.ini').open('a', encoding='utf-8') as file:
             file.write('2000=BRA - Brasileirão Série A\n')
         mapping, _, aliases = identities(self.game)

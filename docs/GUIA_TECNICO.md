@@ -27,7 +27,7 @@ As abas **Próxima Partida**, **Meu Time** e **Competição**, a cabine do VAR, 
 Com o FIFA fechado, coloque um PNG (preferencialmente transparente), JPG, WEBP ou BMP em
 `data/ui/imgAssets/careerCompetitionIcons/`, dentro da instalação do jogo. Use o **ID da
 competição** ou o nome completo cadastrado no `FSW/settings.ini` como nome da imagem:
-por exemplo, `1738.png` ou `BRA - Brasileirao Serie A.png` nesta edição. Não é necessário
+por exemplo, `1761.png` ou `BRA - Brasileirao Serie A.png` nesta edição. Não é necessário
 abrir nem editar o settings.ini. O arquivo `COMPETICOES.txt`, gerado automaticamente na
 mesma pasta ao abrir o Server, lista os nomes aceitos para a instalação selecionada.
 

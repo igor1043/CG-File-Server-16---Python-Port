@@ -15,10 +15,9 @@ import time
 import unicodedata
 
 from PIL import Image, ImageOps
+from .competition_catalog import COMP_OBJ, ICON_MAP, icon_mapping, settings_text
 
 ICONS = Path('data/ui/imgAssets/careerCompetitionIcons')
-COMP_OBJ = Path('dlc/dlc_FootballCompEng/dlc/FootballCompEng/data/compdata/compobj.txt')
-ICON_MAP = Path('ModCarrerMode/data/catalogs/career_competition_icon_map.tsv')
 FIELDS = ['visual_id', 'filename', 'source_big', 'dds_sha256', 'alpha_bounds', 'host_available']
 EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.dds'}
 
@@ -34,27 +33,10 @@ def normalized(name):
 
 def identities(game):
     """Follow the same explicit-map / TrophyName / C<ID> precedence as the host."""
-    mapping, labels, aliases = {}, {}, {}
-    path = game / COMP_OBJ
-    if path.is_file():
-        for row in csv.reader(path.read_text(encoding='utf-8-sig').splitlines()):
-            if len(row) < 5 or row[1] != '3':
-                continue
-            explicit = re.search(r'TrophyName_Abbr15_(\d+)', row[3])
-            generic = re.fullmatch(r'C(\d+)', row[2])
-            match = explicit or generic
-            if match and row[0].isdigit():
-                mapping[int(row[0])] = int(match[1])
-    path = game / ICON_MAP
-    if path.is_file():
-        for line in path.read_text(encoding='utf-8-sig').splitlines():
-            match = re.fullmatch(r'\s*(\d+)\s*\|\s*(\d+)\s*', line)
-            if match:
-                mapping[int(match[1])] = int(match[2])
-    mapping = {key: value for key, value in mapping.items() if 0 < key <= 65535 and 0 < value <= 65535}
+    mapping, labels, aliases = icon_mapping(game), {}, {}
     path = game / 'FSW/settings.ini'
     if path.is_file():
-        text = path.read_text(encoding='utf-8-sig', errors='replace')
+        text = settings_text(path)
         for section in ('Scoreboard', 'movies'):
             block = re.search(r'^\[' + section + r'\][ \t]*\r?\n(.*?)(?=^\[|\Z)', text, re.M | re.S | re.I)
             if not block:

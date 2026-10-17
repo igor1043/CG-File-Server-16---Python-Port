@@ -13,6 +13,7 @@ from pathlib import Path
 from .ini_file import SessionIniFile
 from .match_presentation import MatchPresentation
 from .entrance_friendly import common_league_competition, no_competition
+from .competition_catalog import entrance_folder
 
 
 COMPETITION_SECTIONS = ('movies', 'Scoreboard', 'comp')
@@ -41,7 +42,10 @@ def resolve_asset(game_root: Path, competition: str, round_id: str = '', *, sett
             if not competition_id(key) or not any(settings.key_exists(key, section) for section in COMPETITION_SECTIONS):
                 continue
             configured = True
-            candidate = root / 'data/sceneassets/entrance_props/competitions' / key
+            folder = entrance_folder(root, int(key))
+            if folder is None:
+                continue
+            candidate = root / 'data/sceneassets/entrance_props/competitions' / folder
             if (candidate / 'asset.ini').is_file():
                 directory = candidate
                 break
@@ -117,7 +121,7 @@ class EntrancePropsRuntime:
             context = dict(schema=1, process_id=pid, home=app.HID, away=app.AID,
                            competition=competition or '0', round=round_id or '0',
                            mode=mode if enabled and directory else 'none',
-                           league=league or '0', asset=selected or '0')
+                           league=league or '0', asset=selected or '0', resolved_competition=resolved or '0')
             self._publish(root/'runtime/entrance_props_context.ini', '[selection]\n' + ''.join(f'{key}={value}\n' for key, value in context.items()))
             destination = root / 'runtime/entrance_props_selection.json'
             payload = dict(home=app.HID, away=app.AID, competition=competition, round=round_id,

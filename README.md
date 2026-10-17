@@ -8,6 +8,8 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 ## Novidades — 17/10/2026
 
+- **Compatibilidade com a base v12.11/Honduras:** ícones e aberturas são associados pela identidade da competição e da fase, acompanhando os IDs do calendário instalado.
+
 - **Ícones automáticos da carreira:** copie uma imagem com o nome ou ID da competição. O Server identifica, converte e cadastra sozinho, sem editar tabelas.
 - **Movimento das camisas e calções:** ative ou desative a física de roupas pelo painel. Sua escolha fica salva para as próximas aberturas.
 - **Controle durante a partida:** o painel de F12 permite alterar a física e confirma a resposta do jogo quando o módulo compatível está carregado.
@@ -39,7 +41,7 @@ Para ativar o movimento das roupas, entre em **Configurações da partida > Fís
 ## Adicione um ícone sem planilha
 
 1. Com o FIFA fechado, copie um **PNG ou JPG** para `data/ui/imgAssets/careerCompetitionIcons/`, dentro da pasta do jogo.
-2. Coloque no arquivo o **nome completo ou ID da competição**. Nesta edição, por exemplo: **`1738.png`** ou **`BRA - Brasileirao Serie A.png`**.
+2. Coloque no arquivo o **nome completo ou ID da competição**. Nesta edição, por exemplo: **`1761.png`** ou **`BRA - Brasileirao Serie A.png`**.
 3. Abra o Server atualizado, aguarde alguns segundos e inicie o FIFA.
 
 Pronto: o Server ajusta o tamanho, converte a imagem e cadastra o ícone. **Não é preciso abrir o settings.ini, editar o index.tsv ou preparar um DDS.** A lista **`COMPETICOES.txt`**, gerada na mesma pasta, mostra os nomes aceitos na sua instalação.

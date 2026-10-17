@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .file_tools import copy, copy_if_exists, copy_tvlogo, extra_setup
+from .competition_catalog import presentation_package
 
 if TYPE_CHECKING:
     from .app import Server16App
@@ -120,8 +121,8 @@ class AssetRuntime:
                 )
                 self._notify_loading("show", "scoreboard", "Carregando placar", scoreboard or "Padrão", "Aplicando atribuição do placar", 40)
                 if scoreboard:
-                    variant = app.ScoreBoard / scoreboard / app.tvlogoscoreboardtype
-                    scoreboard_dir = app.ScoreBoard / scoreboard
+                    scoreboard_dir = presentation_package(app.exedir, app.ScoreBoard, 'scoreboard', scoreboard)
+                    variant = scoreboard_dir / app.tvlogoscoreboardtype
                     if app.tvlogoscoreboardtype != "default" and variant.exists():
                         copy(variant, app.Scoredata, progress_callback=copy_progress(40, 100))
                     elif scoreboard_dir.exists():
@@ -158,7 +159,7 @@ class AssetRuntime:
             fallback=("0", "movies"),
         )
         if movie:
-            movie_dir = app.Movies / movie
+            movie_dir = presentation_package(app.exedir, app.Movies, 'movies', movie)
             if movie_dir.exists():
                 self._notify_loading("show", "movie", "Carregando vídeo pré-jogo", movie, "Preparando vídeo e vinheta", 0)
                 try:

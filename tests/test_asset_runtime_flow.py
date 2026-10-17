@@ -74,6 +74,26 @@ class AssetRuntimeFlowTests(unittest.TestCase):
                 self.assertEqual(self.app.MOVBUMP.read_bytes(), f"bumper-{name}".encode())
                 del self.assignments[key]
 
+    def test_new_official_movie_name_uses_existing_package_without_editing_settings(self):
+        self.assignments[("movies", "tour")] = "AUST - Isuzu UTE A-League"
+        self.movie_package("Isuzu UTE A-League")
+        self.put("ModCarrerMode/data/catalogs/presentation_package_aliases.tsv",
+                 b"movies|AUST - Isuzu UTE A-League|Isuzu UTE A-League\n")
+        before = dict(self.assignments)
+        self.runtime.apply_movie_runtime()
+        self.assertEqual(self.app.Movdata.read_bytes(), b"video-Isuzu UTE A-League")
+        self.assertEqual(self.assignments, before)
+
+    def test_new_scoreboard_name_resolves_existing_assets_after_native_baseline(self):
+        self.assignments[("Scoreboard", "tour")] = "New official name"
+        self.put("FSW/ScoreBoard/game/native.big", b"native")
+        self.put("ScoreBoard/Old package/game/native.big", b"mapped scoreboard")
+        self.put("ModCarrerMode/data/catalogs/presentation_package_aliases.tsv",
+                 b"scoreboard|New official name|Old package\n")
+        self.app.tvlogoscoreboardtype = "default"
+        self.runtime.apply_scoreboard_runtime()
+        self.assertEqual((self.app.Scoredata / "game/native.big").read_bytes(), b"mapped scoreboard")
+
     def test_scoreboard_priority_copies_baseline_before_assigned_files(self):
         priorities = [("Scoreboard", "round"), ("Scoreboard", "tour"),
                       ("HomeTeamScoreBoard", "1043"), ("Scoreboard", "0")]
