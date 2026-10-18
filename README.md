@@ -19,10 +19,11 @@ salvo e é recuperado nas próximas sessões, sem precisar abrir o menu. A suavi
 é sempre **Forte** e o enquadramento sempre **Campo e bola**, com olhar neutro.
 O modo pode ser **Primeira pessoa** ou **Terceira pessoa · carreira**. Este último
 mantém a câmera atrás do jogador selecionado, mostra o corpo inteiro e suaviza
-as viradas sem copiar os balanços da cabeça. Na terceira pessoa, **Distância** oferece
+as viradas e a translação sem copiar os balanços da cabeça. Limita a aceleração das
+viradas e suaviza trocas para jogadores próximos. Na terceira pessoa, **Distância** oferece
 **Perto**, **Intermediária** e **Afastada**, com transição suave. As escolhas ficam salvas.
 A abertura padrão é **85° nos dois modos**, sem ampliação automática com a posse.
-Cada modo guarda seu próprio ajuste: 75°–120° na primeira pessoa e 60°–90° na terceira,
+Cada modo guarda seu próprio ajuste: 75°–150° na primeira pessoa e 60°–90° na terceira,
 em passos de 5°. A terceira pessoa usa uma posição mais recuada para preservar as proporções.
 Com posse, o olhar mantém mais espaço
 para o campo, dá atenção ao controle próximo da bola e volta a levantar após

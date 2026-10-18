@@ -70,6 +70,15 @@ int main(){
     auto wide=custom.update(head,{0,0,0},ball,true,0,false,110);
     assert(wide.fov>normal.fov&&wide.fov<=120*.01745329252f);
     assert(wide.pose.pitch<=normal.pose.pitch); // Wider lens preserves more field.
+    for(float requested:{125.f,145.f,150.f,200.f}){
+        const float expected=std::min(requested,150.f)*.01745329252f;
+        for(bool possession:{false,true}){
+            custom.reset();
+            const auto panoramic=custom.update(head,{0,0,0},ball,possession,0,false,requested);
+            assert(std::fabs(panoramic.fov-expected)<.001f);
+            assert(std::isfinite(panoramic.pose.pitch)&&std::isfinite(std::tan(panoramic.fov*.5f)));
+        }
+    }
     auto tilted=fp::personalizeLook(head,10);
     assert(std::fabs(tilted.pitch-head.pitch-.1745329252f)<.001f);
     assert(tilted.heading==head.heading&&tilted.eye.x==head.eye.x);
@@ -96,10 +105,21 @@ int main(){
     assert(steady.pose.eye.y==third.pose.eye.y&&steady.pose.pitch==third.pose.pitch);
     assert(steady.pose.roll==0); // Animated nod/tilt does not shake this mode.
     auto translated=career.update(head,{100,0,0},{1000,10,0},1.f/60,75);
-    assert(std::fabs(translated.pose.eye.x-third.pose.eye.x-100.f)<.001f);
+    assert(translated.pose.eye.x>third.pose.eye.x&&translated.pose.eye.x<third.pose.eye.x+10.f);
+    for(int i=0;i<180;++i)translated=career.update(head,{100,0,0},{1000,10,0},1.f/60,75);
+    assert(std::fabs(translated.pose.eye.x-third.pose.eye.x-100.f)<.01f);
     head.heading=1.f;
     auto orbit=career.update(head,{100,0,0},{1000,10,0},1.f/60,75);
     assert(orbit.pose.heading>0&&orbit.pose.heading<.1f); // Strong orbit smoothing.
+    float priorHeading=orbit.pose.heading,priorSpeed=priorHeading*60.f;
+    for(int i=0;i<180;++i){
+        orbit=career.update(head,{100,0,0},{100.f+900.f*std::cos(1.f),10.f,-900.f*std::sin(1.f)},1.f/60,75);
+        const float speed=fp::wrap(orbit.pose.heading-priorHeading)*60.f;
+        assert(std::fabs(speed)<=1.501f);
+        assert(std::fabs(speed-priorSpeed)<=4.f/60.f+.001f);
+        priorHeading=orbit.pose.heading;priorSpeed=speed;
+    }
+    assert(std::fabs(orbit.pose.heading-1.f)<.005f);
     career.reset();
     auto reset=career.update(head,{2000,0,0},{2900,10,0},1.f/60,75);
     assert(reset.pose.heading>.5f); // New selected player/context acquires immediately.
@@ -115,6 +135,22 @@ int main(){
     auto farPreset=presets.update(head,{0,0,0},{900,10,0},0,85,2);
     assert(farPreset.pose.eye.x==-1150.f&&farPreset.pose.eye.y==450.f);
     assert(closePreset.fov==midPreset.fov&&midPreset.fov==farPreset.fov);
+    fp::CareerCamera handoff;
+    const auto oldPlayer=handoff.update(head,{0,0,0},{900,10,0},0,85);
+    auto newPlayer=handoff.update(head,{1000,0,0},{1900,10,0},1.f/60,85,0,true);
+    assert(newPlayer.pose.eye.x>oldPlayer.pose.eye.x&&newPlayer.pose.eye.x<oldPlayer.pose.eye.x+50.f);
+    for(int i=0;i<180;++i)newPlayer=handoff.update(head,{1000,0,0},{1900,10,0},1.f/60,85);
+    assert(std::fabs(newPlayer.pose.eye.x-520.f)<.01f);
+    const auto remote=handoff.update(head,{9000,0,0},{9900,10,0},1.f/60,85,0,true);
+    assert(remote.pose.eye.x==8520.f); // No long sweep across the stadium.
+    fp::CareerCamera fps60,fps120;
+    head.heading=0;fps60.update(head,{0,0,0},{900,10,0},0,85);fps120.update(head,{0,0,0},{900,10,0},0,85);
+    head.heading=1.f;
+    fp::FramedView at60{},at120{};
+    for(int i=0;i<120;++i)at60=fps60.update(head,{100,0,0},{1000,10,0},1.f/60,85);
+    for(int i=0;i<240;++i)at120=fps120.update(head,{100,0,0},{1000,10,0},1.f/120,85);
+    assert(std::fabs(at60.pose.heading-at120.pose.heading)<.01f);
+    assert(std::fabs(at60.pose.eye.x-at120.pose.eye.x)<5.f);
     fp::PossessionFraming defaultWide;
     head.heading=0;head.pitch=.1f;fp::axes(head);
     auto defaultOff=defaultWide.update(head,{0,0,0},ball,false,0,false,85);

@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 MAPPING_NAME = 'Local\\FIFA16_FirstPersonCamera_v4'
-DLL_NAME = 'server16_first_person_v6.dll'
+DLL_NAME = 'server16_first_person_v7.dll'
 DEFAULT_FOV = 85
 CAREER_FOV = 85
 PREFERENCES_VERSION = 4
@@ -28,7 +28,7 @@ class CameraShared(ctypes.Structure):
 
 
 def fov_limits(mode):
-    return (60, 90) if mode == 1 else (75, 120)
+    return (60, 90) if mode == 1 else (75, 150)
 
 
 def _load_settings(path):
@@ -45,7 +45,7 @@ def _load_settings(path):
     # standard in both modes. Later explicit mode-specific choices survive.
     first = data.get('fov_first_person', DEFAULT_FOV) if data.get('version') == PREFERENCES_VERSION else DEFAULT_FOV
     career = data.get('fov_career', CAREER_FOV) if data.get('version') == PREFERENCES_VERSION else CAREER_FOV
-    first = first if type(first) is int and 75 <= first <= 120 else DEFAULT_FOV
+    first = first if type(first) is int and 75 <= first <= 150 else DEFAULT_FOV
     career = career if type(career) is int and 60 <= career <= 90 else CAREER_FOV
     distance = data.get('distance', 0)
     distance = distance if type(distance) is int and 0 <= distance <= 2 else 0

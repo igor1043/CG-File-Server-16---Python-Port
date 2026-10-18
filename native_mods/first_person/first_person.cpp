@@ -73,13 +73,16 @@ static void __fastcall generatorHook(void* self,void* output){
         if(s.valid&&InterlockedCompareExchange(&enabled,0,0)&&!stopping){
             LARGE_INTEGER now{};QueryPerformanceCounter(&now);
             const int mode=InterlockedCompareExchange(&cameraMode,0,0);
-            if(previousBehavior!=s.behavior||previousTable!=s.head.table||previousPlayer!=s.selected||previousPhase!=s.gameState||previousMode!=mode){stabilizer.reset();gameView.reset();careerView.reset();}
+            const bool contextChanged=previousBehavior!=s.behavior||previousTable!=s.head.table||previousPhase!=s.gameState||previousMode!=mode;
+            const bool playerChanged=previousPlayer!=s.selected;
+            if(contextChanged||playerChanged){stabilizer.reset();gameView.reset();}
+            if(contextChanged)careerView.reset();
             const float dt=previousTime.QuadPart?static_cast<float>(static_cast<double>(now.QuadPart-previousTime.QuadPart)/static_cast<double>(timerFrequency.QuadPart)):0.f;
             auto target=s.raw;
             const float baseFov=static_cast<float>(InterlockedCompareExchange(&fieldOfView,0,0));
             float fov=baseFov*.01745329252f;
             if(mode==1){
-                const auto view=careerView.update(s.raw,s.head.root,get<fp::Vec>(s.behavior+0xa20),dt,baseFov,InterlockedCompareExchange(&cameraDistance,0,0));
+                const auto view=careerView.update(s.raw,s.head.root,get<fp::Vec>(s.behavior+0xa20),dt,baseFov,InterlockedCompareExchange(&cameraDistance,0,0),playerChanged);
                 s.pose=view.pose;fov=view.fov;
             }else{
               if(InterlockedCompareExchange(&framing,0,0)){
@@ -186,7 +189,7 @@ static DWORD WINAPI controlLoop(void*){
             const int lens=channel->fov,bias=channel->look_bias;
             const int mode=channel->mode;
             const int distance=channel->distance;
-            const int minLens=mode==1?60:75,maxLens=mode==1?90:120;
+            const int minLens=mode==1?60:75,maxLens=mode==1?90:150;
             if((wanted!=0&&wanted!=1)||smoothing<0||smoothing>2||view<0||view>1||lens<minLens||lens>maxLens||bias<-10||bias>20||mode<0||mode>1||distance<0||distance>2)error=2;
             else if(wanted){const DWORD result=Start(nullptr);if(!result)error=1;else if(result==2)error=3;}
             if(!error){InterlockedExchange(&profile,smoothing);InterlockedExchange(&framing,view);InterlockedExchange(&fieldOfView,lens);InterlockedExchange(&lookBias,bias);InterlockedExchange(&cameraMode,mode);InterlockedExchange(&cameraDistance,distance);InterlockedExchange(&enabled,wanted);}

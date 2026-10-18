@@ -136,8 +136,9 @@ class CameraRuntimeTests(unittest.TestCase):
                 try:
                     runtime.configure(mode=0)
                     self.assertEqual((runtime.fov,runtime.shared.fov),(85,85))
-                    runtime.configure(fov=120)
-                    self.assertEqual((runtime.fov,runtime.shared.fov),(120,120))
+                    runtime.configure(fov=150)
+                    self.assertEqual((runtime.fov,runtime.shared.fov),(150,150))
+                    with self.assertRaises(ValueError):runtime.configure(fov=151)
                     runtime.configure(mode=1)
                     self.assertEqual((runtime.fov,runtime.shared.fov),(85,85))
                     with self.assertRaises(ValueError):runtime.configure(fov=105)
@@ -145,11 +146,11 @@ class CameraRuntimeTests(unittest.TestCase):
                     runtime.configure(distance=2)
                     self.assertEqual(runtime.shared.distance,2)
                     runtime.configure(mode=0)
-                    self.assertEqual(runtime.fov,120)
+                    self.assertEqual(runtime.fov,150)
                 finally:runtime.close()
                 runtime=FirstPersonRuntime(app)
                 try:
-                    self.assertEqual(runtime.fov,120)
+                    self.assertEqual(runtime.fov,150)
                     runtime.configure(mode=1)
                     self.assertEqual(runtime.fov,70)
                     self.assertEqual(runtime.distance,2)
@@ -227,9 +228,12 @@ class HubTests(unittest.TestCase):
                         self.assertEqual(image.size,(1200,980))
                     selector.handle(3,0)
                     runtime.configure.assert_called_with(fov=110)
-                    runtime.fov=120
+                    runtime.fov=145
                     selector.handle(3,0)
-                    runtime.configure.assert_called_with(fov=120)
+                    runtime.configure.assert_called_with(fov=150)
+                    runtime.fov=150
+                    selector.handle(3,0)
+                    runtime.configure.assert_called_with(fov=150)
                     runtime.fov=75
                     selector.handle(2,0)
                     runtime.configure.assert_called_with(fov=75)

@@ -17,7 +17,7 @@ int main(){
     s->profile=7;s->command=2;wait(2);assert(s->error==2&&s->enabled==0);
     s->profile=1;s->requested=1;s->command=3;wait(3);assert(s->error==1&&s->enabled==0);
     s->requested=0;s->command=4;wait(4);assert(s->error==0&&s->enabled==0);
-    s->fov=121;s->command=5;wait(5);assert(s->error==2&&s->enabled==0);
+    s->fov=151;s->command=5;wait(5);assert(s->error==2&&s->enabled==0);
     s->fov=105;s->look_bias=-11;s->command=6;wait(6);assert(s->error==2);
     s->look_bias=8;s->command=7;wait(7);assert(s->error==0);
     s->mode=2;s->command=8;wait(8);assert(s->error==2);
@@ -27,6 +27,9 @@ int main(){
     s->mode=0;s->command=12;wait(12);assert(s->error==2);
     s->mode=1;s->distance=3;s->command=13;wait(13);assert(s->error==2);
     s->distance=2;s->command=14;wait(14);assert(s->error==0);
+    s->mode=0;s->fov=150;s->command=15;wait(15);assert(s->error==0&&s->enabled==0);
+    s->mode=1;s->command=16;wait(16);assert(s->error==2&&s->enabled==0);
+    s->mode=0;s->fov=151;s->command=17;wait(17);assert(s->error==2&&s->enabled==0);
     s->owner=0;Sleep(80);assert(s->enabled==0);
     std::puts("PASS: real DLL channel, ack, FOV/tilt/mode bounds, unsupported executable rejection, disable and owner loss");
     // Exit ends the worker; do not unload while its thread is running.

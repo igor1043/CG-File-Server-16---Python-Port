@@ -1,6 +1,6 @@
 # Primeira pessoa no Server16
 
-Componente x64 `server16_first_person_v6.dll`, carregado pelo Server usando o helper
+Componente x64 `server16_first_person_v7.dll`, carregado pelo Server usando o helper
 existente `cgfs16_inject.exe`. O controle é o mapa `Local\FIFA16_FirstPersonCamera_v4`,
 80 bytes, versão 4, declarado em `camera_channel.h` e `first_person_runtime.CameraShared`.
 O Server publica owner/heartbeat e comando; a DLL publica ack/estado/erro. Não há
@@ -29,14 +29,15 @@ de drible. Ao soltar a bola, prioriza o campo por 650 ms; isso inclui passes e c
 sem distinguir a animação. Não gira o heading em direção à bola. O Server fixa
 suavização Forte (2), enquadramento Campo e bola (1) e viés neutro (0). O menu
 expõe ativação, modo, FOV por modo e distância na terceira pessoa.
-A primeira pessoa aceita 75–120° e a terceira 60–90°, sem aumento automático com posse. A posse usa
+A primeira pessoa aceita 75–150° e a terceira 60–90°, sem aumento automático com posse. A posse usa
 PossesorPlayerId (+A30) comparado ao jogador seguido (+9CC). A folga da câmera
 mantém o olho pelo menos 21 cm à frente do centro animado da cabeça, incluindo
 viradas com atraso do filtro, para reduzir aparições do cabelo. Não oculta meshes.
 
 Modo 1 (Terceira pessoa · carreira) usa `career_camera.h`: câmera 480 cm atrás da
 raiz e 230 cm acima, com referência de mira 850 cm à frente / 110 cm de altura.
-Órbita horizontal suavizada com tau 320 ms; posição segue a raiz, sem copiar
+Órbita horizontal com resposta de 400 ms, limite de 1,5 rad/s e aceleração de
+4 rad/s². A translação da raiz passa por dois filtros (100 e 140 ms), sem copiar
 altura/pitch/roll animados da cabeça. A bola à frente atrai parcialmente a direção;
 o corpo inteiro cabe no FOV padrão 85°. Sem teste de colisão contra o cenário.
 Não usa `headClearance`, que empurraria a câmera para dentro da posição de primeira
@@ -60,6 +61,11 @@ O painel antigo deve ser fechado e seu protótipo parado ou o FIFA reiniciado an
 de ativar esta versão, pois ambos usam as mesmas funções da câmera.
 
 Distância (campo int32 final do canal): 0 Perto (480/230 cm), 1 Intermediária
-(750/320 cm), 2 Afastada (1150/450 cm), com resposta de 300 ms. Preferências versão 4
+(750/320 cm), 2 Afastada (1150/450 cm), com filtros de 160 e 180 ms para a transição. Preferências versão 4
 guardam o FOV de cada modo separadamente; ambos começam em 85°. A primeira pessoa
 sincroniza a pose aplicada com o cache nativo +BE0, usado na interpolação de transições.
+
+Na terceira pessoa, trocas de jogador de até 25 m preservam o filtro em vez de
+reiniciá-lo. Trocas mais distantes, pausa longa, novo contexto ou mudança de fase
+readquirem a câmera para evitar travessias longas do estádio. A primeira pessoa
+mantém a âncora imediata; estes filtros de translação são exclusivos da terceira.

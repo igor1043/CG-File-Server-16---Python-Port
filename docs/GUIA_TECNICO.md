@@ -7,13 +7,13 @@ no overlay existente. Música mantém os perfis geral e específico do confronto
 Gráficos controla a física de roupas. Câmera oferece somente ativação, modo e campo
 de visão, em passos de 5. Modos: Primeira pessoa (0) e Terceira pessoa · carreira
 (1), ambos na câmera nativa Profissional. Padrão de 85 graus nos dois, sem ampliar
-automaticamente com posse. A primeira pessoa aceita 75–120 graus e a terceira 60–90.
+automaticamente com posse. A primeira pessoa aceita 75–150 graus e a terceira 60–90.
 Na terceira pessoa, Distância seleciona Perto, Intermediária ou Afastada.
 Suavização Forte (perfil 2), enquadramento Campo e bola (1) e viés neutro (0)
 são fixos. O submenu Personalizar e os outros seletores foram removidos.
 No FIFA, selecione a câmera **Profissional** para usar a primeira pessoa.
 
-`first_person_runtime.py` controla a DLL `bin/server16_first_person_v6.dll` por mapa
+`first_person_runtime.py` controla a DLL `bin/server16_first_person_v7.dll` por mapa
 `Local\FIFA16_FirstPersonCamera_v4`, de 80 bytes, versão 4, com comandos confirmados
 pelo jogo. Os últimos quatro int32 são FOV, inclinação em graus, modo e distância (0–2). A DLL valida a versão
 e os slots nativos antes de intervir, mantém o acompanhamento na troca de jogador
@@ -45,11 +45,12 @@ a DLL nativa já carregada, reinicie também o FIFA.
 
 Terceira pessoa · carreira usa `career_camera.h`: posição Perto a 4,80 m atrás / 2,30 m
 acima da raiz, Intermediária a 7,50 / 3,20 m e Afastada a 11,50 / 4,50 m. A mudança
-de distância/altura usa constante de 300 ms. Mira 8,50 m à frente e 1,10 m de altura.
-Segue a translação sem atraso e suaviza a órbita horizontal com constante de
-320 ms. Mantém pitch de enquadramento e roll neutro, sem seguir os balanços da
+de distância/altura usa dois filtros de 160 e 180 ms. Mira 8,50 m à frente e 1,10 m de altura.
+A translação usa filtros de 100 e 140 ms; a órbita tem resposta de 400 ms, velocidade
+limitada a 1,5 rad/s e aceleração a 4 rad/s². Mantém pitch de enquadramento e roll neutro, sem seguir os balanços da
 cabeça. A bola à frente pode atrair levemente a direção da câmera; uma bola atrás
-não provoca giro forçado. Trocar modo/jogador/fase reinicia os filtros. A proteção
+não provoca giro forçado. Trocar modo/fase reinicia os filtros; jogadores próximos
+(até 25 m) preservam a transição, e saltos maiores readquirem a câmera. A proteção
 contra cabelo se aplica somente à primeira pessoa, preservando a posição atrás
 do corpo neste modo. Não há sondagem de colisão contra objetos do estádio.
 

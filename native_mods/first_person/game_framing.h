@@ -47,7 +47,7 @@ public:
         const Vec delta=ball-head.eye;
         const float distance=std::hypot(delta.x,delta.z);
         const bool finite=std::isfinite(distance)&&std::isfinite(ball.y);
-        baseFov=clamp(baseFov,75.f,120.f);
+        baseFov=clamp(baseFov,75.f,150.f);
         float targetLens=baseFov*degrees;
         Pose target=gameFraming(head,root,ball);
         if(continuous&&wasPossessing&&!possessing)releaseLook=.65f;
