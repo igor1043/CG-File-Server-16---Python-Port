@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 MAPPING_NAME = 'Local\\FIFA16_FirstPersonCamera_v4'
-DLL_NAME = 'server16_first_person_v5.dll'
+DLL_NAME = 'server16_first_person_v6.dll'
 DEFAULT_FOV = 85
 CAREER_FOV = 85
 PREFERENCES_VERSION = 4
@@ -216,6 +216,8 @@ class FirstPersonRuntime:
         if self.error:
             return self.error
         if self.shared.error:
+            if self.shared.error == 3:
+                return 'Câmera salva; aguardando inicialização do FIFA.'
             return ('Outra câmera está em uso ou esta versão do FIFA não é compatível.'
                     if self.shared.error == 1 else 'A configuração da câmera foi rejeitada.')
         if self.enabled and not self.game_pid:

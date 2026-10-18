@@ -1,6 +1,6 @@
 # Primeira pessoa no Server16
 
-Componente x64 `server16_first_person_v5.dll`, carregado pelo Server usando o helper
+Componente x64 `server16_first_person_v6.dll`, carregado pelo Server usando o helper
 existente `cgfs16_inject.exe`. O controle é o mapa `Local\FIFA16_FirstPersonCamera_v4`,
 80 bytes, versão 4, declarado em `camera_channel.h` e `first_person_runtime.CameraShared`.
 O Server publica owner/heartbeat e comando; a DLL publica ack/estado/erro. Não há
@@ -8,6 +8,12 @@ processo de painel externo. Sem heartbeat por três segundos ou ao fechar o Serv
 a câmera desativa. F10 também desativa. O Server salva ativação e abertura e
 recupera a escolha na inicialização, sem exigir abertura do menu. Reiniciar o Server reaproveita a DLL já
 carregada, inclusive se o diretório temporário do PyInstaller mudou.
+
+A revisão v6 adia a ativação até o próprio FIFA inicializar o cache de nomes dos
+ossos (flag RVA 3518200 no executável 577DE45C). Apenas carregar BCEngine não basta:
+consultar o osso antes disso aciona a inicialização preguiçosa contra uma tabela
+ainda ausente e derruba o jogo. O erro transitório 3 indica espera, mantém a escolha
+salva e tenta de novo automaticamente, sem chamar o resolvedor durante a espera.
 
 O protótipo usa o BCEngine desta compilação do FIFA (timestamp 577DE45C), com dois
 desvios de vtable verificados antes da escrita. Captura Head pela matriz animada,

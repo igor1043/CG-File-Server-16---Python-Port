@@ -9,6 +9,7 @@
 #include "game_framing.h"
 #include "career_camera.h"
 #include "camera_channel.h"
+#include "camera_bootstrap.h"
 extern "C" {__declspec(dllexport) CameraPublicState CameraStatus{};}
 extern "C" {__declspec(dllexport) CameraTrackingPublicState CameraTrackingStatus{};}
 static volatile LONG profile=2;
@@ -145,8 +146,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI Start(void* directory){
     if(!bc||pe<0||pe>4096||get<unsigned>(image+static_cast<uintptr_t>(pe)+8)!=0x577de45c)return 0;
     generator=reinterpret_cast<Generator>(bc+0x8a6b0);collect=reinterpret_cast<Collect>(bc+0x5cd20);
     if(get<uintptr_t>(bc+0x1254f0)!=reinterpret_cast<uintptr_t>(generator)||get<uintptr_t>(bc+0x1130e0)!=reinterpret_cast<uintptr_t>(collect))return 0;
-    headIndex=reinterpret_cast<int(__fastcall*)(int)>(bc+0x24a0)(3);if(headIndex<0||headIndex>255)return 0;
-    rootIndex=reinterpret_cast<int(__fastcall*)(int)>(bc+0x24a0)(11);if(rootIndex<0||rootIndex>255)return 0;
+    // Loaded BCEngine is not sufficient: saved activation can reach here
+    // before FIFA builds its bone registry. Defer without invoking the API.
+    const auto boneCacheReady=get<unsigned char>(image+fp::boneCacheReadyRva);
+    if(boneCacheReady!=1)return 2; // Pending native initialization, retry later.
+    if(!fp::initializedBones(boneCacheReady,reinterpret_cast<int(__fastcall*)(int)>(bc+0x24a0),headIndex,rootIndex))return 0;
     if(!QueryPerformanceFrequency(&timerFrequency)||timerFrequency.QuadPart<=0)return 0;
     HMODULE pinned=nullptr;if(!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,reinterpret_cast<LPCSTR>(&image),&pinned))return 0;
     if(!exchange(bc+0x1130e0,reinterpret_cast<uintptr_t>(collect),reinterpret_cast<uintptr_t>(&collectHook)))return 0;
@@ -176,7 +180,7 @@ static DWORD WINAPI controlLoop(void*){
         const uint32_t owner=channel->owner,command=channel->command;
         const bool alive=channel->version==4&&owner&&static_cast<uint32_t>(GetTickCount()-channel->heartbeat)<3000;
         if(!alive||owner!=lastOwner)InterlockedExchange(&enabled,0);
-        if(alive&&(owner!=lastOwner||command!=lastCommand)){
+        if(alive&&(owner!=lastOwner||command!=lastCommand||channel->error==3)){
             int error=0;
             const int wanted=channel->requested,smoothing=channel->profile,view=channel->framing;
             const int lens=channel->fov,bias=channel->look_bias;
@@ -184,7 +188,7 @@ static DWORD WINAPI controlLoop(void*){
             const int distance=channel->distance;
             const int minLens=mode==1?60:75,maxLens=mode==1?90:120;
             if((wanted!=0&&wanted!=1)||smoothing<0||smoothing>2||view<0||view>1||lens<minLens||lens>maxLens||bias<-10||bias>20||mode<0||mode>1||distance<0||distance>2)error=2;
-            else if(wanted&&!Start(nullptr))error=1;
+            else if(wanted){const DWORD result=Start(nullptr);if(!result)error=1;else if(result==2)error=3;}
             if(!error){InterlockedExchange(&profile,smoothing);InterlockedExchange(&framing,view);InterlockedExchange(&fieldOfView,lens);InterlockedExchange(&lookBias,bias);InterlockedExchange(&cameraMode,mode);InterlockedExchange(&cameraDistance,distance);InterlockedExchange(&enabled,wanted);}
             else InterlockedExchange(&enabled,0);
             channel->error=error;MemoryBarrier();channel->ack=command;lastCommand=command;

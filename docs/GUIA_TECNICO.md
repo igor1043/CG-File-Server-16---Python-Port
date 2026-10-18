@@ -13,7 +13,7 @@ Suavização Forte (perfil 2), enquadramento Campo e bola (1) e viés neutro (0)
 são fixos. O submenu Personalizar e os outros seletores foram removidos.
 No FIFA, selecione a câmera **Profissional** para usar a primeira pessoa.
 
-`first_person_runtime.py` controla a DLL `bin/server16_first_person_v5.dll` por mapa
+`first_person_runtime.py` controla a DLL `bin/server16_first_person_v6.dll` por mapa
 `Local\FIFA16_FirstPersonCamera_v4`, de 80 bytes, versão 4, com comandos confirmados
 pelo jogo. Os últimos quatro int32 são FOV, inclinação em graus, modo e distância (0–2). A DLL valida a versão
 e os slots nativos antes de intervir, mantém o acompanhamento na troca de jogador

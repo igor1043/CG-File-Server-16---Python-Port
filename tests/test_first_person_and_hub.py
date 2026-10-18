@@ -109,6 +109,11 @@ class CameraRuntimeTests(unittest.TestCase):
                     runtime.shared.ack=runtime.shared.command
                     runtime.tick()
                     self.assertTrue(runtime.enabled)
+                    runtime.shared.error=3  # Deferred initialization preserves saved On.
+                    runtime.tick()
+                    self.assertTrue(runtime.enabled)
+                    self.assertIn('aguardando inicialização',runtime.status())
+                    self.assertTrue(load_preferences(path)[0])
                     runtime.configure(fov=85)
                     self.assertTrue(runtime.enabled)
                 finally:runtime.close()

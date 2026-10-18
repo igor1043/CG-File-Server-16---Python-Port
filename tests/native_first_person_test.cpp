@@ -1,9 +1,23 @@
 #include "../native_mods/first_person/game_framing.h"
 #include "../native_mods/first_person/career_camera.h"
+#include "../native_mods/first_person/camera_bootstrap.h"
 #include <cassert>
 #include <cstdio>
 #include <limits>
 int main(){
+    int calls=0,headBone=-1,rootBone=-1;
+    const auto lookup=[&](int bone){++calls;return bone==3?12:0;};
+    const unsigned char notReady[]={0,2,255};
+    for(auto ready:notReady){
+        assert(!fp::initializedBones(ready,lookup,headBone,rootBone));
+        assert(calls==0&&headBone==-1&&rootBone==-1);
+    }
+    assert(fp::initializedBones(1,lookup,headBone,rootBone));
+    assert(calls==2&&headBone==12&&rootBone==0);
+    assert(!fp::initializedBones(1,[](int){return -1;},headBone,rootBone));
+    assert(!fp::initializedBones(1,[](int){return 256;},headBone,rootBone));
+    assert(headBone==12&&rootBone==0);
+    std::puts("PASS: saved activation never calls bone resolver before native initialization");
     fp::Pose head{};head.eye={14,175,0};fp::axes(head);
     const auto near=fp::gameFraming(head,{0,0,0},{90,10,0});
     const auto far=fp::gameFraming(head,{0,0,0},{3000,10,0});
