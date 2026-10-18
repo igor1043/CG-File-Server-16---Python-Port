@@ -38,6 +38,9 @@ int main(int argc,char **argv) {
     CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/calendar/empty.dds"));
     CHECK(resolve_image_path("imgAssets/league/light/l1001700.dds",out,sizeof(out)));
     CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/cards/empty.dds"));
+    visual_competition[3003]=1918;
+    CHECK(resolve_image_path("imgAssets/league/light/l3003.dds",out,sizeof(out)));
+    CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/cards/empty.dds"));
     CHECK(!resolve_image_path("artAssets/cmCalendar/cmcalendar_8.swf",out,sizeof(out)));
     CHECK(!resolve_image_path("imgAssets/crest/light/l1043.dds",out,sizeof(out)));
     CHECK(!resolve_image_path("artAssets/stadium/stadium_cmphoto_0123456789abcdef.big",out,sizeof(out)));

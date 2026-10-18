@@ -65,7 +65,7 @@ static int resolve_image_path(const char *input,char *out,size_t capacity) {
     }
     id=asset>1000000 && asset<=1065535?asset-1000000:asset>0 && asset<65536?visual_competition[asset]:0;
     if(id<=0 || id>=65535 || !icon_file(id,kind)) {
-        if(strcmp(kind,"calendar") && asset<=1000000)return 0;
+        if(strcmp(kind,"calendar") && asset<=1000000 && (id<=0 || id>=65535))return 0;
         /* Missing calendar artwork has a transparent DDS, never a BIG fallback. */
         length=snprintf(out,capacity,"%simgAssets/careerCompetitionIcons/%s/empty.dds",prefix,kind);
         return length>0 && (size_t)length<capacity;
