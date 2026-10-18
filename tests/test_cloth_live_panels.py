@@ -45,16 +45,17 @@ class LiveClothTests(unittest.TestCase):
             selector=audio.MatchAudioTests().make_selector(Path(tmp));switch=install(selector.app.exedir)
             try:
                 selector.open(audio=True);panel=selector.audio_panel
-                original=tuple(panel.values)
-                panel.handle(8,(320<<16)|500)
-                self.assertFalse(switch.enabled());self.assertEqual(tuple(panel.values),original)
-                with patch.object(panel.cloth,'live_enabled',return_value=False):
-                    panel.tick()
-                self.assertIsNone(panel.cloth_pending);self.assertIn('desativada',panel.message)
-                panel.focus=5;panel.handle(6,0);self.assertTrue(switch.enabled())
-                panel.cloth_next_tick=0
+                panel.activate(1)  # Graphics category.
+                before=(selector.app._crowd_master_volume,selector.app._goal_master_volume)
+                panel.handle(6,0)
+                self.assertFalse(switch.enabled())
+                self.assertEqual((selector.app._crowd_master_volume,selector.app._goal_master_volume),before)
+                with patch.object(panel.cloth,'live_enabled',return_value=False):panel.tick()
+                self.assertFalse(panel.cloth_pending);self.assertIn('aplicada',panel.message)
+                panel.handle(6,0);self.assertTrue(switch.enabled())
+                panel._next_tick=0
                 with patch.object(panel.cloth,'live_enabled',return_value=True):panel.tick()
-                self.assertIsNone(panel.cloth_pending)
+                self.assertFalse(panel.cloth_pending)
                 selector.handle(11,0);self.assertTrue(switch.enabled())
             finally:selector.shutdown()
 
@@ -62,7 +63,7 @@ class LiveClothTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             selector=audio.MatchAudioTests().make_selector(Path(tmp));switch=install(selector.app.exedir)
             try:
-                selector.open(audio=True);selector.app.HID='changed';selector.audio_panel.toggle_cloth()
+                selector.open(audio=True);selector.audio_panel.activate(1);selector.app.HID='changed';selector.audio_panel.activate(0)
                 self.assertFalse(selector.opened);self.assertTrue(switch.enabled())
             finally:selector.shutdown()
 

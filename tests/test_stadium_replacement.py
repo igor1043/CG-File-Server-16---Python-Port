@@ -234,6 +234,45 @@ class StadiumReplacementTests(unittest.TestCase):
                 self.runtime.run_stadium_copy_job('1','manual','176','A','A,None,None,None',self.context()[:3])
         self.assertEqual(self.files(),before)
 
+    def test_automatic_preview_return_preserves_generation_and_assets(self):
+        a=self.app
+        a._last_stadium_applied_signature=(1,'stadium','1',self.assignments[('stadium','1')],'1','10','20')
+        a.curstad='A'
+        a.lastpagename='game/screens/misc/StadiumPan'
+        a.matchstarted=False
+        a._is_post_match_page=Server16App._is_post_match_page
+        a._native_assets_restored_for_match=False
+        a._clear_live_context=Mock()
+        Server16App._handle_page_transition(a,'game/screens/playNow/KickOffHub')
+        self.assertEqual(a._kickoff_generation,1)
+        a._clear_live_context.assert_not_called()
+        with patch.object(self.runtime,'start_stadium_task') as start:
+            self.runtime.apply_stadium_runtime()
+            start.assert_not_called()
+
+    def test_automatic_late_apply_never_copies_or_writes_stadium_id(self):
+        self.app.lastpagename='game/screens/TV/bumper'
+        self.app._stadium_fixture_entered=True
+        before=self.files()
+        with patch.object(self.runtime,'start_stadium_task') as start:
+            self.runtime.apply_stadium_runtime()
+            start.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError,'selection screen'):
+            self.runtime.run_stadium_copy_job('1','stadium','176','A','A,None,None,None',self.context()[:3])
+        self.app.memory.write_int.assert_not_called()
+        self.assertEqual(self.files(),before)
+
+    def test_loading_begins_after_copy_rolls_back_without_id_switch(self):
+        before=self.files()
+        payload=self.runtime.run_stadium_copy_job('1','stadium','176','A','A,None,None,None',self.context()[:3])
+        payload['context']=self.context()[:3]
+        self.app._stadium_fixture_entered=True
+        self.app.lastpagename='game/screens/TV/bumper'
+        with self.assertRaisesRegex(RuntimeError,'selection screen'):
+            self.runtime.finish_stadium_apply(payload)
+        self.app.memory.write_int.assert_not_called()
+        self.assertEqual(self.files(),before)
+
     def test_zero_size_texture_is_rejected_before_any_game_file_change(self):
         before=self.files()
         (self.packages/'A/texture_day.rx3').write_bytes(b'')

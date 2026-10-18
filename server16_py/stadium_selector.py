@@ -23,6 +23,7 @@ from .crowd_control import CrowdControl
 from .prematch_panel import PrematchPanel
 from .narration_runtime import narration_runtime
 from .intro_music_runtime import intro_music_runtime
+from .match_hub_panel import MatchHubPanel
 
 SELECTOR_MAPPING_NAME = 'Local\\CGFS16_Selector_v1'
 
@@ -112,7 +113,7 @@ class StadiumSelector:
         self._attempted_pid = 0
         self._next_injection = 0.0
         self._status = None
-        app.log('Overlay channel initialized: stadium F12 / Start; match audio F12 / Select+Start')
+        app.log('Overlay channel initialized: stadium F12 / Start; match settings F12 / Select+Start')
 
     def match_eligible(self):
         app = self.app
@@ -133,6 +134,8 @@ class StadiumSelector:
 
     def tick(self):
         app = self.app
+        camera=getattr(app,'_first_person_runtime',None)
+        if camera is not None:camera.tick()
         if time.monotonic() >= getattr(self,'_next_cloth_sync',0):
             from .cloth_motion_switch import ClothMotionSwitch
             switch=ClothMotionSwitch(getattr(app,'exedir',app.base_dir))
@@ -239,7 +242,7 @@ class StadiumSelector:
     def open(self, audio=False, hub=False):
         self.context=self._context()
         self.applying=False
-        self.audio_panel=MatchAudioPanel(self) if audio else None
+        self.audio_panel=MatchHubPanel(self) if audio else None
         self.prematch_panel=None
         self.return_to_menu=False
         self.country=self.query=self.draft=self.message=''
@@ -354,6 +357,9 @@ class StadiumSelector:
         music_runtime=getattr(self.app,'_intro_music_runtime',None)
         if music_runtime is not None:
             music_runtime.close();self.app._intro_music_runtime=None
+        camera=getattr(self.app,'_first_person_runtime',None)
+        if camera is not None:
+            camera.close();self.app._first_person_runtime=None
         self.shared=None
         self.mapping.close()
 

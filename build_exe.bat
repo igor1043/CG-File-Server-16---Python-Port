@@ -9,6 +9,7 @@ set "OVERLAY_DLL=bin\cgfs16_overlay.dll"
 set "INJECTOR_EXE=bin\cgfs16_inject.exe"
 set "FIFA_LIBRARY=bin\FifaLibrary16.dll"
 set "NARRATION_DLL=bin\fifa16_narration.dll"
+set "CAMERA_DLL=bin\server16_first_person_v5.dll"
 
 echo ============================================================
 echo  CGFS16 - Full Build
@@ -33,6 +34,8 @@ if errorlevel 1 exit /b 1
 call :require_file "%FIFA_LIBRARY%" "FIFA database library"
 if errorlevel 1 exit /b 1
 call :require_file "%NARRATION_DLL%" "Narration DLL"
+if errorlevel 1 exit /b 1
+call :require_file "%CAMERA_DLL%" "First-person camera DLL"
 if errorlevel 1 exit /b 1
 
 echo [3/4] Setting up 32-bit Python bridge ...
@@ -130,6 +133,15 @@ if errorlevel 1 (
 )
 echo [OK] fifa16_narration.dll
 echo.
+if not exist build mkdir build
+cl /nologo /O2 /W4 /WX /LD /EHsc /std:c++17 /MT ^
+  "native_mods\first_person\first_person.cpp" ^
+  /Fo:"build\server16_first_person.obj" /Fe:"%CAMERA_DLL%" ^
+  /link /INCREMENTAL:NO user32.lib
+if errorlevel 1 (
+  call :fail "First-person camera compilation failed."
+  exit /b 1
+)
 exit /b 0
 
 :skip_cpp_build
@@ -140,7 +152,7 @@ exit /b 0
 
 :use_prebuilt_helpers
 echo [WARN] %~1
-if exist "%OVERLAY_DLL%" if exist "%INJECTOR_EXE%" if exist "%NARRATION_DLL%" (
+if exist "%OVERLAY_DLL%" if exist "%INJECTOR_EXE%" if exist "%NARRATION_DLL%" if exist "%CAMERA_DLL%" (
   echo [1/3] Using existing %OVERLAY_DLL%.
   echo [2/3] Using existing %INJECTOR_EXE%.
   echo.

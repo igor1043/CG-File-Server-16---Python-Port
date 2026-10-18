@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from PIL import Image
 import test_stadium_selector as fixtures
-from server16_py.match_audio_panel import percentage
+from server16_py.match_audio_panel import percentage, MatchAudioPanel
 from server16_py.settings_store import SettingsStore
 from server16_py.audio_profiles import AudioProfileRuntime
 
@@ -22,6 +22,12 @@ class MatchAudioTests(unittest.TestCase):
         app._crowd_master_volume = app._goal_master_volume = 1.0
         app.chants_runtime = Mock()
         return selector
+
+    def open_audio(self, selector):
+        # Exercise the audio editor independently of the new category menu.
+        selector.open(audio=True)
+        selector.audio_panel = MatchAudioPanel(selector)
+        selector.render()
 
     def test_defaults_bounds_and_invalid_settings(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -56,7 +62,7 @@ class MatchAudioTests(unittest.TestCase):
             finally:
                 selector.shutdown()
 
-    def test_keyboard_shortcut_in_match_routes_to_audio_and_cancel_never_saves(self):
+    def test_keyboard_shortcut_routes_to_music_submenu_and_cancel_never_saves(self):
         with tempfile.TemporaryDirectory() as temporary:
             selector = self.make_selector(Path(temporary))
             try:
@@ -70,9 +76,10 @@ class MatchAudioTests(unittest.TestCase):
                 with Image.open(selector.shared.image_path) as image:
                     self.assertEqual(image.size, (selector.audio_panel.WIDTH*2,selector.audio_panel.HEIGHT*2))
                     self.assertEqual(image.getpixel((600,20))[:3], (255,255,255))
+                selector.handle(6,0)  # Open Music from the in-match category menu.
                 original = selector.app.settings.path.read_bytes()
                 selector.handle(2,0)
-                self.assertEqual(selector.audio_panel.values, [95,100])
+                self.assertEqual(selector.audio_panel.child.values, [95,100])
                 self.assertEqual(selector.app._crowd_master_volume, 1)
                 selector.handle(11,0)
                 self.assertFalse(selector.opened)
@@ -86,7 +93,7 @@ class MatchAudioTests(unittest.TestCase):
             root = Path(temporary)
             selector = self.make_selector(root)
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.handle(8, (143<<16)|300)
                 self.assertEqual(selector.audio_panel.values[0],50)
                 selector.handle(5,0)
@@ -103,7 +110,7 @@ class MatchAudioTests(unittest.TestCase):
                 self.assertEqual(SettingsStore(root/'settings.json').goal_master_volume,0)
                 selector.app.chants_runtime.apply_crowd_master_volume.assert_called_once()
                 selector.app.chants_runtime.apply_goal_master_volume.assert_called_once()
-                selector.open(audio=True)
+                self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[50,0])
             finally:
                 selector.shutdown()
@@ -112,7 +119,7 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             selector = self.make_selector(Path(temporary))
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.values = [0,0]
                 previous = dict(selector.app.settings.data)
                 with patch.object(selector.app.settings,'save',side_effect=OSError('disk full')):
@@ -181,7 +188,7 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_selector(Path(temporary))
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 panel=selector.audio_panel
                 self.assertEqual(panel.CANCEL[2]-panel.CANCEL[0],panel.GENERAL[2]-panel.GENERAL[0])
                 self.assertEqual(panel.GENERAL[2]-panel.GENERAL[0],panel.MATCH[2]-panel.MATCH[0])
@@ -199,7 +206,7 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_selector(Path(temporary))
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 values=list(selector.audio_panel.values)
                 selector.handle(15,(389<<16)|440)
                 self.assertEqual(selector.audio_panel.focus,4)
@@ -222,7 +229,7 @@ class MatchAudioTests(unittest.TestCase):
             root=Path(temporary)
             selector=self.make_selector(root)
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.values=[65,40]
                 selector.audio_panel.focus=4
                 selector.handle(6,0)
@@ -233,7 +240,7 @@ class MatchAudioTests(unittest.TestCase):
                 selector.app.audio_profiles=AudioProfileRuntime(selector.app)
                 selector.app.audio_profiles.bind(selector.app.exedir)
                 selector.app._crowd_master_volume=selector.app._goal_master_volume=1
-                selector.open(audio=True)
+                self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[65,40])
                 selector.audio_panel.values=[80,50]
                 selector.audio_panel.apply('general')
@@ -241,7 +248,7 @@ class MatchAudioTests(unittest.TestCase):
                 self.assertEqual(selector.app._crowd_master_volume,.8)
                 self.assertEqual(selector.app._goal_master_volume,.5)
                 self.assertEqual(selector.app.settings.crowd_master_volume,.8)
-                selector.open(audio=True)
+                self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[80,50])
                 self.assertEqual(selector.audio_panel.runtime.source,'general')
                 self.assertTrue(selector.audio_panel.runtime.has_match_profile)
@@ -251,10 +258,10 @@ class MatchAudioTests(unittest.TestCase):
                 selector.app._kickoff_generation+=1
                 selector.app.audio_profiles.sync()
                 self.assertEqual(selector.app._crowd_master_volume,.8)
-                selector.open(audio=True)
+                self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[80,50])
                 self.assertFalse(selector.audio_panel.runtime.has_match_profile)
-                selector.close();selector.app.AID='2';selector.open(audio=True)
+                selector.close();selector.app.AID='2';self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[65,40])
             finally:selector.shutdown()
 
@@ -262,7 +269,7 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_selector(Path(temporary))
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 panel=selector.audio_panel
                 self.assertEqual([label for _,_,label in panel.buttons()],
                 ['Cancelar','Aplicar geral','Aplicar específico'])
@@ -286,23 +293,23 @@ class MatchAudioTests(unittest.TestCase):
                 app._chants_base_volume=.2
                 app._chants_volume_is_crowd=True
                 app._chants_paused=False
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.runtime.save_match((.65,.4))
                 selector.audio_panel.values=[0,25]
                 selector.audio_panel.apply('general')
                 self.assertEqual(player.volume,0)
                 self.assertEqual(app.audio_profiles.sync(),(0,.25))
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.values=[50,30]
                 selector.audio_panel.apply('match')
                 self.assertEqual(player.volume,.1)
                 # Apply restores the correct live level even if values didn't change.
                 player.volume=0
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.apply('match')
                 self.assertEqual(player.volume,.1)
                 app._chants_paused=True
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.values=[80,75]
                 selector.audio_panel.apply('general')
                 self.assertEqual(player.volume,0)
@@ -317,13 +324,13 @@ class MatchAudioTests(unittest.TestCase):
             selector=self.make_selector(Path(temporary))
             try:
                 selector.app.settings.data.update(CROWD_MASTER_VOLUME=1.737,GOAL_MASTER_VOLUME=.427)
-                selector.open(audio=True)
+                self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[174,43])
                 self.assertEqual(selector.audio_panel.maximums,[200,100])
                 selector.audio_panel.apply('match')
                 self.assertEqual(selector.app._crowd_master_volume,1.737)
                 self.assertEqual(selector.app._goal_master_volume,.427)
-                selector.open(audio=True)
+                self.open_audio(selector)
                 self.assertEqual(selector.audio_panel.values,[174,43])
             finally:selector.shutdown()
 
@@ -331,13 +338,13 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);selector=self.make_selector(root)
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 path=selector.app.audio_profiles.path
                 original=path.read_bytes()
                 selector.handle(2,0);selector.handle(7,0)
                 self.assertEqual(path.read_bytes(),original)
                 path.write_bytes(b'broken json')
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.values=[10,20]
                 selector.audio_panel.apply('match')
                 self.assertTrue(selector.opened)
@@ -353,9 +360,9 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_selector(Path(temporary))
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.apply('match')
-                selector.open(audio=True)
+                self.open_audio(selector)
                 selector.audio_panel.focus=4
                 selector.app.audio_profiles.save_match()
                 selector.handle(5,0)
@@ -396,7 +403,7 @@ class MatchAudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_selector(Path(temporary))
             try:
-                selector.open(audio=True)
+                self.open_audio(selector)
                 revision=selector.shared.render_ready
                 save=Image.Image.save
                 def check_save(image,*args,**kwargs):

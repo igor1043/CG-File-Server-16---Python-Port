@@ -143,15 +143,15 @@ class PresentationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             selector = audio_fixtures.MatchAudioTests().make_selector(Path(tmp))
             try:
-                selector.handle(17, 1); selector.open(audio=True)
+                selector.handle(17, 1); audio_fixtures.MatchAudioTests().open_audio(selector)
                 runtime = selector.audio_panel.runtime
                 runtime.apply_general = Mock(return_value=(1, 1))
                 runtime.apply_match = Mock(return_value=(1, 1))
                 selector.handle(18, 1)
                 runtime.apply_general.assert_called_once()
-                selector.open(audio=True); selector.handle(18, 2)
+                audio_fixtures.MatchAudioTests().open_audio(selector); selector.handle(18, 2)
                 runtime.apply_match.assert_called_once()
-                selector.open(audio=True); selector.handle(7, 0)
+                audio_fixtures.MatchAudioTests().open_audio(selector); selector.handle(7, 0)
                 self.assertFalse(selector.opened)
                 self.assertEqual(runtime.apply_general.call_count, 1)
                 self.assertEqual(runtime.apply_match.call_count, 1)

@@ -1,5 +1,73 @@
 # Server16 Python — FIFA Friends
 
+## Ajustes da partida e câmera em primeira pessoa
+
+O atalho **Select + Start / F12**, durante a partida, abre Música, Gráficos e Câmera
+no overlay existente. Música mantém os perfis geral e específico do confronto;
+Gráficos controla a física de roupas. Câmera oferece somente ativação, modo e campo
+de visão, em passos de 5. Modos: Primeira pessoa (0) e Terceira pessoa · carreira
+(1), ambos na câmera nativa Profissional. Padrão de 85 graus nos dois, sem ampliar
+automaticamente com posse. A primeira pessoa aceita 75–120 graus e a terceira 60–90.
+Na terceira pessoa, Distância seleciona Perto, Intermediária ou Afastada.
+Suavização Forte (perfil 2), enquadramento Campo e bola (1) e viés neutro (0)
+são fixos. O submenu Personalizar e os outros seletores foram removidos.
+No FIFA, selecione a câmera **Profissional** para usar a primeira pessoa.
+
+`first_person_runtime.py` controla a DLL `bin/server16_first_person_v5.dll` por mapa
+`Local\FIFA16_FirstPersonCamera_v4`, de 80 bytes, versão 4, com comandos confirmados
+pelo jogo. Os últimos quatro int32 são FOV, inclinação em graus, modo e distância (0–2). A DLL valida a versão
+e os slots nativos antes de intervir, mantém o acompanhamento na troca de jogador
+e permite o acompanhamento na saída do centro (KickOff). O enquadramento combina
+a posse, posição da bola e o indicador nativo de controle próximo. Depois de
+soltar a bola, o olhar prioriza o campo por um curto intervalo; não distingue a
+animação de chute de um passe. Uma pequena folga em frente à cabeça reduz a
+chance de o cabelo aparecer nas viradas suavizadas.
+
+`runtime/first_person_camera.json` versão 4 salva `enabled`, `mode`, `distance`,
+`fov_first_person` e `fov_career`. A migração fixa o padrão solicitado de 85 nos
+dois modos; novos ajustes ficam separados por modo e sobrevivem à troca. O runtime
+é criado na inicialização do Server e restaura a ativação sem abrir o menu,
+inclusive após trocar o processo do FIFA. Desconexão, fechamento ou falha do hook
+não apagam a ativação salva. F10 volta à câmera original e salva desligado após
+confirmar estado estável por 250 ms. Uma pausa do Server maior que 1,5 s reafirma
+a escolha para não confundir o watchdog do heartbeat com F10. Sem heartbeat por
+três segundos a DLL desativa o efeito. Fechar só o overlay mantém o efeito.
+O Server reaberto reutiliza a DLL já carregada no mesmo FIFA.
+O painel externo anterior deve estar fechado; se aquele protótipo ainda estiver
+carregado e usando as funções, reinicie o FIFA uma vez para usar a integração.
+
+`scripts/build_first_person.cmd` compila o módulo; `scripts/test_first_person.cmd`
+valida a matemática e exercita o canal da DLL em um processo de teste, incluindo
+rejeição de executável incompatível. Os testes Python cobrem categorias, volta de
+submenus, volume sem regressão e persistência. O build normal inclui o módulo no
+executável do Server. Recompile e reinicie o Server para atualizar o menu; se mudar
+a DLL nativa já carregada, reinicie também o FIFA.
+
+Terceira pessoa · carreira usa `career_camera.h`: posição Perto a 4,80 m atrás / 2,30 m
+acima da raiz, Intermediária a 7,50 / 3,20 m e Afastada a 11,50 / 4,50 m. A mudança
+de distância/altura usa constante de 300 ms. Mira 8,50 m à frente e 1,10 m de altura.
+Segue a translação sem atraso e suaviza a órbita horizontal com constante de
+320 ms. Mantém pitch de enquadramento e roll neutro, sem seguir os balanços da
+cabeça. A bola à frente pode atrair levemente a direção da câmera; uma bola atrás
+não provoca giro forçado. Trocar modo/jogador/fase reinicia os filtros. A proteção
+contra cabelo se aplica somente à primeira pessoa, preservando a posição atrás
+do corpo neste modo. Não há sondagem de colisão contra objetos do estádio.
+
+Em KickOff (2) e OutOfPlay (14, incluindo espera para reinício), a posição relativa
+à cabeça é imediata, preservando a suavização dos ângulos. O antigo bloqueio de
+14 fazia a câmera voltar à saída nativa antes de a bola entrar em jogo. A seleção
+do jogador continua atualizando nessas fases. Mudanças entre 2/14/15 e correções
+de pose local maiores que 45 cm
+reiniciam o filtro, evitando arrasto da âncora inicial.
+A primeira pessoa também mantém o cache nativo de pose (+BE0, 0x64 bytes) coerente
+com a pose aplicada, pois a interpolação nativa o usa nas transições de reinício.
+Esse cache é copiado pelo gerador nativo em 8AB29..8ABC8 e lido em 8AAE7.
+
+A aplicação de estádio automática conserva a geração ao voltar da prévia e,
+assim como a manual, valida a fase antes de publicar arquivos e confirmar o ID.
+Ao sair do pré-jogo, uma aplicação pendente é revertida sem trocar o ID; novas
+aplicações ficam bloqueadas para evitar misturar a geometria com texturas em cache.
+
 Painel para configurar partidas do FIFA 16, escolher estádios e administrar apresentação, cânticos e áudio. Trabalha com os módulos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
 
 ## O que está disponível

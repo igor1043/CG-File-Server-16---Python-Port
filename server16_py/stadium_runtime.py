@@ -50,9 +50,16 @@ class StadiumRuntime:
     def keep_manual_selection_on_setup_return(self, previous_page: str) -> bool:
         app = self.app
         manual = getattr(app, '_manual_stadium_override', None)
-        return bool(manual and manual[0][:3] == self._context() and
-            not getattr(app, '_stadium_fixture_entered', False) and
-            (prematch_page(previous_page) or 'stadiumpan' in (previous_page or '').lower()))
+        applied = getattr(app, '_last_stadium_applied_signature', None)
+        automatic = bool(applied and applied[0] == app._kickoff_generation and
+                         len(applied) > 4 and applied[4] == app.HID and app.curstad)
+        pending = bool(self.pending_selection and self.pending_selection[0] == self._context())
+        # The stadium preview returns to the same setup for automatic choices,
+        # too. Starting a new generation here re-copies and switches slots while
+        # FIFA is already loading the selected stadium's textures.
+        return bool(((manual and manual[0][:3] == self._context()) or automatic or pending) and
+                    not getattr(app, '_stadium_fixture_entered', False) and
+                    (prematch_page(previous_page) or 'stadiumpan' in (previous_page or '').lower()))
 
     def _active_injection_slot(self) -> str | None:
         app = self.app
@@ -91,7 +98,7 @@ class StadiumRuntime:
         if context != self._context() or not app.memory.is_open() or getattr(app, '_closing', False) or getattr(app, '_match_audio_ended', False):
             raise RuntimeError('The match context changed while preparing stadium assets')
         preview = 'stadiumpan' in (app.lastpagename or '').lower() and not getattr(app, '_stadium_fixture_entered', False)
-        if section == 'manual' and (getattr(app, '_stadium_fixture_entered', False) or not (prematch_page(app.lastpagename) or preview)):
+        if getattr(app, '_stadium_fixture_entered', False) or not (prematch_page(app.lastpagename) or preview):
             raise RuntimeError('The match left the stadium selection screen before application finished')
         if self._active_injection_slot() == str(injid):
             raise RuntimeError('The destination stadium ID became active; previous stadium preserved')
@@ -176,6 +183,11 @@ class StadiumRuntime:
 
     def apply_stadium_runtime(self) -> None:
         app = self.app
+        preview = 'stadiumpan' in (app.lastpagename or '').lower()
+        if getattr(app, '_stadium_fixture_entered', False) or not (prematch_page(app.lastpagename) or preview):
+            # Never replace models/textures or the stadium ID after loading has
+            # begun; those files may already be resident in FIFA's texture cache.
+            return
         manual = getattr(app, '_manual_stadium_override', None)
         if manual and manual[0][:3] == self._context():
             # An explicit selection wins for this match; do not replace it on

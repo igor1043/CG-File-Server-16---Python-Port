@@ -17,6 +17,7 @@ a = Analysis(
         ('bin\\cgfs16_overlay.dll', 'bin'),
         ('bin\\cgfs16_inject.exe',  'bin'),
         ('bin\\fifa16_narration.dll', 'bin'),
+        ('bin\\server16_first_person_v5.dll', 'bin'),
         ('bin\\FifaLibrary16.dll',  'bin'),
     ],
     datas=[

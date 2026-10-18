@@ -26,8 +26,10 @@ class MatchAudioPanel:
     GENERAL = (214, 365, 386, 413)
     MATCH = (404, 365, 576, 413)
 
-    def __init__(self, selector):
+    def __init__(self, selector, *, on_back=None, include_cloth=True):
         self.selector = selector
+        self.on_back = on_back or selector.close
+        self.include_cloth = include_cloth
         app = selector.app
         self.runtime = audio_profiles(app)
         self.profile_path = self.runtime.path
@@ -41,6 +43,7 @@ class MatchAudioPanel:
         self.cloth_next_tick = 0
 
     def tick(self):
+        if not self.include_cloth:return
         now=time.monotonic()
         if now<self.cloth_next_tick:return
         self.cloth_next_tick=now+.25
@@ -58,6 +61,7 @@ class MatchAudioPanel:
             self.cloth_enabled=live;self.selector.render()
 
     def toggle_cloth(self):
+        if not self.include_cloth:return
         if not self.cloth.available():return
         if not self.selector.match_eligible() or self.selector.context!=self.selector._context():
             self.selector.close();return
@@ -111,7 +115,7 @@ class MatchAudioPanel:
             selector.render()
             return
         app.log(f'Match audio applied: scope={scope}; crowd={volumes[0]:.3f}; goal={volumes[1]:.3f}')
-        selector.close()
+        self.on_back()
 
     def activate(self, focus):
         if focus==5:
@@ -119,7 +123,7 @@ class MatchAudioPanel:
         if focus not in [item[0] for item in self.buttons()]:
             return
         if focus == 2:
-            self.selector.close()
+            self.on_back()
         else:
             self.apply({3: 'general', 4: 'match'}[focus])
 
@@ -132,20 +136,20 @@ class MatchAudioPanel:
             if value in (1,2,3):
                 self.activate({1:3,2:4,3:2}[value])
             return
-        focuses = [0, 1] + ([5] if self.cloth.available() else []) + [focus for focus, rect, label in self.buttons()]
+        focuses = [0, 1] + ([5] if self.include_cloth and self.cloth.available() else []) + [focus for focus, rect, label in self.buttons()]
         if self.focus not in focuses:
             self.focus = 0
         if kind==15:
             x,y=value&65535,(value>>16)&65535
             targets=[(i,(rect[0]-10,rect[1]-15,rect[2]+10,rect[3]+15)) for i,rect in enumerate(self.SLIDERS)]
             targets.extend((focus, rect) for focus, rect, label in self.buttons())
-            if self.cloth.available():targets.append((5,self.CLOTH))
+            if self.include_cloth and self.cloth.available():targets.append((5,self.CLOTH))
             focus=next((focus for focus,rect in targets if rect[0]<=x<=rect[2] and rect[1]<=y<=rect[3]),None)
             if focus is not None and focus!=self.focus:
                 self.focus=focus; self.selector.render()
             return
         if kind in (7, 11):
-            self.selector.close()
+            self.selector.close() if kind==11 else self.on_back()
             return
         if kind in (4, 5, 9):
             self.focus = focuses[(focuses.index(self.focus) + (-1 if kind == 4 else 1)) % len(focuses)]
@@ -163,7 +167,7 @@ class MatchAudioPanel:
                 return
         elif kind in (8, 12):
             x, y = value & 65535, (value >> 16) & 65535
-            if kind==8 and self.CLOTH[0]<=x<=self.CLOTH[2] and self.CLOTH[1]<=y<=self.CLOTH[3]:
+            if self.include_cloth and kind==8 and self.CLOTH[0]<=x<=self.CLOTH[2] and self.CLOTH[1]<=y<=self.CLOTH[3]:
                 self.focus=5;self.toggle_cloth();return
             for i, rect in enumerate(self.SLIDERS):
                 if rect[0]-10 <= x <= rect[2]+10 and rect[1]-15 <= y <= rect[3]+15:
@@ -192,8 +196,8 @@ class MatchAudioPanel:
             while len(label) > 1 and draw.textlength(label, font=font) > 550:
                 label = label[:-2].rstrip('…') + '…'
             return label
-        text(24, 22, 'Ajustes da partida', 23, bold=True)
-        text(388, 30, 'Áudio e física de roupas', 13, muted)
+        text(24, 22, 'Música' if not self.include_cloth else 'Ajustes da partida', 23, bold=True)
+        text(350, 30, 'Torcida, cânticos e hinos' if not self.include_cloth else 'Áudio e física de roupas', 13, muted)
         app = self.selector.app
         key = match_key(getattr(app, 'HID', ''), getattr(app, 'AID', ''))
         names = []
@@ -216,12 +220,13 @@ class MatchAudioPanel:
                 draw_focus_ring(draw,(28, rect[1]-9, 572, rect[3]+1))
             text(40, rect[3]+8, '0', 12, muted)
             text(530, rect[3]+8, str(self.maximums[i]), 12, muted)
-        rect=self.CLOTH;active=self.cloth_enabled;available=self.cloth.available()
-        if self.focus==5:draw_focus_ring(draw,rect,8)
-        text(36,311,'Física de roupas · aplica agora',16,ink if available else muted)
-        draw.rounded_rectangle((479,308,525,332),12,fill=blue if active and available else '#d6dee9')
-        cx=513 if active else 491;draw.ellipse((cx-9,311,cx+9,329),fill='white')
-        text(535,311,'Sim' if active else 'Não',12,ink if available else muted)
+        if self.include_cloth:
+            rect=self.CLOTH;active=self.cloth_enabled;available=self.cloth.available()
+            if self.focus==5:draw_focus_ring(draw,rect,8)
+            text(36,311,'Física de roupas · aplica agora',16,ink if available else muted)
+            draw.rounded_rectangle((479,308,525,332),12,fill=blue if active and available else '#d6dee9')
+            cx=513 if active else 491;draw.ellipse((cx-9,311,cx+9,329),fill='white')
+            text(535,311,'Sim' if active else 'Não',12,ink if available else muted)
         for focus, rect, label in self.buttons():
             primary = focus == 4
             fill=FOCUSED_PRIMARY if primary and self.focus==focus else blue if primary else 'white'

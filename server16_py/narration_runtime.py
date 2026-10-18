@@ -15,7 +15,7 @@ def save_preferences(path,name):
     data=load_preferences(path);data.update(version=1,default_narrator=name)
     temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf8');temporary.replace(path)
 
-def narration_dll_loaded(pid):
+def narration_dll_loaded(pid, dll_name='fifa16_narration.dll'):
     """Reuse the game worker when the Server is reopened in the same session."""
     from ctypes import wintypes as w
     kernel=ctypes.WinDLL('kernel32',use_last_error=True)
@@ -31,7 +31,7 @@ def narration_dll_loaded(pid):
         if not psapi.EnumProcessModulesEx(handle,modules,ctypes.sizeof(modules),ctypes.byref(needed),3):return False
         for module in modules[:min(2048,needed.value//ctypes.sizeof(w.HMODULE))]:
             name=ctypes.create_unicode_buffer(260)
-            if psapi.GetModuleBaseNameW(handle,module,name,len(name)) and name.value.lower()=='fifa16_narration.dll':return True
+            if psapi.GetModuleBaseNameW(handle,module,name,len(name)) and name.value.lower()==dll_name.lower():return True
         return False
     finally:kernel.CloseHandle(handle)
 

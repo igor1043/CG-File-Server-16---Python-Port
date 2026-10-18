@@ -63,6 +63,7 @@ from .settings_editor import SettingsAreaEditor, asset_specs, audio_specs, stadi
 from .settings_store import SettingsStore
 from .stadium_runtime import StadiumRuntime
 from .stadium_selector import StadiumSelector
+from .first_person_runtime import first_person_runtime
 from .update_checker import GithubReleaseChecker, UpdateCheckResult
 try:
     from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector
@@ -398,6 +399,11 @@ class Server16App(tk.Tk):
             self._stadium_selector = StadiumSelector(self)
         except Exception as exc:
             self.log('Stadium selector initialization failed',exc)
+        try:
+            # Restore the saved camera without requiring the overlay to open.
+            first_person_runtime(self)
+        except Exception as exc:
+            self.log('First-person initialization failed',exc)
         self.setuppaths()
         self.competition_icons = CompetitionIconService(self.log)
         if not self._check_fifa_location():
@@ -3618,7 +3624,7 @@ class Server16App(tk.Tk):
                  self._stadium_selector.keep_crowd_on_setup_return(previous_page))):
                 self.pagechange = True
                 self.skillgamechange = self.bumperpagechange = False
-                self.log('Returned to pre-match setup; keeping manual stadium for the same fixture')
+                self.log('Returned to pre-match setup; keeping stadium for the same fixture')
                 return
             self._match_audio_ended = False
             self._stadium_fixture_entered = False

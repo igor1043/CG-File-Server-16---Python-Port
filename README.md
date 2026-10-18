@@ -10,6 +10,33 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 - **ID direto:** cada modelo usa a pasta com o ID atual da competição ou fase, sem tabela de conversão. Uma fase sem pacote próprio fica sem arco e placas; não herda o modelo principal.
 
+## Menu durante a partida — 18/10/2026
+
+Abra com **Select + Start** no controle ou **F12**. O painel agora reúne **Música**
+(cânticos da torcida e hinos de gol), **Gráficos** (física de roupas) e **Câmera**.
+Em Câmera, ajuste **Câmera do jogador**, **Modo** e **Campo de visão**. Ligar/desligar fica
+salvo e é recuperado nas próximas sessões, sem precisar abrir o menu. A suavização
+é sempre **Forte** e o enquadramento sempre **Campo e bola**, com olhar neutro.
+O modo pode ser **Primeira pessoa** ou **Terceira pessoa · carreira**. Este último
+mantém a câmera atrás do jogador selecionado, mostra o corpo inteiro e suaviza
+as viradas sem copiar os balanços da cabeça. Na terceira pessoa, **Distância** oferece
+**Perto**, **Intermediária** e **Afastada**, com transição suave. As escolhas ficam salvas.
+A abertura padrão é **85° nos dois modos**, sem ampliação automática com a posse.
+Cada modo guarda seu próprio ajuste: 75°–120° na primeira pessoa e 60°–90° na terceira,
+em passos de 5°. A terceira pessoa usa uma posição mais recuada para preservar as proporções.
+Com posse, o olhar mantém mais espaço
+para o campo, dá atenção ao controle próximo da bola e volta a levantar após
+um passe ou finalização. O novo enquadramento é experimental;
+a sensação em domínios e chutes precisa ser avaliada jogando.
+
+O controle da câmera pertence ao Server; não precisa abrir o painel externo.
+Fechar apenas o overlay mantém a câmera escolhida. **F10** devolve a câmera original;
+fechar o Server também desativa o efeito naquele momento, preservando a escolha
+salva para a próxima abertura. **F10** salva a opção desligada. Use a câmera nativa
+**Profissional** nos dois modos, pois o efeito depende desse comportamento nativo. A saída do
+centro fixa a posição na cabeça sem o atraso do filtro. Uma pequena folga à frente da cabeça
+reduz a chance de o cabelo aparecer nas viradas.
+
 ## Novidades — 17/10/2026
 
 - **Compatibilidade com a base v12.11/Honduras:** ícones acompanham a identidade do calendário instalado; aberturas usam diretamente as pastas dos IDs atuais.
