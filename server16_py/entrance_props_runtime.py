@@ -13,7 +13,6 @@ from pathlib import Path
 from .ini_file import SessionIniFile
 from .match_presentation import MatchPresentation
 from .entrance_friendly import common_league_competition, no_competition
-from .competition_catalog import entrance_folder
 
 
 COMPETITION_SECTIONS = ('movies', 'Scoreboard', 'comp')
@@ -26,9 +25,8 @@ def competition_id(value: str) -> bool:
 def resolve_asset(game_root: Path, competition: str, round_id: str = '', *, settings=None) -> tuple[Path | None, str]:
     """Use only IDs configured in the original Server16 settings file.
 
-    A configured round with its own asset.ini overrides the main competition.
-    Empty round folders inherit the main competition; invalid explicit packages
-    are rejected rather than silently loading a different ceremony.
+    A nonzero round selects only that ID. With no round, select the competition.
+    Missing, unconfigured or invalid packages never inherit the main ceremony.
     """
     root = Path(game_root)
     path = root / 'FSW/settings.ini'
@@ -36,21 +34,12 @@ def resolve_asset(game_root: Path, competition: str, round_id: str = '', *, sett
         return None, 'settings_missing'
     try:
         settings = settings if settings is not None else SessionIniFile(path)
-        directory = None
-        configured = False
-        for key in dict.fromkeys((round_id, competition)):
-            if not competition_id(key) or not any(settings.key_exists(key, section) for section in COMPETITION_SECTIONS):
-                continue
-            configured = True
-            folder = entrance_folder(root, int(key))
-            if folder is None:
-                continue
-            candidate = root / 'data/sceneassets/entrance_props/competitions' / folder
-            if (candidate / 'asset.ini').is_file():
-                directory = candidate
-                break
-        if directory is None:
-            return None, 'asset_missing' if configured else 'competition_unconfigured'
+        key = round_id if not no_competition(round_id) else competition
+        if not competition_id(key) or not any(settings.key_exists(key, section) for section in COMPETITION_SECTIONS):
+            return None, 'competition_unconfigured'
+        directory = root / 'data/sceneassets/entrance_props/competitions' / key
+        if not (directory / 'asset.ini').is_file():
+            return None, 'asset_missing'
         metadata = configparser.ConfigParser(interpolation=None)
         metadata.read_string((directory / 'asset.ini').read_text(encoding='utf-8-sig'))
         if metadata.getint('asset', 'schema') != 1:

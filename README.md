@@ -4,11 +4,15 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Atualizado em:** 17/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Atualizado em:** 18/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+
+## Aberturas — 18/10/2026
+
+- **ID direto:** cada modelo usa a pasta com o ID atual da competição ou fase, sem tabela de conversão. Uma fase sem pacote próprio fica sem arco e placas; não herda o modelo principal.
 
 ## Novidades — 17/10/2026
 
-- **Compatibilidade com a base v12.11/Honduras:** ícones e aberturas são associados pela identidade da competição e da fase, acompanhando os IDs do calendário instalado.
+- **Compatibilidade com a base v12.11/Honduras:** ícones acompanham a identidade do calendário instalado; aberturas usam diretamente as pastas dos IDs atuais.
 
 - **Ícones automáticos da carreira:** copie uma imagem com o nome ou ID da competição. O Server identifica, converte e cadastra sozinho, sem editar tabelas.
 - **Movimento das camisas e calções:** ative ou desative a física de roupas pelo painel. Sua escolha fica salva para as próximas aberturas.

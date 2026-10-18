@@ -6,7 +6,6 @@ import re
 
 COMP_OBJ = Path('dlc/dlc_FootballCompEng/dlc/FootballCompEng/data/compdata/compobj.txt')
 ICON_MAP = Path('ModCarrerMode/data/catalogs/career_competition_icon_map.tsv')
-ENTRANCE_BINDINGS = Path('ModCarrerMode/data/catalogs/entrance_competition_bindings.tsv')
 PRESENTATION_ALIASES = Path('ModCarrerMode/data/catalogs/presentation_package_aliases.tsv')
 
 
@@ -102,23 +101,3 @@ def icon_mapping(game):
             elif hint in mapping and mapping[hint] == asset:
                 mapping[hint] = asset
     return mapping
-
-
-def entrance_folder(game, ident):
-    path = Path(game) / ENTRANCE_BINDINGS
-    if not path.is_file():
-        return str(ident)
-    key = identity_key(nodes(game), ident)
-    if key is None:
-        return None
-    matches, claimed = set(), False
-    for line in path.read_text(encoding='utf-8-sig').splitlines():
-        parts = line.split('|', 1)
-        if len(parts) != 2 or not parts[0].isdigit():
-            continue
-        claimed |= int(parts[0]) == int(ident)
-        if parts[1] == key:
-            matches.add(parts[0])
-    if len(matches) == 1:
-        return matches.pop()
-    return None if matches or claimed else str(ident)

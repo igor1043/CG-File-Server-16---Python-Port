@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
-from server16_py.competition_catalog import COMP_OBJ, ICON_MAP, ENTRANCE_BINDINGS, PRESENTATION_ALIASES, nodes, identity_key, icon_mapping, entrance_folder, presentation_package
+from server16_py.competition_catalog import COMP_OBJ, ICON_MAP, PRESENTATION_ALIASES, nodes, identity_key, icon_mapping, presentation_package
 from server16_py.entrance_props_runtime import resolve_asset
 
 
@@ -27,20 +27,10 @@ class CompetitionCatalogTests(unittest.TestCase):
         self.write(ICON_MAP,'10|117|C7|TrophyName_Abbr15_7\n')
         self.assertEqual(icon_mapping(self.root),{10:83,30:7,40:7})
 
-    def test_model_binding_survives_shift_and_blocks_reused_folder(self):
+    def test_competition_phase_identity_path(self):
         objects=nodes(self.root)
         key=identity_key(objects,30)
-        self.write(ENTRANCE_BINDINGS,'10|'+key+'\n')
-        self.assertEqual(entrance_folder(self.root,30),'10')
-        self.assertIsNone(entrance_folder(self.root,10))
         self.assertEqual(identity_key(objects,31),key+'~4:S1:FCE_Setup_Stage')
-
-    def test_duplicate_bindings_and_missing_compdata_are_rejected(self):
-        key=identity_key(nodes(self.root),30)
-        self.write(ENTRANCE_BINDINGS,f'10|{key}\n11|{key}\n')
-        self.assertIsNone(entrance_folder(self.root,30))
-        (self.root/COMP_OBJ).unlink()
-        self.assertIsNone(entrance_folder(self.root,30))
 
     def test_changed_compdata_invalidates_cache_and_missing_asset_keeps_fallback(self):
         self.write(ICON_MAP,'10|117|C7|TrophyName_Abbr15_7\n')
