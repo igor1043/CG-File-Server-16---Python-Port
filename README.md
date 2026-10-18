@@ -6,6 +6,15 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 **Atualizado em:** 18/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
+## Overlay da carreira — 18/10/2026
+
+No hub da carreira, **Select + Start** ou **F12** abre um painel próprio com
+**Transferir para outro clube** e **Finanças > Solicitar verba**. Selecione o save,
+revise o pedido e saia da carreira sem salvar novamente. Aguarde a confirmação
+no menu principal e carregue o mesmo save. O Server guarda um backup antes de aplicar.
+Clubes e divisões acompanham os dados do save; verba está disponível para treinador.
+Veja o [guia da overlay da carreira](docs/OVERLAY_CARREIRA.md) para uso, limites e validação.
+
 ## Aberturas — 18/10/2026
 
 - **ID direto:** cada modelo usa a pasta com o ID atual da competição ou fase, sem tabela de conversão. Uma fase sem pacote próprio fica sem arco e placas; não herda o modelo principal.
@@ -76,7 +85,7 @@ Para ativar o movimento das roupas, entre em **Configurações da partida > Fís
 2. Coloque no arquivo o **nome completo ou ID da competição**. Nesta edição, por exemplo: **`1761.png`** ou **`BRA - Brasileirao Serie A.png`**.
 3. Abra o Server atualizado, aguarde alguns segundos e inicie o FIFA.
 
-Pronto: o Server ajusta o tamanho, converte a imagem e cadastra o ícone. **Não é preciso abrir o settings.ini, editar o index.tsv ou preparar um DDS.** A lista **`COMPETICOES.txt`**, gerada na mesma pasta, mostra os nomes aceitos na sua instalação.
+Pronto: o Server prepara o calendário e os cards da Central/Competições a partir da mesma imagem, com o mesmo ID do INI. **Não é preciso editar tabelas, preparar DDS ou extrair BIG.** A lista **`COMPETICOES.txt`**, gerada na mesma pasta, mostra os nomes aceitos na sua instalação.
 
 Prefira PNG com fundo transparente. Para atualizar um logo, substitua a imagem original; deixe apenas uma imagem por competição. Os originais e os backups ficam preservados. Se você colocar a imagem com o FIFA aberto, o Server processa quando o jogo estiver fechado. O botão de iniciar o FIFA conclui a importação antes de abrir o jogo.
 

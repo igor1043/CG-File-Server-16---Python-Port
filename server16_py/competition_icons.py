@@ -1,6 +1,5 @@
-"""Import ordinary artwork into the career calendar without hand-edited catalogues."""
+"""One competition-ID artwork library for calendar and career cards."""
 from __future__ import annotations
-
 import csv
 import hashlib
 import io
@@ -8,245 +7,129 @@ import json
 import os
 from pathlib import Path
 import re
-import struct
 import tempfile
 import threading
 import time
 import unicodedata
-
 from PIL import Image, ImageOps
-from .competition_catalog import COMP_OBJ, ICON_MAP, icon_mapping, settings_text
+from .competition_catalog import COMP_OBJ, ICON_MAP, icon_mapping, settings_text, nodes, visual
 
-ICONS = Path('data/ui/imgAssets/careerCompetitionIcons')
-FIELDS = ['visual_id', 'filename', 'source_big', 'dds_sha256', 'alpha_bounds', 'host_available']
-EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.dds'}
+ICONS=Path('data/ui/imgAssets/careerCompetitionIcons')
+EXTENSIONS={'.png','.jpg','.jpeg','.webp','.bmp','.dds'}
 
-
-def digest(data):
-    return hashlib.sha256(data).hexdigest()
-
-
+def digest(data):return hashlib.sha256(data).hexdigest()
 def normalized(name):
-    text = unicodedata.normalize('NFKD', name.casefold())
-    return re.sub(r'[^a-z0-9]+', ' ', ''.join(c for c in text if not unicodedata.combining(c))).strip()
-
-
+    text=unicodedata.normalize('NFKD',name.casefold())
+    return re.sub(r'[^a-z0-9]+',' ',''.join(c for c in text if not unicodedata.combining(c))).strip()
 def identities(game):
-    """Follow the same explicit-map / TrophyName / C<ID> precedence as the host."""
-    mapping, labels, aliases = icon_mapping(game), {}, {}
-    path = game / 'FSW/settings.ini'
+    mapping={ident:ident for ident,row in nodes(game).items() if row[0]==3}
+    labels,aliases={},{}
+    path=Path(game)/'FSW/settings.ini'
     if path.is_file():
-        text = settings_text(path)
-        for section in ('Scoreboard', 'movies'):
-            block = re.search(r'^\[' + section + r'\][ \t]*\r?\n(.*?)(?=^\[|\Z)', text, re.M | re.S | re.I)
-            if not block:
-                continue
+        text=settings_text(path)
+        for section in ('Scoreboard','movies'):
+            block=re.search(r'^\['+section+r'\][ \t]*\r?\n(.*?)(?=^\[|\Z)',text,re.M|re.S|re.I)
+            if not block:continue
             for line in block[1].splitlines():
-                match = re.match(r'^\s*(\d+)\s*=(.*)', line)
-                if not match or int(match[1]) not in mapping:
-                    continue
-                key, label = int(match[1]), match[2].split(',')[0].strip()
-                if label and label.casefold() not in ('none', 'default'):
-                    labels[key] = label
-                    aliases.setdefault(normalized(label), set()).add(mapping[key])
-    return mapping, labels, aliases
+                match=re.match(r'^\s*(\d+)\s*=(.*)',line)
+                if not match or int(match[1]) not in mapping:continue
+                key,label=int(match[1]),match[2].split(',')[0].strip()
+                if label and label.casefold() not in ('none','default'):
+                    labels[key]=label;aliases.setdefault(normalized(label),set()).add(key)
+    return mapping,labels,aliases
 
+def resolve(stem,mapping,aliases):
+    match=re.fullmatch(r'(?:c)?(\d+)(?:\s*[-_]\s*.+)?',stem,re.I)
+    if match and int(match[1]) in mapping:return int(match[1])
+    candidates=aliases.get(normalized(stem),set())
+    if len(candidates)==1:return next(iter(candidates))
+    raise ValueError('competição não identificada; use o ID ou um nome de COMPETICOES.txt')
 
-def resolve(stem, mapping, aliases):
-    # Bare numbers are competition IDs. c<number> explicitly means a visual ID.
-    match = re.fullmatch(r'c(\d+)', stem, re.I)
-    if match and int(match[1]) in mapping.values():
-        return int(match[1])
-    match = re.match(r'^(\d+)(?:\s*[-_]\s*.+)?$', stem)
-    if match and int(match[1]) in mapping:
-        return mapping[int(match[1])]
-    candidates = aliases.get(normalized(stem), set())
-    if len(candidates) == 1:
-        return next(iter(candidates))
-    raise ValueError('competição não identificada ou nome ambíguo; use um nome da lista COMPETICOES.txt')
+def convert(raw,kind='calendar'):
+    with Image.open(io.BytesIO(raw)) as original:
+        original.load();image=ImageOps.exif_transpose(original).convert('RGBA')
+    bounds=image.getchannel('A').getbbox()
+    if not bounds:raise ValueError('imagem totalmente transparente')
+    image=image.crop(bounds)
+    canvas=Image.new('RGBA',(128,128) if kind=='calendar' else (256,256))
+    box=48 if kind=='calendar' else 256
+    image.thumbnail((box-2,box-2),Image.Resampling.LANCZOS)
+    canvas.paste(image,((box-image.width)//2,(box-image.height)//2))
+    out=io.BytesIO();canvas.save(out,format='DDS',pixel_format='DXT5');data=out.getvalue()
+    expected=16512 if kind=='calendar' else 65664
+    if len(data)!=expected or data[:4]!=b'DDS ' or data[84:88]!=b'DXT5':raise ValueError('DDS DXT5 inválido')
+    return data,','.join(map(str,canvas.getchannel('A').getbbox()))
 
-
-def convert(raw):
-    with Image.open(io.BytesIO(raw)) as source:
-        source.load()
-        image = ImageOps.exif_transpose(source).convert('RGBA')
-    bounds = image.getchannel('A').getbbox()
-    if not bounds:
-        raise ValueError('imagem totalmente transparente')
-    image = image.crop(bounds)
-    image.thumbnail((46, 46), Image.Resampling.LANCZOS)
-    canvas = Image.new('RGBA', (128, 128))
-    canvas.paste(image, ((48 - image.width) // 2, (48 - image.height) // 2))
-    output = io.BytesIO()
-    canvas.save(output, format='DDS', pixel_format='DXT5')
-    data = output.getvalue()
-    if len(data) != 16512 or data[:4] != b'DDS ' or data[84:88] != b'DXT5':
-        raise ValueError('a versão do Pillow instalada não produz DDS DXT5; atualize o Server16')
-    return data, ','.join(map(str, canvas.getchannel('A').getbbox()))
-
-
-def atomic_write(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
+def atomic_write(path,data):
+    path.parent.mkdir(parents=True,exist_ok=True);temporary=None
     try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.' + path.name, suffix='.tmp', delete=False) as file:
-            temporary = Path(file.name)
-            file.write(data)
-        os.replace(temporary, path)
+        with tempfile.NamedTemporaryFile(dir=path.parent,prefix='.'+path.name,suffix='.tmp',delete=False) as file:
+            temporary=Path(file.name);file.write(data)
+        os.replace(temporary,path)
     finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
-
+        if temporary is not None and temporary.exists():temporary.unlink()
 
 class CompetitionIconImporter:
-    def __init__(self, game, log=print):
-        self.game = Path(game)
-        self.folder = self.game / ICONS
-        self.log = log
-        self.reported = set()
-        self.observed = {}
-
-    def _report(self, name, detail):
-        key = (name, detail)
-        if key not in self.reported:
-            self.reported.add(key)
-            self.log(f'Ícones da carreira: {name}: {detail}')
-
-    def _instructions(self, mapping, labels):
-        text = ('ÍCONES DAS COMPETIÇÕES\n\n'
-                'Coloque aqui uma imagem PNG, JPG, WEBP ou BMP com um dos nomes da lista abaixo.\n'
-                'Abra o Server16 atualizado e aguarde alguns segundos ANTES de abrir o FIFA.\n'
-                'O Server converte, dimensiona e cadastra o ícone automaticamente. Não edite o index.tsv.\n'
-                'Prefira PNG com fundo transparente. A imagem original fica preservada.\n'
-                'Se o FIFA já estiver aberto, a aplicação fica para a próxima abertura do jogo.\n'
-                'Não coloque duas imagens da mesma competição; substitua a imagem existente.\n'
-                'Apenas o nome é usado para identificar a competição, não o desenho do logo.\n'
-                'Esta função troca os ícones de competições existentes; não cria campeonatos.\n\n'
-                'Exemplos de nomes aceitos (troque .png por .jpg se necessário):\n')
-        for key in sorted(mapping):
-            label = re.sub(r'[<>:"/\\|?*]', '-', labels.get(key, 'Competição ' + str(key)))
-            text += f'{key} - {label}.png\n'
-        path = self.folder / 'COMPETICOES.txt'
-        data = text.encode('utf-8-sig')
-        if not path.is_file() or path.read_bytes() != data:
-            atomic_write(path, data)
-
-    def _recover_missing_index(self, mapping):
-        index = self.folder / 'index.tsv'
-        if index.is_file():
-            return
-        canonical = set(mapping.values())
-        output = io.StringIO(newline='')
-        writer = csv.DictWriter(output, fieldnames=FIELDS, delimiter='\t', lineterminator='\n')
-        writer.writeheader()
+    def __init__(self,game,log=print):
+        self.game=Path(game);self.folder=self.game/ICONS;self.log=log;self.observed={};self.reported=set()
+    def _report(self,name,detail):
+        key=(name,detail)
+        if key not in self.reported:self.reported.add(key);self.log(f'Ícones das competições: {name}: {detail}')
+    def sync(self,force=False):
+        mapping,labels,aliases=identities(self.game)
+        if not mapping:return 0
+        self.folder.mkdir(parents=True,exist_ok=True)
+        instructions=('ÍCONES DAS COMPETIÇÕES — UMA IMAGEM POR ID DO INI\n\n'
+            'Use <ID>.png nesta pasta. Calendário, Central e Competições usam esta mesma imagem.\n'
+            'Abra o Server16 antes do FIFA para preparar as proporções. Não precisa de BIG.\n'
+            'As subpastas calendar e cards são geradas automaticamente; não as edite.\n\n')
+        instructions+=''.join(f'{key} - {labels.get(key,"Competição "+str(key))}.png\n' for key in sorted(mapping))
+        self._write_if_changed(self.folder/'COMPETICOES.txt',instructions.encode('utf-8-sig'))
+        raw_visuals={ident:visual(row) for ident,row in nodes(self.game).items() if row[0]==3}
+        for ident,art in icon_mapping(self.game).items():
+            if not raw_visuals.get(ident):raw_visuals[ident]=art
+        # This manifest translates legacy visual IDs at the UI boundary only.
+        manifest='competition_id\tvisual_id\tlabel\n'+''.join(f'{key}\t{raw_visuals[key]}\t{labels.get(key,"")}\n' for key in sorted(mapping))
+        self._write_if_changed(self.folder/'competitions.tsv',manifest.encode('utf-8'))
+        pending={}
         for path in sorted(self.folder.iterdir()):
-            match = re.fullmatch(r'c(\d+)\.dds', path.name, re.I)
-            if not match or not path.is_file() or not 0 < int(match[1]) <= 65535:
-                continue
-            raw = path.read_bytes()
-            if (len(raw) < 16512 or raw[:4] != b'DDS ' or raw[84:88] != b'DXT5'
-                    or struct.unpack_from('<I', raw, 4)[0] != 124
-                    or struct.unpack_from('<II', raw, 12) != (128, 128)):
-                continue
-            writer.writerow(dict(visual_id=match[1], filename=path.name, source_big='existing DDS',
-                                 dds_sha256=digest(raw), alpha_bounds='',
-                                 host_available=str(int(int(match[1]) in canonical))))
-        atomic_write(index, output.getvalue().encode('utf-8'))
-        self.log('Ícones da carreira: índice interno reconstruído pelas competições instaladas.')
-
-    def sync(self, force=False):
-        mapping, labels, aliases = identities(self.game)
-        if not mapping:
-            return 0
-        self.folder.mkdir(parents=True, exist_ok=True)
-        self._instructions(mapping, labels)
-        self._recover_missing_index(mapping)
-        state_path = self.game / 'runtime/career_icons/state.json'
-        state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.is_file() else {}
-        pending = {}
-        for path in sorted(self.folder.iterdir()):
-            if not path.is_file() or path.suffix.lower() not in EXTENSIONS:
-                continue
-            # These are the native outputs, including legacy aliases: never re-import them.
-            if path.suffix.lower() == '.dds' and re.fullmatch(r'c\d+', path.stem, re.I):
-                continue
+            if not path.is_file() or path.suffix.lower() not in EXTENSIONS:continue
+            if path.suffix.lower()=='.dds' and re.fullmatch(r'c\d+',path.stem,re.I):continue # archived visual-ID outputs
+            try:pending.setdefault(resolve(path.stem,mapping,aliases),[]).append(path)
+            except ValueError as exc:self._report(path.name,str(exc))
+        for kind in ('calendar','cards'):
+            side=128 if kind=='calendar' else 256
+            empty=io.BytesIO();Image.new('RGBA',(side,side)).save(empty,format='DDS',pixel_format='DXT5')
+            self._write_if_changed(self.folder/kind/'empty.dds',empty.getvalue())
+        installed=0
+        for ident,paths in pending.items():
+            if len(paths)!=1:self._report(str(ident),'mais de uma imagem para o mesmo ID');continue
+            path=paths[0]
             try:
-                visual = resolve(path.stem, mapping, aliases)
-                pending.setdefault(visual, []).append(path)
-            except ValueError as exc:
-                self._report(path.name, str(exc))
-        installed = 0
-        for visual, paths in pending.items():
-            if len(paths) != 1:
-                self._report(str(visual), 'mais de uma imagem para a mesma competição: ' + ', '.join(p.name for p in paths))
-                continue
-            path = paths[0]
-            try:
-                stamp = (path.stat().st_size, path.stat().st_mtime_ns)
-                old_stamp = self.observed.get(path.name)
-                self.observed[path.name] = stamp
-                # A periodic scan waits for two unchanged observations (file copy may be in progress).
-                if not force and old_stamp != stamp:
-                    continue
-                raw = path.read_bytes()
-                if (path.stat().st_size, path.stat().st_mtime_ns) != stamp:
-                    continue
-                target = self.folder / f'c{visual}.dds'
-                index = self.folder / 'index.tsv'
-                fields, rows = FIELDS, []
-                if index.is_file():
-                    reader = csv.DictReader(io.StringIO(index.read_text(encoding='utf-8-sig')), delimiter='\t')
-                    fields = reader.fieldnames
-                    if fields is None or not set(FIELDS).issubset(fields):
-                        raise ValueError('índice interno inválido; o arquivo foi preservado')
-                    rows = list(reader)
-                    if any(None in row or any(value is None for value in row.values()) for row in rows):
-                        raise ValueError('índice interno incompleto; o arquivo foi preservado')
-                record = state.get(path.name, {})
-                active_rows = [row for row in rows if row['visual_id'] == str(visual)]
-                if (record.get('source') == digest(raw) and record.get('visual') == visual and target.is_file()
-                        and record.get('output') == digest(target.read_bytes())
-                        and len(active_rows) == 1 and active_rows[0]['host_available'] == '1'):
-                    continue
-                data, bounds = convert(raw)
-                row = dict.fromkeys(fields, '')
-                row.update(visual_id=str(visual), filename=target.name, source_big=path.name,
-                           dds_sha256=digest(data), alpha_bounds=bounds, host_available='1')
-                rows = [item for item in rows if item['visual_id'] != str(visual)] + [row]
-                output = io.StringIO(newline='')
-                writer = csv.DictWriter(output, fieldnames=fields, delimiter='\t', lineterminator='\n')
-                writer.writeheader()
-                writer.writerows(rows)
-                new_state = dict(state)
-                new_state[path.name] = {'source': digest(raw), 'visual': visual, 'output': digest(data)}
-                updates = {target: data, index: output.getvalue().encode('utf-8'),
-                           state_path: json.dumps(new_state, ensure_ascii=False, indent=2).encode('utf-8')}
-                before = {dest: dest.read_bytes() if dest.is_file() else None for dest in updates}
-                backup = self.game / 'runtime/backups/career_competition_icons' / str(time.time_ns())
-                for dest, content in before.items():
-                    if content is not None:
-                        atomic_write(backup / dest.relative_to(self.game), content)
-                atomic_write(backup / 'manifest.json', json.dumps({
-                    'source': path.name, 'sha256': digest(raw),
-                    'files': {dest.relative_to(self.game).as_posix(): digest(value) if value is not None else None
-                              for dest, value in before.items()}}, indent=2).encode('utf-8'))
+                stamp=(path.stat().st_size,path.stat().st_mtime_ns);old=self.observed.get(path.name);self.observed[path.name]=stamp
+                if not force and old!=stamp:continue
+                raw=path.read_bytes()
+                if (path.stat().st_size,path.stat().st_mtime_ns)!=stamp:continue
+                updates={self.folder/kind/f'c{ident}.dds':convert(raw,kind)[0] for kind in ('calendar','cards')}
+                changed={p:data for p,data in updates.items() if not p.is_file() or p.read_bytes()!=data}
+                if not changed:continue
+                before={p:p.read_bytes() if p.is_file() else None for p in changed}
+                backup=self.game/'runtime/backups/career_competition_icons'/str(time.time_ns())
+                for p,data in before.items():
+                    if data is not None:atomic_write(backup/p.relative_to(self.game),data)
                 try:
-                    for dest, content in updates.items():
-                        atomic_write(dest, content)
+                    for p,data in changed.items():atomic_write(p,data)
                 except Exception:
-                    for dest, content in before.items():
-                        if content is not None:
-                            atomic_write(dest, content)
-                        elif dest.is_file():
-                            dest.unlink()
+                    for p,data in before.items():
+                        if data is None:p.unlink(missing_ok=True)
+                        else:atomic_write(p,data)
                     raise
-                state = new_state
-                installed += 1
-                self.log(f'Ícones da carreira: {path.name} aplicado automaticamente ({target.name}).')
-            except (OSError, ValueError, Image.DecompressionBombError) as exc:
-                self._report(path.name, str(exc))
+                installed+=1;self.log(f'Ícone {ident}: calendário e cards preparados da mesma imagem {path.name}.')
+            except (OSError,ValueError,Image.DecompressionBombError) as exc:self._report(path.name,str(exc))
         return installed
-
+    @staticmethod
+    def _write_if_changed(path,data):
+        if not path.is_file() or path.read_bytes()!=data:atomic_write(path,data)
 
 class CompetitionIconService:
     """One worker, no Tk calls; writes only while FIFA is closed."""

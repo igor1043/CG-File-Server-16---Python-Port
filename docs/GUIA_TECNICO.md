@@ -93,30 +93,25 @@ As abas **Próxima Partida**, **Meu Time** e **Competição**, a cabine do VAR, 
 
 ### Adicionar um ícone de competição
 
-Com o FIFA fechado, coloque um PNG (preferencialmente transparente), JPG, WEBP ou BMP em
-`data/ui/imgAssets/careerCompetitionIcons/`, dentro da instalação do jogo. Use o **ID da
-competição** ou o nome completo cadastrado no `FSW/settings.ini` como nome da imagem:
-por exemplo, `1761.png` ou `BRA - Brasileirao Serie A.png` nesta edição. Não é necessário
-abrir nem editar o settings.ini. O arquivo `COMPETICOES.txt`, gerado automaticamente na
-mesma pasta ao abrir o Server, lista os nomes aceitos para a instalação selecionada.
+Use `data/ui/imgAssets/careerCompetitionIcons/<ID_DO_INI>.png`, com o ID da
+competição principal no FSW/settings.ini instalado (1761 para Brasileirão,
+1620 Copa do Brasil, 1460 Libertadores e 2442 Carioca nesta base).
+O Server gera `COMPETICOES.txt` com os nomes aceitos e `competitions.tsv` com a
+identidade instalada. Não é necessário editar essas tabelas.
 
-Abra o Server atualizado e aguarde alguns segundos antes de iniciar o FIFA. O botão de
-iniciar o FIFA também conclui a importação antes de abrir o jogo. O Server cria o DDS no
-formato e tamanho corretos, resolve o ID visual e atualiza o índice interno. **Não edite
-o index.tsv.** O original e os ícones de outras competições ficam preservados. Para trocar
-o desenho, substitua a imagem original; não deixe duas imagens da mesma competição.
+Com o FIFA fechado, abra o Server para gerar as vistas `calendar/c<ID>.dds` e
+`cards/c<ID>.dds` da mesma imagem. O canvas de calendário é 128x128 com área
+proporcional 48x48; os cards usam canvas 256x256 proporcional. As vistas preparadas
+acompanham o pacote FIFA Friends para funcionar também sem Server aberto.
+Backups ficam em `runtime/backups/career_competition_icons/`.
 
-Imagens colocadas enquanto o FIFA está aberto são processadas quando ele estiver fechado
-e o Server estiver aberto. Nomes desconhecidos ou ambíguos e imagens inválidas são
-preservados e explicados na aba Logs, sem atribuir um ícone a outra competição.
-O Server não identifica competições pelo desenho da imagem e não cria campeonatos.
-Competições novas já cadastradas no CompData são descobertas automaticamente; mapeamentos
-específicos existentes têm prioridade. `c7.png` é uma alternativa para quem já conhece
-o ID visual; `7.png` significa ID de competição, e pode corresponder a outro recurso.
-
-Os backups ficam em `runtime/backups/career_competition_icons/`. Os DDS `c<ID>.dds`
-existentes continuam funcionando diretamente com o módulo `career_ui_assets` atualizado.
-Esse recurso usa o encoder DDS DXT5 do Pillow (12.1.1 no executável distribuído).
+A identidade visual da carreira aberta é traduzida para o ID atual da competição,
+sem tratar IDs de partidas como fases ou objetos de outra base. O número interno
+1000000+ID só separa o pedido nativo das antigas imagens de liga: os arquivos e a
+configuração usam sempre o ID do INI. Calendário, Central e Competições compartilham
+essa resolução. Os BIG antigos de ícones não são lidos; um calendário sem imagem
+fica transparente, sem logo de outra competição. Os BIG de layout continuam
+pertencendo ao jogo. Não é preciso editar nem extrair arquivos BIG.
 
 ### Iniciar o jogo
 

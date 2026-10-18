@@ -1,6 +1,8 @@
 #define UI_ASSETS_TEST
 #include "career_ui_assets.c"
 #include "path_hooks.inc"
+#include "../career_native/src/host/calendar_icon_identity.h"
+#include "../career_native/src/core/fce_contracts.c"
 #define CHECK(x) do {if(!(x)){printf("FAIL %d %s\n",__LINE__,#x);return 1;}} while(0)
 static int __cdecl test_print_core(void *writer,void *object,const char *format,va_list arguments) {
     struct {char *buffer;size_t written;size_t capacity;BYTE truncated;} *sink=object;
@@ -14,58 +16,48 @@ static void __cdecl test_string_core(void *object,const char *format,va_list arg
     parts[1]=parts[0]+(length>=0 && (size_t)length<capacity?length:0);
 }
 int main(int argc,char **argv) {
-    BYTE rows[2*0x5c]={0},registry[21*32]={0},competition[0x10+400*0x5c]={0};
-    BYTE *competition_pointer=competition,*wrapper=(BYTE*)&competition_pointer;
-    int id=2240,type=3,asset=820;char name[MAX_PATH],resolved[MAX_PATH],tiny[8],alias[64];
-    const char *request="artAssets/cmCalendarCompetitions/cmcomp_1693.swf";
-    const char *expected="imgAssets/careerCompetitionIcons/c1693.dds";
+    char name[MAX_PATH],out[MAX_PATH],alias[64];int reference[3]={1738,1739,820};
+    const FceCompNode nodes[]={{1437,1361,3,1003,0},{1458,1437,4,-1,2},{1597,1596,3,229,0},
+        {1702,1597,4,-1,0},{1738,1596,3,7,0},{1739,1738,4,-1,0},{2419,2314,3,23,0},{2430,2419,4,-1,0}};
+    FceCompetition identity;
     CHECK(argc==2 && strlen(argv[1])<MAX_PATH-110);strcpy(game_dir,argv[1]);
-    build_catalog();CHECK(calendar_count==2 && InterlockedCompareExchange(&catalog_ready,0,0));
-    CHECK(existing_calendar(1693) && existing_calendar(820));
-    CHECK(!Fifa16UiAssetsHasCompetition(1693) && Fifa16UiAssetsHasCompetition(820));
-    CHECK(!Fifa16UiAssetsHasCompetition(65536));
-    CHECK(!existing_calendar(1615));CHECK(!existing_calendar(-1));
-    CHECK(!existing_calendar(65536));CHECK(!existing_calendar(1700));
-    CHECK(calendar_id("C1693.DDS","c",".dds")==1693);
-    CHECK(!calendar_id("c1693.dds.bad","c",".dds"));
-    CHECK(!calendar_id("c4294968989.dds","c",".dds"));
-    CHECK(resolve_image_path(request,resolved,sizeof(resolved)) && !strcmp(resolved,expected));
-    CHECK(resolve_image_path("data\\ui\\artAssets\\cmCalendarCompetitions\\cmcomp_1693.big",resolved,sizeof(resolved)) && !strcmp(resolved,"data/ui/imgAssets/careerCompetitionIcons/c1693.dds"));
-    CHECK(resolve_image_path("UI/ARTASSETS/CMCALENDARCOMPETITIONS/CMCOMP_1693.SWF",resolved,sizeof(resolved)) && !strcmp(resolved,"ui/imgAssets/careerCompetitionIcons/c1693.dds"));
-    CHECK(resolve_image_path("imgAssets/cmCalendarCompetitions/cmCalendarCompetitions1693.dds",resolved,sizeof(resolved)) && !strcmp(resolved,expected));
-    CHECK(resolve_image_path("imgAssets/cmCalendarCompetitions/light/l1693.dds",resolved,sizeof(resolved)) && !strcmp(resolved,expected));
-    CHECK(resolve_image_path("imgAssets/cmCalendarCompetitions/dark/l1693.dds",resolved,sizeof(resolved)) && !strcmp(resolved,expected));
-    CHECK(!resolve_image_path(request,tiny,sizeof(tiny)));
-    CHECK(!resolve_image_path("artAssets/cmCalendarCompetitions/cmcomp_1615.swf",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("artAssets/cmCalendarCompetitions/cmcomp_4294968989.swf",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("artAssets/cmCalendarCompetitions/cmcomp_1693.swf.bad",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("invalid/artAssets/cmCalendarCompetitions/cmcomp_1693.swf",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("artAssets/cmCalendar/cmcalendar_8.swf",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("imgAssets/cmCalendar/cmCalendar8.dds",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("imgAssets/league/light/l1693.dds",resolved,sizeof(resolved)));
-    CHECK(!resolve_image_path("ui/imgAssets/kits/j30_110636_0.dds",resolved,sizeof(resolved)));
+    build_catalog();CHECK(calendar_count==5);
+    CHECK(Fifa16UiAssetsHasCompetition(1001761));CHECK(Fifa16UiAssetsHasCompetition(7));
+    CHECK(!Fifa16UiAssetsHasCompetition(1738));CHECK(!Fifa16UiAssetsHasCompetition(1001700));
+    CHECK(resolve_image_path("artAssets/cmCalendarCompetitions/cmcomp_1001761.swf",out,sizeof(out)));
+    CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/calendar/c1761.dds"));
+    CHECK(resolve_image_path("data\\ui\\artAssets\\cmCalendarCompetitions\\cmcomp_1001460.big",out,sizeof(out)));
+    CHECK(!strcmp(out,"data/ui/imgAssets/careerCompetitionIcons/calendar/c1460.dds"));
+    CHECK(resolve_image_path("ui/imgAssets/league/dark/l1001620.dds",out,sizeof(out)));
+    CHECK(!strcmp(out,"ui/imgAssets/careerCompetitionIcons/cards/c1620.dds"));
+    CHECK(resolve_image_path("imgAssets/league/light/l1003.dds",out,sizeof(out)));
+    CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/cards/c1460.dds"));
+    CHECK(resolve_image_path("artAssets/cmCalendarCompetitions/cmcomp_0.swf",out,sizeof(out)));
+    CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/calendar/empty.dds"));
+    CHECK(resolve_image_path("artAssets/cmCalendarCompetitions/cmcomp_1001700.big",out,sizeof(out)));
+    CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/calendar/empty.dds"));
+    CHECK(resolve_image_path("imgAssets/league/light/l1001700.dds",out,sizeof(out)));
+    CHECK(!strcmp(out,"imgAssets/careerCompetitionIcons/cards/empty.dds"));
+    CHECK(!resolve_image_path("artAssets/cmCalendar/cmcalendar_8.swf",out,sizeof(out)));
+    CHECK(!resolve_image_path("imgAssets/crest/light/l1043.dds",out,sizeof(out)));
+    CHECK(!resolve_image_path("artAssets/stadium/stadium_cmphoto_0123456789abcdef.big",out,sizeof(out)));
     native_print_core=test_print_core;native_string_core=test_string_core;
-    /* Locale formatting uses this same game function before any artwork. */
     CHECK(ui_print(name,sizeof(name),"%s_%s","por","br")==6 && !strcmp(name,"por_br"));
     CHECK(ui_print(name,sizeof(name),"data/loc/%s.db","por_br")==18 && !strcmp(name,"data/loc/por_br.db"));
-    CHECK(ui_print(name,sizeof(name),"kit %d %s",30,"preserved")==16 && !strcmp(name,"kit 30 preserved"));
-    CHECK(ui_print(name,sizeof(name),"artAssets/cmCalendarCompetitions/cmcomp_%d.swf",1693)==(int)strlen(expected) && !strcmp(name,expected));
-    CHECK(ui_print(name,4,"%s","abcdef")==6 && !strcmp(name,"abc"));
-    CHECK(ui_print(name,strlen(request),"%s",request)==(int)strlen(request) && strlen(name)==strlen(request)-1);
+    CHECK(ui_print(name,sizeof(name),"artAssets/cmCalendarCompetitions/cmcomp_%d.swf",1002442)>0);
+    CHECK(!strcmp(name,"imgAssets/careerCompetitionIcons/calendar/c2442.dds"));
     {char *parts[3]={name,name,name+sizeof(name)};
-     CHECK(ui_string(parts,"artAssets/cmCalendarCompetitions/cmcomp_%d.swf",1693)==parts);
-     CHECK(!strcmp(name,expected) && parts[1]==name+strlen(name));
-     ui_string(parts,"ui/imgAssets/kits/j%d_%d_0.dds",30,110636);
-     CHECK(!strcmp(name,"ui/imgAssets/kits/j30_110636_0.dds"));}
-    memcpy(rows,&id,4);memcpy(rows+4,&type,4);memcpy(rows+12,"CRTR",5);
-    memcpy(rows+17,"cm_pst_champions_trophy",23);memcpy(rows+0x54,&asset,4);
-    CHECK(resolve_rows(rows,2,id)==820);CHECK(!resolve_rows(rows,2,2239));
-    memcpy(rows+0x5c,rows,0x5c);CHECK(!resolve_rows(rows,2,id));memset(rows+0x5c,0,0x5c);
-    memcpy(competition+0x10,rows,0x5c);memcpy(registry+20*32+24,&wrapper,sizeof(wrapper));
-    InterlockedExchange(&capacity_ready,1);
-    CHECK(Fifa16UiAssetsResolveCompetition(id,registry)==820);
-    CHECK(!Fifa16UiAssetsResolveCompetition(1693,NULL)); /* Host owns official ID resolution. */
+     CHECK(ui_string(parts,"ui/imgAssets/league/light/l%d.dds",1002442)==parts);
+     CHECK(!strcmp(name,"ui/imgAssets/careerCompetitionIcons/cards/c2442.dds"));}
     CHECK(alias_name("j2_110636_0.dds",alias,sizeof(alias)) && !strcmp(alias,"j30_110636_0.dds"));
-    CHECK(!alias_name("j2_110636_1.dds",alias,sizeof(alias)));
-    puts("PASS: dedicated DDS without BIG/league directories, missing/invalid files, IDs, formatter bounds, preseason and unrelated UI paths");return 0;
+    CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_OK && identity.asset==7);
+    reference[2]=437;CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_OK && identity.asset==7);
+    reference[0]=1437;reference[1]=1458;reference[2]=839;
+    CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_OK && identity.asset==1003);
+    reference[0]=1597;reference[1]=1702;CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_OK && identity.asset==229);
+    reference[0]=2419;reference[1]=2430;CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_OK && identity.asset==23);
+    reference[0]=1738;reference[1]=1458;CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_CONFLICT);
+    reference[0]=9999;reference[1]=9998;reference[2]=1738;
+    CHECK(calendar_icon_identity(nodes,8,reference,&identity)==FCE_UNKNOWN);
+    puts("PASS: one competition-ID folder, calendar/cards proportions, no BIG resources, live career identity, fixture namespace isolation and unrelated paths");return 0;
 }
