@@ -87,3 +87,8 @@ tools/video_abertura/*.avi
 tools/narration_studio/*_portrait.jpg
 tools/narration_studio/generic_backup_path.txt
 code-release/
+
+# Local reverse-engineering dependencies and superseded camera binaries.
+runtime/dev_deps/
+bin/server16_first_person.dll
+bin/server16_first_person_v[2-4].dll

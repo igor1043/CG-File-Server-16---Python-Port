@@ -1,0 +1,17 @@
+LIBRARY dinput8
+EXPORTS
+    DirectInput8Create @1
+    DllCanUnloadNow=proxy_DllCanUnloadNow @2
+    DllGetClassObject=proxy_DllGetClassObject @3
+    DllRegisterServer=proxy_DllRegisterServer @4
+    DllUnregisterServer=proxy_DllUnregisterServer @5
+    GetdfDIJoystick=proxy_GetdfDIJoystick @6
+    Fifa16CareerApiVersion @7
+    Fifa16CareerGetState @8
+    Fifa16CareerAcquireSnapshot @9
+    Fifa16CareerGetSnapshotModel @10
+    Fifa16CareerGetSnapshotGeneration @11
+    Fifa16CareerReleaseSnapshot @12
+    Fifa16CareerAcquireCachedSnapshot @13
+    Fifa16CareerJobOfferProtocol @14 DATA
+    Fifa16CareerRegisterJobUiCallback @15

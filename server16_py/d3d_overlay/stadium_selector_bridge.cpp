@@ -58,7 +58,9 @@ static bool alive() {
 extern "C" BOOL selector_shortcut_enabled(void) {
     return alive() && g_selector->enabled && g_selector->ready==7 && game_foreground(g_window);
 }
-extern "C" BOOL selector_audio_mode(void) { return g_selector && g_selector->enabled==2; }
+// Modes 2 (match) and 3 (career) share Select+Start and panel navigation.
+// The career panel is rendered and dispatched separately by Python.
+extern "C" BOOL selector_audio_mode(void) { return g_selector && (g_selector->enabled==2 || g_selector->enabled==3); }
 static bool audio_combo_edge(WORD buttons,WORD previous) {
     const WORD combo=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
     return (buttons&combo)==combo && (previous&combo)!=combo;
@@ -218,6 +220,15 @@ void selector_initialize(void (*logger)(const char *)) {
     attach_channel();
 }
 void selector_tick(HWND window,float width,float height) {
+    // A dead Python owner can leave our mapped view alive after Windows has
+    // removed the named handle. A restarted Server may create a new object
+    // with the same name. Reopen it instead of retaining that stale view.
+    if (g_selector && !alive()) {
+        UnmapViewOfFile(g_selector);
+        g_selector=nullptr;
+        g_next_attach=0;
+        g_start_pending=0;
+    }
     attach_channel();
     if (!g_selector) return;
     if (width && width<300) return;

@@ -1,41 +1,39 @@
-# Unified career competition artwork (revision 4)
+# Career competition artwork — revision 7, Robson base
 
-User-editable sources are `data/ui/imgAssets/careerCompetitionIcons/<INI_ID>.png`.
-The current CompData hierarchy supplies the main competition ID that is also used
-in FSW's installed INI. Server16 prepares two proportional DDS views from that
-same source: `calendar/c<ID>.dds` and `cards/c<ID>.dds`. Both are distributed with
-the PNGs and `competitions.tsv`. A package installation works without launching
-Server16; only changing PNGs requires preparation before the next FIFA launch.
+The editable images are `data/ui/imgAssets/careerCompetitionIcons/<INI_ID>.png`.
+Server16 prepares `calendar/c<ID>.dds` and `cards/c<ID>.dds` from each image.
+The calendar DLL now generates its native APT movie at FIFA startup, embedding
+the exact calendar DDS in `data/ui/artAssets/cmCalendarCompetitions/cmcomp_<1000000+ID>.big`.
+The generated movie is necessary for CalendarCell; a DDS cannot replace a `.swf`
+movie request. Deleted or stale generated BIGs are rebuilt before hooks activate.
+The generator contains a small native APT/geometry template and needs no old BIG.
+Missing artwork uses a transparent movie. Card requests retain their DDS type.
+The same card DDS is also prepared at the native `league/light` and `league/dark`
+filenames for the resolved internal ID. Native widgets that resolve the filename
+without the generic formatter receive the same competition artwork.
 
-The calendar, Central next-match card and competition next/results cards use
-one identity resolver. A live career's object number is never interpreted using
-another release's on-disk object numbering. Its semantic visual identity maps
-to the current installed competition ID. CalendarCell's reference fields are
-`competition`, `stage`, **`fixture ID`**; the third field never participates in
-competition lookup. This fixes the month-dependent Portuguese/English cup icons.
+Calendar textures also exist at native `cmCalendarCompetitions<ID>.dds` and
+`cmCalendarCompetitions/light|dark/l<ID>.dds` names, including the empty asset.
+The BIG uses the original 64-byte member alignment. Derived DXT5 headers declare
+the entire compressed level size (16384/65536 bytes), correcting old Pillow
+outputs before loading. Pixel blocks and author PNGs are preserved.
 
-Internally the host tags explicitly resolved IDs with 1000000 to distinguish them
-from stock visual IDs passed through the same FIFA formatters. This is an internal
-UI namespace, not a second editable ID or table. The emitted path strips the tag
-and always names the INI ID in the shared folder. Unrelated crests/kits/stadium
-paths retain their behavior. Legacy league light/dark requests resolve through
-the manifest only when the visual identity is unambiguous.
+Calendar, Central next match, competition next/results and club results share the
+same resolved competition ID. Saved careers retain their own FCE object numbering;
+the semantic identity maps to the installed CompData. The fixture ID in the third
+CalendarCell reference field never participates in competition lookup.
 
-Legacy `cmcomp_<ID>.big/.swf` strings are recognized at the formatter boundary;
-no BIG is opened, scanned, extracted or rebuilt for competition icons. Missing
-calendar artwork routes to a transparent DDS, not an old BIG. Screen/layout BIGs
-and the separate stadium-photo movie writer are unrelated resources.
+The million prefix distinguishes resolved competition IDs from stock visual IDs.
+Generated movie names retain that prefix; editable PNG/DDS names use the INI ID.
+The manifest resolves unambiguous stock league requests to the same card texture.
+The distribution includes the library and prepared movies and works without a
+new Server16 build. The DLL also regenerates the movies from the distributed DDSs.
 
-Build: `build.cmd`; tests use synthetic DDSs with no BIG or league directories,
-check the shared identity contract, formatter bounds and keeper regressions.
-The host regression test `career_native/scripts/tests/test_calendar_icon_identity.cmd`
-checks all 65535 fixture IDs for four competitions from the captured old career.
-`career_ui_assets.log` records CATALOG/READY/RESOLVE. Visual verification of all
-three screens is required after installation; unit tests do not prove rendering.
-
-The package installer distributes the library while preserving user-edited PNGs
-and their matching generated views. The source-only export intentionally excludes
-images; use the full FIFA Friends package for a ready-to-run installation.
+Build and regression checks: `build.cmd`. `verify_installed.c` checks each manifest
+entry and prepares the movies on a real installation. Tests reproduce removal of
+a movie, compare its embedded DDS byte for byte and retain the keeper checks.
+The host calendar test covers 262140 references from four saved-career identities.
+Rendering inside FIFA still requires loading the new DLL after a game restart.
 
 ## Career Starting XI goalkeeper (14 October 2026)
 

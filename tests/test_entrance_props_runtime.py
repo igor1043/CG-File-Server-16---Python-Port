@@ -28,7 +28,7 @@ class EntrancePropsTests(unittest.TestCase):
             self.assertEqual(resolve_asset(root,'1761'),(current,'ready'))
             self.assertEqual(resolve_asset(root,'1761','1762'),(phase,'ready'))
             (phase/'asset.ini').unlink()
-            self.assertEqual(resolve_asset(root,'1761','1762'),(None,'asset_missing'))
+            self.assertEqual(resolve_asset(root,'1761','1762'),(current,'ready'))
             (current/'asset.ini').unlink()
             self.assertTrue((old/'asset.ini').exists())
             self.assertEqual(resolve_asset(root,'1761'),(None,'asset_missing'))
@@ -165,16 +165,16 @@ class EntrancePropsTests(unittest.TestCase):
             self.assertEqual(common_league_competition(root, '0', '567', database)[2], 'friendly_teams_invalid')
             self.assertEqual(common_league_competition(root, '777', '567', database)[2], 'friendly_league_unknown')
 
-    def test_round_requires_its_exact_package_without_root_fallback(self):
+    def test_round_overrides_main_package_and_missing_round_inherits(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             group = self.package(root, '195')
             final = self.package(root, '245')
             self.settings(root, '[movies]\n195=UEFA - Champions League\n[comp]\n245=Estadio da final,10,3,0\n')
             self.assertEqual(resolve_asset(root, '195', '245'), (final, 'ready'))
-            self.assertEqual(resolve_asset(root, '195', '219'), (None, 'competition_unconfigured'))
+            self.assertEqual(resolve_asset(root, '195', '219'), (group, 'ready'))
             (final/'asset.ini').unlink()
-            self.assertEqual(resolve_asset(root, '195', '245'), (None, 'asset_missing'))
+            self.assertEqual(resolve_asset(root, '195', '245'), (group, 'ready'))
             self.assertEqual(resolve_asset(root, '195', '0'), (group, 'ready'))
             self.assertEqual(resolve_asset(root, '195', '../bad'), (None, 'competition_unconfigured'))
             self.assertIsNone(resolve_asset(root, '9999')[0])
@@ -192,7 +192,7 @@ class EntrancePropsTests(unittest.TestCase):
             mapping.parent.mkdir(parents=True)
             mapping.write_text('[competitions]\n1615=9999\n9999=1615\n')
             (directory.parent/'REFERENCIA_IDS.txt').write_text('1615=9999\n')
-            self.assertEqual(resolve_asset(root, '1615', '1616'), (None, 'competition_unconfigured'))
+            self.assertEqual(resolve_asset(root, '1615', '1616'), (directory, 'ready'))
             self.assertEqual(resolve_asset(root, '1615'), (directory, 'ready'))
             self.assertEqual(resolve_asset(root, '9999')[1], 'competition_unconfigured')
             self.assertEqual(settings.read_bytes(), original)

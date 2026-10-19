@@ -3214,7 +3214,7 @@ class Server16App(tk.Tk):
     def _sync_crowd_volume_controller(self) -> None:
         """Read Start+Select and adjust only the crowd audio multiplier."""
         selector = self._stadium_selector
-        if selector is not None and selector.shared.enabled == 2:
+        if selector is not None and selector.shared.enabled in (2, 3):
             self._crowd_volume_previous_buttons = 0
             self._crowd_volume_combo_latched = False
             if self._crowd_volume_visible:

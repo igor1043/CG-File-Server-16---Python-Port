@@ -4,20 +4,35 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Atualizado em:** 18/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Atualizado em:** 19/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
-## Overlay da carreira — 18/10/2026
+## Overlay da carreira — 19/10/2026
 
 No hub da carreira, **Select + Start** ou **F12** abre um painel próprio com
-**Transferir para outro clube** e **Finanças > Solicitar verba**. Selecione o save,
-revise o pedido e saia da carreira sem salvar novamente. Aguarde a confirmação
+**Transferir para outro clube** e **Finanças > Solicitar verba**. A carreira aberta
+é reconhecida automaticamente. Revise o pedido e saia da carreira sem salvar novamente. Aguarde a confirmação
 no menu principal e carregue o mesmo save. O Server guarda um backup antes de aplicar.
 Clubes e divisões acompanham os dados do save; verba está disponível para treinador.
 Veja o [guia da overlay da carreira](docs/OVERLAY_CARREIRA.md) para uso, limites e validação.
 
+O público automático também dá mais peso à Libertadores e às competições
+brasileiras, usando a próxima partida real do clube. Veja os valores e ajustes
+no [guia de público por competição](docs/PUBLICO_COMPETICOES.md).
+
 ## Aberturas — 18/10/2026
 
-- **ID direto:** cada modelo usa a pasta com o ID atual da competição ou fase, sem tabela de conversão. Uma fase sem pacote próprio fica sem arco e placas; não herda o modelo principal.
+- **Base Robson 12.12:** cada modelo usa a pasta com o ID atual da competição ou fase. A fase com pacote próprio tem prioridade; sem esse pacote, herda o da competição principal. Os módulos traduzem identidades de carreiras antigas para o CompData instalado.
+
+Os ícones da carreira usam uma imagem por ID do INI. A DLL prepara os BIGs e os
+nomes nativos de DDS do calendário e dos cards, com cabeçalhos DXT5 corrigidos.
+O teste do usuário após reiniciar confirmou os ícones no jogo. Entradas e suportes
+3D ainda aguardam confirmação visual em partida.
+
+Use a atualização correspondente do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12):
+ela inclui `dinput8.dll`, os três módulos corrigidos e a biblioteca de ícones.
+Mantenha os BIGs do calendário e reinicie FIFA/Server após copiar os arquivos.
+Nesta base, a Série A usa `1761.png` e a Libertadores `1460.png` em
+`data/ui/imgAssets/careerCompetitionIcons/`; consulte `COMPETICOES.txt` para os demais IDs.
 
 ## Menu durante a partida — 18/10/2026
 

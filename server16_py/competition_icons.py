@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import tempfile
 import threading
 import time
@@ -55,10 +56,18 @@ def convert(raw,kind='calendar'):
     box=48 if kind=='calendar' else 256
     image.thumbnail((box-2,box-2),Image.Resampling.LANCZOS)
     canvas.paste(image,((box-image.width)//2,(box-image.height)//2))
-    out=io.BytesIO();canvas.save(out,format='DDS',pixel_format='DXT5');data=out.getvalue()
+    data=encode_native_dds(canvas)
     expected=16512 if kind=='calendar' else 65664
     if len(data)!=expected or data[:4]!=b'DDS ' or data[84:88]!=b'DXT5':raise ValueError('DDS DXT5 inválido')
     return data,','.join(map(str,canvas.getchannel('A').getbbox()))
+
+def encode_native_dds(image):
+    out=io.BytesIO();image.save(out,format='DDS',pixel_format='DXT5');data=bytearray(out.getvalue())
+    # FIFA expects the BC3 top-level byte count, not Pillow's RGB row pitch.
+    linear=((image.width+3)//4)*((image.height+3)//4)*16
+    struct.pack_into('<I',data,20,linear)
+    struct.pack_into('<I',data,88,0)
+    return bytes(data)
 
 def atomic_write(path,data):
     path.parent.mkdir(parents=True,exist_ok=True);temporary=None
@@ -81,7 +90,7 @@ class CompetitionIconImporter:
         self.folder.mkdir(parents=True,exist_ok=True)
         instructions=('ÍCONES DAS COMPETIÇÕES — UMA IMAGEM POR ID DO INI\n\n'
             'Use <ID>.png nesta pasta. Calendário, Central e Competições usam esta mesma imagem.\n'
-            'Abra o Server16 antes do FIFA para preparar as proporções. Não precisa de BIG.\n'
+            'Abra o Server16 antes do FIFA para preparar as proporções. O módulo gera o BIG do calendário ao iniciar o FIFA.\n'
             'As subpastas calendar e cards são geradas automaticamente; não as edite.\n\n')
         instructions+=''.join(f'{key} - {labels.get(key,"Competição "+str(key))}.png\n' for key in sorted(mapping))
         self._write_if_changed(self.folder/'COMPETICOES.txt',instructions.encode('utf-8-sig'))
@@ -99,8 +108,7 @@ class CompetitionIconImporter:
             except ValueError as exc:self._report(path.name,str(exc))
         for kind in ('calendar','cards'):
             side=128 if kind=='calendar' else 256
-            empty=io.BytesIO();Image.new('RGBA',(side,side)).save(empty,format='DDS',pixel_format='DXT5')
-            self._write_if_changed(self.folder/kind/'empty.dds',empty.getvalue())
+            self._write_if_changed(self.folder/kind/'empty.dds',encode_native_dds(Image.new('RGBA',(side,side))))
         installed=0
         for ident,paths in pending.items():
             if len(paths)!=1:self._report(str(ident),'mais de uma imagem para o mesmo ID');continue

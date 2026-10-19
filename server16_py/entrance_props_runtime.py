@@ -25,8 +25,9 @@ def competition_id(value: str) -> bool:
 def resolve_asset(game_root: Path, competition: str, round_id: str = '', *, settings=None) -> tuple[Path | None, str]:
     """Use only IDs configured in the original Server16 settings file.
 
-    A nonzero round selects only that ID. With no round, select the competition.
-    Missing, unconfigured or invalid packages never inherit the main ceremony.
+    A configured round package has priority. When absent, use the configured
+    main competition package, matching the working Robson 12.12 behavior.
+    An explicitly present but corrupt package is rejected.
     """
     root = Path(game_root)
     path = root / 'FSW/settings.ini'
@@ -34,12 +35,20 @@ def resolve_asset(game_root: Path, competition: str, round_id: str = '', *, sett
         return None, 'settings_missing'
     try:
         settings = settings if settings is not None else SessionIniFile(path)
-        key = round_id if not no_competition(round_id) else competition
-        if not competition_id(key) or not any(settings.key_exists(key, section) for section in COMPETITION_SECTIONS):
+        if not no_competition(round_id) and not competition_id(round_id):
             return None, 'competition_unconfigured'
-        directory = root / 'data/sceneassets/entrance_props/competitions' / key
-        if not (directory / 'asset.ini').is_file():
-            return None, 'asset_missing'
+        directory = None
+        configured = False
+        for candidate in dict.fromkeys((round_id, competition)):
+            if not competition_id(candidate) or not any(settings.key_exists(candidate, section) for section in COMPETITION_SECTIONS):
+                continue
+            configured = True
+            package = root / 'data/sceneassets/entrance_props/competitions' / candidate
+            if (package / 'asset.ini').is_file():
+                directory = package
+                break
+        if directory is None:
+            return None, 'asset_missing' if configured else 'competition_unconfigured'
         metadata = configparser.ConfigParser(interpolation=None)
         metadata.read_string((directory / 'asset.ini').read_text(encoding='utf-8-sig'))
         if metadata.getint('asset', 'schema') != 1:

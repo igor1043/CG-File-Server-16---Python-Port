@@ -98,7 +98,7 @@ int main() {
         shared->enabled=mode; shared->visible=0;
         shared->read_index=shared->write_index=0; g_start_pending=0;
     };
-    for (LONG mode : {1L,2L}) {
+    for (LONG mode : {1L,2L,3L}) {
         reset_events(mode);
         assert(handle_shortcut(true,false,true,0,0,0,100)); // F12 opens both cards.
         assert(shared->visible && shared->events[0].kind==1 && shared->write_index==1);
@@ -111,8 +111,9 @@ int main() {
     assert(handle_shortcut(true,false,false,XINPUT_GAMEPAD_START,0,XINPUT_GAMEPAD_START,450));
     assert(shared->events[0].kind==1);
     assert(!handle_shortcut(true,true,false,XINPUT_GAMEPAD_START,0,XINPUT_GAMEPAD_START,500));
+    for (LONG mode : {2L,3L})
     for (WORD first : {WORD(0),WORD(XINPUT_GAMEPAD_START),WORD(XINPUT_GAMEPAD_BACK)}) {
-        reset_events(2);
+        reset_events(mode);
         if (first) assert(!handle_shortcut(true,false,false,first,first,0,100));
         assert(handle_shortcut(true,false,false,combo,combo&~first,first,200));
         assert(shared->events[0].kind==1);
@@ -128,6 +129,11 @@ int main() {
     selector_tick(child,1280,720);
     assert(shared->ready==7);
     assert(!shared->visible && !selector_shortcut_enabled());
+    shared->owner_pid=0; // Dead Server: reconnect the named channel.
+    selector_tick(child,1280,720);
+    assert(g_selector && shared->ready==7);
+    shared->owner_pid=GetCurrentProcessId();
+    shared->heartbeat=GetTickCount();
     DestroyWindow(child); DestroyWindow(root); DestroyWindow(other);
     UnmapViewOfFile(g_selector); g_selector=nullptr;
     UnmapViewOfFile(shared); CloseHandle(map);

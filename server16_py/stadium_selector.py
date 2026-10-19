@@ -24,6 +24,8 @@ from .prematch_panel import PrematchPanel
 from .narration_runtime import narration_runtime
 from .intro_music_runtime import intro_music_runtime
 from .match_hub_panel import MatchHubPanel
+from .career_service import CareerService, career_page, safe_exit_page
+from .career_panel import CareerPanel
 
 SELECTOR_MAPPING_NAME = 'Local\\CGFS16_Selector_v1'
 
@@ -56,6 +58,9 @@ class StadiumSelector:
         self.keyboard = self.opened = False
         self.applying = False
         self.audio_panel = None
+        self.career_panel = None
+        self.career_service = CareerService(app)
+        self._career_notice_shown = False
         self.prematch_panel = None
         self.controller_connected = False
         self.return_to_menu = False
@@ -134,6 +139,7 @@ class StadiumSelector:
 
     def tick(self):
         app = self.app
+        self.career_service.tick()
         camera=getattr(app,'_first_person_runtime',None)
         if camera is not None:camera.tick()
         if time.monotonic() >= getattr(self,'_next_cloth_sync',0):
@@ -155,7 +161,10 @@ class StadiumSelector:
         if music_runtime is not None or (game_root/'IntroMusic').is_dir():
             intro_music_runtime(app).tick(prematch_eligible)
         stadium_eligible = prematch_eligible and app.module_enabled('Stadium')
-        mode = 1 if prematch_eligible else 2 if self.match_eligible() else 0
+        career_eligible = app.memory.is_open() and (self.career_service.in_career(app.lastpagename) or
+            ((self.career_service.pending or self.career_service.notice_available()) and
+             (safe_exit_page(app.lastpagename) or self.career_service.context_reader.exited_hub(app.lastpagename))))
+        mode = 1 if prematch_eligible else 3 if career_eligible else 2 if self.match_eligible() else 0
         page=(app.lastpagename or '').lower()
         # Keep attendance through walkout/loading, pause and gameplay, but not
         # Career menus or post-match pages. Editing is still pre-match only.
@@ -165,7 +174,9 @@ class StadiumSelector:
                             self.crowd_control.shared.requested_percent>=0)) or
              ('stadiumpan' in page and self.crowd_control.shared.requested_percent>=0)))
         self.crowd_control.tick(prematch_eligible,crowd_phase)
-        if self.opened and (not mode or bool(self.audio_panel) != (mode==2) or self.context != self._context()):
+        opened_mode = 3 if self.career_panel else 2 if self.audio_panel else 1
+        if self.opened and (not mode or opened_mode != mode or
+                            (mode != 3 and self.context != self._context())):
             self.close()
         if stadium_eligible and time.monotonic() >= self._next_preload:
             self._preload_catalog()
@@ -176,6 +187,8 @@ class StadiumSelector:
             self.prematch_panel.tick()
         if self.opened and self.audio_panel:
             self.audio_panel.tick()
+        if self.opened and self.career_panel:
+            self.career_panel.tick()
         if self.opened and not self.audio_panel and not self.prematch_panel and (self._preview_loading or self.loading) and time.monotonic()>=self._next_loader:
             self.render()
         if self.applying and not app._stadium_task_running:
@@ -203,7 +216,7 @@ class StadiumSelector:
             shared.read_index=(shared.read_index+1)%64
             if kind==1:
                 if shared.enabled and shared.ready==7:
-                    self.open(audio=shared.enabled==2,hub=shared.enabled==1)
+                    self.open(audio=shared.enabled==2,hub=shared.enabled==1,career=shared.enabled==3)
                 else:
                     app.log(f'Stadium selector shortcut rejected: enabled={shared.enabled} native_ready={shared.ready}/7')
                     self.close()
@@ -239,15 +252,21 @@ class StadiumSelector:
         self._catalog_thread=threading.Thread(target=load,name='stadium-catalog',daemon=True)
         self._catalog_thread.start()
 
-    def open(self, audio=False, hub=False):
+    def open(self, audio=False, hub=False, career=False):
         self.context=self._context()
         self.applying=False
         self.audio_panel=MatchHubPanel(self) if audio else None
+        self.career_panel=CareerPanel(self,self.career_service) if career else None
         self.prematch_panel=None
         self.return_to_menu=False
         self.country=self.query=self.draft=self.message=''
         self.index=0; self.focus=2; self.keyboard=False
         self.opened=True
+        if career:
+            self._opening_selection_names=()
+            self.loading=False
+            self.render()
+            return
         if hub and not audio:
             self.show_menu()
             return
@@ -270,6 +289,7 @@ class StadiumSelector:
         self.keyboard=False
         self.loading=False
         self.audio_panel=None
+        self.career_panel=None
         self.prematch_panel=PrematchPanel(self)
         self.return_to_menu=True
         self.render()
@@ -344,11 +364,14 @@ class StadiumSelector:
         self.opened=self.loading=False; self.keyboard=False
         self.applying=False
         self.audio_panel=None
+        self.career_panel=None
         self.prematch_panel=None
         self.return_to_menu=False
 
     def shutdown(self):
+        self.career_service.feedback.close()
         self._image_stop.set()
+        self.career_service.jobs_runtime.close()
         self.close(); self.shared.enabled=0; self.shared.owner_pid=0
         self.crowd_control.shutdown()
         runtime=getattr(self.app,'_narration_runtime',None)
@@ -456,6 +479,9 @@ class StadiumSelector:
             return
         if self.audio_panel:
             self.audio_panel.handle(kind,value)
+            return
+        if self.career_panel:
+            self.career_panel.handle(kind,value)
             return
         if self.prematch_panel:
             self.prematch_panel.handle(kind,value)
@@ -609,6 +635,9 @@ class StadiumSelector:
         self._preview_transition=False
 
     def render(self):
+        if self.career_panel:
+            self._publish(self.career_panel.render(), self.career_panel.WIDTH, self.career_panel.HEIGHT)
+            return
         if self.audio_panel:
             self._publish(self.audio_panel.render(), self.audio_panel.WIDTH, self.audio_panel.HEIGHT)
             return

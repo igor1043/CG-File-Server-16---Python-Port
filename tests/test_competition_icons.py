@@ -1,4 +1,5 @@
 import io
+import struct
 from pathlib import Path
 import tempfile
 import unittest
@@ -28,6 +29,8 @@ class CompetitionIconsTests(unittest.TestCase):
             self.assertEqual(im.size,(side,side));self.assertLessEqual(bounds[2],limit);self.assertLessEqual(bounds[3],limit)
             self.assertAlmostEqual((bounds[2]-bounds[0])/(bounds[3]-bounds[1]),2,delta=.15)
             self.assertEqual(target.read_bytes()[84:88],b'DXT5')
+            self.assertEqual(struct.unpack_from('<I',target.read_bytes(),20)[0],side*side)
+            self.assertEqual(struct.unpack_from('<I',target.read_bytes(),88)[0],0)
         self.assertEqual(source.read_bytes(),original);self.assertEqual(list(self.game.rglob('*.big')),[])
         self.assertIn('1761\t7\tBRA', (self.folder/'competitions.tsv').read_text())
     def test_two_views_are_repaired_without_a_runtime_state_file(self):
@@ -53,7 +56,9 @@ class CompetitionIconsTests(unittest.TestCase):
     def test_empty_views_are_transparent_and_known_missing_art_is_not_substituted(self):
         self.importer.sync(force=True)
         for kind in ('calendar','cards'):
-            self.assertIsNone(Image.open(self.folder/kind/'empty.dds').convert('RGBA').getchannel('A').getbbox())
+            p=self.folder/kind/'empty.dds';image=Image.open(p).convert('RGBA')
+            self.assertIsNone(image.getchannel('A').getbbox())
+            self.assertEqual(struct.unpack_from('<I',p.read_bytes(),20)[0],image.width*image.height)
         self.assertFalse((self.folder/'cards/c1620.dds').exists())
     def test_ambiguous_names_rejected_and_sources_keep_independent_ids(self):
         with (self.game/'FSW/settings.ini').open('a') as f:f.write('1620=BRA - Brasileirao\n')

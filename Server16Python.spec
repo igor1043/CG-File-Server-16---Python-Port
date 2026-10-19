@@ -19,11 +19,13 @@ a = Analysis(
         ('bin\\fifa16_narration.dll', 'bin'),
         ('bin\\server16_first_person_v7.dll', 'bin'),
         ('bin\\FifaLibrary16.dll',  'bin'),
+        ('bin\\career_jobs_runtime.dll', 'bin'),
     ],
     datas=[
         ('server16_py\\assets\\flags', 'server16_py/assets/flags'),
         ('server16_py\\offsets.json', 'server16_py'),
         ('server16_py\\db_worker.py', 'server16_py'),
+        ('server16_py\\career_save_worker.py', 'server16_py'),
         ('server16_py\\bh_worker.py', 'server16_py'),
         ('server16_py\\locales\\en.json', 'server16_py/locales'),
         ('server16_py\\locales\\pt.json', 'server16_py/locales'),

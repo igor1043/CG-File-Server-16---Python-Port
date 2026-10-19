@@ -19,9 +19,36 @@ import ctypes.wintypes as wintypes
 import logging
 import os
 import threading
+import hashlib
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def _loaded_overlay_path(pid):
+    """Read the module inventory; a Server restart must not add a second hook."""
+    from .memory_access import Memory, MODULEENTRY32W, INVALID_HANDLE_VALUE
+    probe = Memory()
+    kernel = probe.kernel32
+    snapshot = kernel.CreateToolhelp32Snapshot(24, pid)
+    if not snapshot or snapshot == INVALID_HANDLE_VALUE:
+        raise OSError('Não foi possível verificar os módulos do FIFA.')
+    try:
+        entry = MODULEENTRY32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        ok = kernel.Module32FirstW(snapshot, ctypes.byref(entry))
+        if not ok:
+            raise OSError('Não foi possível ler os módulos do FIFA.')
+        matches = []
+        while ok:
+            if entry.szModule.casefold() == 'cgfs16_overlay.dll':
+                matches.append(Path(entry.szExePath))
+            ok = kernel.Module32NextW(snapshot, ctypes.byref(entry))
+        if len(matches)>1:
+            raise RuntimeError('Mais de uma overlay está carregada. Reinicie o FIFA.')
+        return matches[0] if matches else None
+    finally:
+        kernel.CloseHandle(snapshot)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared memory layout — MUST match OverlayShared in cgfs16_overlay.cpp
@@ -166,6 +193,19 @@ class D3DOverlayInjector:
         with self._lock:
             if self._injected_pid == pid:
                 return True
+            try:
+                loaded = _loaded_overlay_path(pid)
+                if loaded is not None:
+                    expected = hashlib.sha256(Path(self._dll_path).read_bytes()).digest()
+                    if hashlib.sha256(loaded.read_bytes()).digest() != expected:
+                        log.error('D3DOverlay: another version is loaded; FIFA restart required')
+                        return False
+                    self._injected_pid = pid
+                    log.info('D3DOverlay: reusing the existing native overlay in pid=%d', pid)
+                    return True
+            except (OSError, RuntimeError) as exc:
+                log.error('D3DOverlay: existing-module check failed: %s', exc)
+                return False
             ok = self._do_inject(pid)
             if ok:
                 self._injected_pid = pid
