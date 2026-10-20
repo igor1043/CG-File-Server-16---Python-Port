@@ -3,9 +3,10 @@
 #include <assert.h>
 #include <initializer_list>
 int main() {
+    static_assert(pyroIntroCount==20 && pyroGoalCount==12,"Every machine has an event source");
     const uint64_t start=1000;
     for(bool goal : {false,true}) {
-        const int count=goal?8:10;
+        const int count=goal?pyroGoalCount:pyroIntroCount;
         const uint64_t length=goal?25000ULL:60000ULL;
         uint64_t previous=0;
         for(int i=0;i<count;i+=2) {
@@ -22,4 +23,10 @@ int main() {
         assert(!pyro_drain_due(start-1,start,goal,0));
         assert(!pyro_drain_due(start+length,start,goal,count));
     }
+    for(int i=0;i<pyroGoalCount;++i){
+        const auto& rear=pyro_site(true,i);
+        assert(rear.x==-5900 || rear.x==5900);
+        assert(&rear==&machineSites[i+pyroSidelineCount]);
+    }
+    assert(machineOutletHeightCm>55 && machineOutletHeightCm<60);
 }

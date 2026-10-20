@@ -19,9 +19,9 @@ def main(feature='career_job_offer',career_tests=36):
     from PyInstaller.archive.readers import CArchiveReader
     import pefile
     install_feature=feature
-    if feature in ('career_light_notices','career_notice_refresh','career_sticky_progress'):feature='career_performance_retirement'
+    if feature in ('career_light_notices','career_notice_refresh','career_sticky_progress','career_menu_fixes'):feature='career_performance_retirement'
     if feature == 'career_performance_retirement':
-        validation_path=('artifacts/career_sticky_progress/validation.json' if install_feature=='career_sticky_progress'
+        validation_path=('artifacts/career_sticky_progress/validation.json' if install_feature in ('career_sticky_progress','career_menu_fixes')
                          else 'artifacts/career_performance_retirement/validation.json')
         evidence=json.loads((ROOT/validation_path).read_text(encoding='utf8'))
         assert evidence.get('passed') and evidence.get('snapshot_unchanged')
@@ -36,7 +36,7 @@ def main(feature='career_job_offer',career_tests=36):
         assert refreshed['passed'] and refreshed['original_saves_unchanged']
         assert refreshed['unchanged_file_reads_across_60_polls']==0 and refreshed['new_file_reads']==1
         assert 'PASS: five-second notices' in (ROOT/'artifacts/career_notice_refresh/native_feedback_tests.log').read_text()
-    if install_feature=='career_sticky_progress':
+    if install_feature in ('career_sticky_progress','career_menu_fixes'):
         assert 'persistent progress survives timers' in (ROOT/'artifacts/career_sticky_progress/native_feedback_tests.log').read_text()
         assert evidence['passed'] and all(row['native_bytes_equal'] for row in evidence['checks'])
     exe=ROOT/'dist_career/Server16Python.exe'
@@ -50,11 +50,21 @@ def main(feature='career_job_offer',career_tests=36):
         service=pyz.extract('server16_py.career_service')
         service_class=next(c for c in service.co_consts if getattr(c,'co_name',None)=='CareerService')
         assert '_bind_inspection' in service_class.co_names
-    if install_feature=='career_sticky_progress':
+    if install_feature in ('career_sticky_progress','career_menu_fixes'):
         feedback=pyz.extract('server16_py.career_feedback')
         native_notice=next(c for c in feedback.co_consts if getattr(c,'co_name',None)=='native_notice')
         assert 0x16402 in native_notice.co_consts and 0x16403 in native_notice.co_consts
         assert 5000 in feedback.co_consts
+    if install_feature=='career_menu_fixes':
+        assert 'server16_py.career_transfer_catalog' in pyz.toc
+        assert json.loads((ROOT/'artifacts/career_club_filter/validation.json').read_text(encoding='utf8'))['passed']
+        assert 'Ran 84 tests' in (ROOT/'artifacts/career_club_filter/career_tests.log').read_text()
+        assert 'Ran 22 tests' in (ROOT/'artifacts/career_club_filter/selector_tests.log').read_text()
+        assert 'Career stadium titles and publication: PASS (0 failures)' in (ROOT/'artifacts/career_club_filter/native_stadium_titles_tests.log').read_text()
+        assert 'Mouse movement/buttons/wheel and buffered events captured' in (ROOT/'artifacts/career_club_filter/native_input_tests.log').read_text()
+        assert 'Exclusive capture: prematch, match and career' in (ROOT/'artifacts/career_club_filter/overlay_build.log').read_text()
+        bridge=next(name for name in archive.toc if name.replace('\\','/')=='bin/cgfs16_overlay.dll')
+        assert archive.extract(bridge)==(ROOT/'bin/cgfs16_overlay.dll').read_bytes()
     for module in ('server16_py.career_feedback','server16_py.career_context','server16_py.career_service'):
         assert module in pyz.toc,module
     if feature in ('career_loading_feedback','career_live_jobs','career_direct_proposal','career_performance_retirement'):
@@ -124,6 +134,8 @@ def main(feature='career_job_offer',career_tests=36):
     for base in (GAME,DEV):
         install(exe,base/'Server16Python.exe',base)
         install(dll,base/'dinput8.dll',base)
+        if install_feature=='career_menu_fixes':
+            install(ROOT/'bin/cgfs16_overlay.dll',base/'bin/cgfs16_overlay.dll',base)
         if feature in ('career_live_jobs','career_direct_proposal','career_performance_retirement'):
             install(ROOT/'bin/career_jobs_runtime.dll',base/'ModCarrerMode/bin/career_jobs_runtime.dll',base)
         if feature=='career_performance_retirement':
@@ -134,11 +146,14 @@ def main(feature='career_job_offer',career_tests=36):
         'tests/providers/test_active_career_save.c','tests/providers/test_career_job_offer.c',
         'tests/providers/test_career_job_delivery.c','scripts/tests/test_career_job_offer.cmd',
         'src/host/career_ui_jobs.inc','tests/providers/test_career_ui_jobs.c','scripts/tests/test_career_ui_jobs.cmd')
-    if install_feature in ('career_light_notices','career_notice_refresh','career_sticky_progress'):
+    if install_feature in ('career_light_notices','career_notice_refresh','career_sticky_progress','career_menu_fixes'):
         relative_files+=('src/features/retirement/retirement_engine.c',
                          'src/features/retirement/retirement_feedback_paint.inc')
-    if install_feature in ('career_notice_refresh','career_sticky_progress'):
+    if install_feature in ('career_notice_refresh','career_sticky_progress','career_menu_fixes'):
         relative_files+=('tests/providers/test_career_feedback.c','scripts/tests/test_career_feedback.cmd')
+    if install_feature=='career_menu_fixes':
+        relative_files+=('src/host/native_cards.inc','tests/providers/test_career_stadium_titles.c',
+                         'scripts/tests/test_career_stadium_titles.cmd')
     for base,sub in ((GAME,'ModCarrerMode/source/career_native'),(ROOT,'native_mods/career_native')):
         for relative in relative_files:install(NATIVE/relative,base/sub/relative,base)
     if feature in ('career_live_jobs','career_direct_proposal','career_performance_retirement'):
@@ -152,9 +167,17 @@ def main(feature='career_job_offer',career_tests=36):
         install(ROOT/'tools/validate_career_performance_retirement.py',DEV/'ModCarrerMode/source/validate_career_performance_retirement.py',DEV)
         if install_feature=='career_notice_refresh':
             install(ROOT/'tools/validate_career_notice_refresh.py',DEV/'ModCarrerMode/source/validate_career_notice_refresh.py',DEV)
-        if install_feature=='career_sticky_progress':
+        if install_feature in ('career_sticky_progress','career_menu_fixes'):
             install(ROOT/'server16_py/stadium_selector.py',DEV/'ModCarrerMode/source/server16_py/stadium_selector.py',DEV)
             install(ROOT/'tools/validate_career_sticky_progress.py',DEV/'ModCarrerMode/source/validate_career_sticky_progress.py',DEV)
+        if install_feature=='career_menu_fixes':
+            install(ROOT/'server16_py/career_transfer_catalog.py',DEV/'ModCarrerMode/source/server16_py/career_transfer_catalog.py',DEV)
+            for source in (ROOT/'server16_py/d3d_overlay').iterdir():
+                if source.is_file():install(source,DEV/'ModCarrerMode/source/server16_py/d3d_overlay'/source.name,DEV)
+            for relative in ('build_career_overlay.cmd','test_career_input.cmd'):
+                install(ROOT/'scripts'/relative,DEV/'ModCarrerMode/source/scripts'/relative,DEV)
+            for relative in ('test_career_transfer_catalog.py','native_input_gate_test.cpp','native_selector_bridge_test.cpp'):
+                install(ROOT/'tests'/relative,DEV/'ModCarrerMode/source/tests'/relative,DEV)
     report={'installed_utc':stamp,'files':entries,'worker_current':True,'native_offer_protocol':1,
         'career_python_tests':career_tests,'selector_python_tests':22,'native_identity_test':True,
         'native_delivery_test':True,'original_save_modified_by_installer':False,
@@ -200,13 +223,21 @@ def main(feature='career_job_offer',career_tests=36):
             proposal_notice_requires_current_request_and_native_contract_ack=True,
             live_club_refresh_without_file_reload_loop=True,unsaved_club_budget_hidden=True,
             new_save_restores_current_club_budget=True,live_refresh_in_game_observed=False)
-    if install_feature=='career_sticky_progress':
+    if install_feature in ('career_sticky_progress','career_menu_fixes'):
         report.update(light_career_notices=True,temporary_notice_duration_ms=5000,
             finance_retirement_progress_persistent=True,progress_replaced_only_by_terminal_result=True,
             completed_notice_after_verified_publication=True,progress_survives_fifa_closure=True,
             optimized_field_layout_cache=True,full_save_verification_preserved=True,
             native_reference_bytes_preserved=True,live_refresh_in_game_observed=False,
             validation='artifacts/career_sticky_progress/validation.json')
+    if install_feature=='career_menu_fixes':
+        report.update(access_divisions_national_teams_free_agents_hidden=True,
+            series_a_b_c_d_preserved=True,live_promoted_clubs_retained=True,
+            exclusive_ansi_unicode_directinput=True,root_render_window_capture=True,
+            stadium_titles_utf8=True,stadium_location_metadata_removed=True,
+            club_stadium_two_line_layout=True,live_input_in_fifa_verified=False,
+            native_stadium_tests='artifacts/career_club_filter/native_stadium_titles_tests.log',
+            filter_validation='artifacts/career_club_filter/validation.json')
     (ROOT/f'artifacts/{install_feature}_install_report.json').write_text(json.dumps(report,indent=2),encoding='utf8')
     print(json.dumps({'installed_utc':stamp,'exe_sha256':digest(exe),'native_sha256':digest(dll),
         'verified_targets':len(entries),'requires_manual_restart':True},indent=2))
@@ -214,6 +245,6 @@ def main(feature='career_job_offer',career_tests=36):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
-    parser.add_argument('--feature',choices=('career_job_offer','career_loading_feedback','career_live_jobs','career_direct_proposal','career_performance_retirement','career_light_notices','career_notice_refresh','career_sticky_progress'),default='career_job_offer')
+    parser.add_argument('--feature',choices=('career_job_offer','career_loading_feedback','career_live_jobs','career_direct_proposal','career_performance_retirement','career_light_notices','career_notice_refresh','career_sticky_progress','career_menu_fixes'),default='career_job_offer')
     parser.add_argument('--career-tests',type=int,default=36)
     args=parser.parse_args();main(args.feature,args.career_tests)

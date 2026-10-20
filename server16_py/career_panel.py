@@ -9,6 +9,7 @@ from .input_hints import navigation_hint, footer_y
 from .overlay_canvas import OverlayDraw, draw_focus_ring
 from .career_artwork import artwork
 from .career_service import retirement_age
+from .career_transfer_catalog import transfer_catalog
 
 
 def money(value):
@@ -32,6 +33,7 @@ class CareerPanel:
         self._revision = -1
         self._loading_signature = None
         self._next_loading_frame = 0
+        self._transfer_source = self._transfer_reference = self._transfer_data = None
         if service.catalog is None and not service.pending:
             service.load()
 
@@ -69,7 +71,12 @@ class CareerPanel:
     def data(self):
         inspection = self.service.inspection
         data = inspection.get('catalog') if inspection else self.service.catalog
-        return data or {'nations':{}, 'leagues':[], 'teams':[], 'links':[]}
+        if not data:return {'nations':{}, 'leagues':[], 'teams':[], 'links':[]}
+        reference=self.service.catalog
+        if data is not self._transfer_source or reference is not self._transfer_reference:
+            self._transfer_data=transfer_catalog(data,reference)
+            self._transfer_source,self._transfer_reference=data,reference
+        return self._transfer_data
 
     def countries(self):
         data = self.data()

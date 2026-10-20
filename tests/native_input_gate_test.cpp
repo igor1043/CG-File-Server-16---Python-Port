@@ -9,6 +9,17 @@ extern "C" BOOL selector_shortcut_enabled(void) { return shortcuts; }
 extern "C" BOOL selector_audio_mode(void) { return audio_mode; }
 static XINPUT_STATE fake_pad;
 static BYTE fake_keys[256];
+static DIMOUSESTATE2 fake_mouse;
+static DWORD observed_buffer_flags;
+static HRESULT WINAPI read_mouse(void *,DWORD size,void *state) {
+    if(size!=sizeof(fake_mouse)) return DIERR_INVALIDPARAM;
+    memcpy(state,&fake_mouse,size); return DI_OK;
+}
+static HRESULT WINAPI read_buffer(void *,DWORD,DIDEVICEOBJECTDATA *events,DWORD *count,DWORD flags) {
+    observed_buffer_flags=flags;
+    if(events && *count) { events[0]={};events[0].dwOfs=12;events[0].dwData=0x80;*count=1; }
+    return DI_OK;
+}
 static DWORD WINAPI read_pad(DWORD index,XINPUT_STATE *state) {
     if (index>=4 || !state) return ERROR_DEVICE_NOT_CONNECTED;
     *state=fake_pad; return ERROR_SUCCESS;
@@ -90,6 +101,21 @@ int main(int argc,char **) {
     shortcuts=TRUE; fake_keys[DIK_M]=fake_keys[DIK_F12]=0x80;
     gated_device_state(&device,256,keys);
     assert(keys[DIK_F12]==0 && keys[DIK_M]==0x80 && keys[DIK_A]==0x80);
+    void *mouse_table[32]={};void **mouse_device=mouse_table;
+    g_devices.push_back({mouse_table,read_mouse,read_buffer,nullptr});
+    fake_mouse.lX=150;fake_mouse.lY=-90;fake_mouse.lZ=120;fake_mouse.rgbButtons[0]=0x80;
+    DIMOUSESTATE2 mouse={};capturing=TRUE;
+    assert(SUCCEEDED(gated_device_state(&mouse_device,sizeof(mouse),&mouse)));
+    assert(!mouse.lX && !mouse.lY && !mouse.lZ && !mouse.rgbButtons[0]);
+    DIDEVICEOBJECTDATA event={};DWORD event_count=1;
+    assert(SUCCEEDED(gated_device_data(&mouse_device,sizeof(event),&event,&event_count,DIGDD_PEEK)));
+    assert(event_count==0 && !(observed_buffer_flags&DIGDD_PEEK));
+    capturing=FALSE;gated_device_state(&mouse_device,sizeof(mouse),&mouse);
+    assert(!mouse.rgbButtons[0]); // Closing cannot deliver the held click.
+    fake_mouse.rgbButtons[0]=0;gated_device_state(&mouse_device,sizeof(mouse),&mouse);
+    fake_mouse.rgbButtons[0]=0x80;gated_device_state(&mouse_device,sizeof(mouse),&mouse);
+    assert(mouse.rgbButtons[0]==0x80 && mouse.lX==150);
+    puts("Mouse movement/buttons/wheel and buffered events captured; held close-click released safely");
     puts("XInput and DirectInput synthetic gate tests passed");
     return 0;
 }

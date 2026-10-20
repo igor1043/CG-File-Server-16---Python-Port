@@ -6,7 +6,7 @@ from .overlay_canvas import OverlayDraw, draw_focus_ring
 from .input_hints import navigation_hint, footer_y, panel_function_key
 from .match_audio_panel import MatchAudioPanel
 from .cloth_motion_switch import ClothMotionSwitch
-from .first_person_runtime import first_person_runtime, fov_limits
+from .first_person_runtime import first_person_runtime, fov_limits, HEAD_SMOOTHING
 
 
 class MatchHubPanel:
@@ -49,6 +49,7 @@ class MatchHubPanel:
                 ('Modo', 'Terceira pessoa · carreira' if runtime.mode else 'Primeira pessoa'),
                 ('Campo de visão', f'{runtime.fov}° · esquerda / direita ajustam 5°')]
         if runtime.mode:items.append(('Distância', ('Perto','Intermediária','Afastada')[runtime.distance]))
+        else:items.append(('Suavização da cabeça', HEAD_SMOOTHING[runtime.profile]))
         return items + [('Voltar', 'Ajustes da partida')]
 
     def targets(self):
@@ -64,7 +65,7 @@ class MatchHubPanel:
         self._next_tick = now + .25
         if self.page == 'camera':
             runtime = self.camera()
-            status = (runtime.status(), runtime.enabled, runtime.fov, runtime.mode, runtime.distance)
+            status = (runtime.status(), runtime.enabled, runtime.fov, runtime.mode, runtime.distance, runtime.profile)
         elif self.page == 'graphics':
             live = self.cloth.live_enabled(pid=self.selector.app._resolve_fifa_pid())
             if self.cloth_pending:
@@ -111,6 +112,7 @@ class MatchHubPanel:
                         low, high = fov_limits(runtime.mode)
                         runtime.configure(fov=max(low,min(high,runtime.fov+direction*5)))
                     elif index == 3 and runtime.mode:runtime.configure(distance=(runtime.distance+direction)%3)
+                    elif index == 3:runtime.configure(head_smoothing=(runtime.profile+direction)%len(HEAD_SMOOTHING))
                     self.message=''
             except (OSError, RuntimeError, ValueError) as exc:
                 self.message = str(exc)
@@ -162,7 +164,7 @@ class MatchHubPanel:
         message=self.message
         if self.page == 'camera' and not message:message=self.camera().status()
         if self.page=='camera':
-            draw.text((24,400),'Suavização forte · visão de campo e bola',font=self.selector.font(13),fill=muted)
+            draw.text((24,400),'Visão de campo e bola · ajustes salvos automaticamente',font=self.selector.font(13),fill=muted)
         if message:
             # Fit status on one line without clipping the controller hints.
             while len(message)>1 and draw.textlength(message,font=self.selector.font(12))>550:message=message[:-2]+'…'

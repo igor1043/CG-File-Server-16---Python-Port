@@ -18,6 +18,26 @@ int main(){
     assert(!fp::initializedBones(1,[](int){return 256;},headBone,rootBone));
     assert(headBone==12&&rootBone==0);
     std::puts("PASS: saved activation never calls bone resolver before native initialization");
+    assert(fp::settings(0).heading==.13f&&fp::settings(0).rollGain==.10f);
+    float priorShake=100.f;
+    for(int profile=0;profile<4;++profile){
+        fp::Stabilizer smoothing;
+        fp::Pose p{};p.eye={0,175,0};fp::axes(p);
+        smoothing.update(p,{0,0,0},0,profile);
+        p.eye.x=100;p.heading=.3f;p.pitch=.2f;p.roll=.2f;
+        const auto filtered=smoothing.update(p,{100,0,0},1.f/60,profile);
+        assert(filtered.eye.x==100.f); // Whole-body travel never lags.
+        assert(filtered.heading>0&&filtered.heading<priorShake);
+        priorShake=filtered.heading;
+        p.eye.y=190;
+        const auto acquired=smoothing.update(p,{100,0,0},1.f/60,profile,true);
+        assert(acquired.eye.y==190); // Every profile attaches immediately at kickoff.
+        assert(acquired.heading<.3f); // Immediate anchor retains angular smoothing.
+        for(int frame=0;frame<600;++frame)smoothing.update(p,{100,0,0},1.f/60,profile);
+        const auto settled=smoothing.update(p,{100,0,0},1.f/60,profile);
+        assert(std::fabs(settled.heading-.3f)<.001f);
+    }
+    std::puts("PASS: four progressively stronger head filters, unchanged medium baseline, instant body translation and restart anchor");
     fp::Pose head{};head.eye={14,175,0};fp::axes(head);
     const auto near=fp::gameFraming(head,{0,0,0},{90,10,0});
     const auto far=fp::gameFraming(head,{0,0,0},{3000,10,0});
@@ -28,7 +48,7 @@ int main(){
     const auto invalid=fp::gameFraming(head,{0,0,0},{std::numeric_limits<float>::quiet_NaN(),0,0});assert(std::isfinite(invalid.pitch));
     fp::Stabilizer filter;filter.update(head,{0,0,0},0);
     fp::Pose out{};
-    for(int i=0;i<120;++i)out=filter.update(near,{0,0,0},1.f/120.f);
+    for(int i=0;i<240;++i)out=filter.update(near,{0,0,0},1.f/120.f);
     assert(std::fabs(out.pitch-near.pitch)<.002f);
     filter.reset();head.eye.x=5014;head.heading=2;out=filter.update(head,{5000,0,0},1.f/60.f);
     assert(out.eye.x==5014&&out.heading==2);

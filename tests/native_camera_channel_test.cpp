@@ -30,6 +30,8 @@ int main(){
     s->mode=0;s->fov=150;s->command=15;wait(15);assert(s->error==0&&s->enabled==0);
     s->mode=1;s->command=16;wait(16);assert(s->error==2&&s->enabled==0);
     s->mode=0;s->fov=151;s->command=17;wait(17);assert(s->error==2&&s->enabled==0);
+    s->fov=150;s->profile=3;s->command=18;wait(18);assert(s->error==0);
+    s->profile=4;s->command=19;wait(19);assert(s->error==2);
     s->owner=0;Sleep(80);assert(s->enabled==0);
     std::puts("PASS: real DLL channel, ack, FOV/tilt/mode bounds, unsupported executable rejection, disable and owner loss");
     // Exit ends the worker; do not unload while its thread is running.

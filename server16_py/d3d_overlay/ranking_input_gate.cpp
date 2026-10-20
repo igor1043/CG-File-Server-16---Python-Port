@@ -318,6 +318,15 @@ static BOOL CALLBACK bootstrap_device(const DIDEVICEINSTANCEW *instance, void *c
     }
     return DIENUM_CONTINUE;
 }
+static BOOL CALLBACK bootstrap_device_ansi(const DIDEVICEINSTANCEA *instance, void *context)
+{
+    IDirectInputDevice8A *device = NULL;
+    if (SUCCEEDED(((IDirectInput8A *)context)->CreateDevice(instance->guidInstance,&device,NULL))) {
+        attach_device(device);
+        device->Release();
+    }
+    return DIENUM_CONTINUE;
+}
 extern "C" BOOL ranking_input_bootstrap(void)
 {
     IDirectInput8W *input = NULL;
@@ -330,5 +339,17 @@ extern "C" BOOL ranking_input_bootstrap(void)
     if (SUCCEEDED(input->CreateDevice(GUID_SysMouse,&device,NULL))) { attach_device(device); device->Release(); }
     input->EnumDevices(DI8DEVCLASS_GAMECTRL,bootstrap_device,input,DIEDFL_ATTACHEDONLY);
     input->Release();
+    // A and W have separate device vtables. FIFA can create the ANSI devices
+    // before injection; hooking only the Unicode table leaves them unfiltered.
+    IDirectInput8A *ansi = NULL;
+    if (FAILED(DirectInput8Create(GetModuleHandleW(NULL),DIRECTINPUT_VERSION,
+        IID_IDirectInput8A,(void **)&ansi,NULL))) return FALSE;
+    ranking_input_attach_directinput(ansi,&IID_IDirectInput8A);
+    IDirectInputDevice8A *ansi_device = NULL;
+    if (SUCCEEDED(ansi->CreateDevice(GUID_SysKeyboard,&ansi_device,NULL))) { attach_device(ansi_device); ansi_device->Release(); }
+    if (SUCCEEDED(ansi->CreateDevice(GUID_SysMouse,&ansi_device,NULL))) { attach_device(ansi_device); ansi_device->Release(); }
+    ansi->EnumDevices(DI8DEVCLASS_GAMECTRL,bootstrap_device_ansi,ansi,DIEDFL_ATTACHEDONLY);
+    ansi->Release();
+    if (g_logger) g_logger("Exclusive DirectInput capture ready for ANSI and Unicode devices");
     return TRUE;
 }

@@ -5,19 +5,21 @@ from .match_presentation import MatchPresentation, PresentationOptions
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
 from .panel_navigation import move_focus
 from .cloth_motion_switch import ClothMotionSwitch, _atomic
+from .smoke_settings_panel import SmokeSettingsPanel
 
 
 class MatchSettingsPanel:
-    WIDTH, HEIGHT = 600, 480
+    WIDTH, HEIGHT = 600, 545
     ROWS = ((24, 85, 576, 123), (24, 130, 576, 168),
-            (48, 175, 576, 213), (48, 220, 576, 258), (24, 265, 576, 303), (24, 310, 576, 348))
-    BACK, APPLY = (24, 368, 292, 410), (308, 368, 576, 410)
+            (48, 175, 576, 213), (48, 220, 576, 258), (24, 265, 576, 303), (24, 310, 576, 348), (24,355,576,397))
+    BACK, APPLY = (24, 427, 292, 469), (308, 427, 576, 469)
 
     def __init__(self, selector):
         self.selector = selector
         self.focus = 0
         self.message = ''
         self.load_error = False
+        self.child = None
         self.store = MatchPresentation(getattr(selector.app, 'exedir', selector.app.base_dir))
         self.cloth = ClothMotionSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
         self.cloth_enabled = self.cloth_original = self.cloth.enabled()
@@ -31,6 +33,9 @@ class MatchSettingsPanel:
 
     def tick(self):
         pass
+
+    def close_smoke(self):
+        self.child=None;self.HEIGHT=545;self.focus=6;self.selector.render()
 
     def enabled(self, focus):
         if focus == 5:
@@ -65,6 +70,8 @@ class MatchSettingsPanel:
                 return
             self.selector.app.log(f'Match presentation applied: {self.options}')
             self.selector.show_menu()
+        elif focus==6:
+            self.child=SmokeSettingsPanel(self);self.HEIGHT=self.child.HEIGHT;self.selector.render()
         elif self.enabled(focus):
             if focus == 5:
                 self.cloth_enabled = not self.cloth_enabled
@@ -74,6 +81,7 @@ class MatchSettingsPanel:
             self.selector.render()
 
     def handle(self, kind, value):
+        if self.child:self.child.handle(kind,value);return
         if kind == 11:
             self.selector.close()
             return
@@ -103,19 +111,23 @@ class MatchSettingsPanel:
         self.selector.render()
 
     def render(self):
+        if self.child:return self.child.render()
         image = Image.new('RGBA', (self.WIDTH*2, self.HEIGHT*2))
         draw = OverlayDraw(image)
         ink, muted, blue = '#344651', '#8797ab', '#0968f8'
         draw.rounded_rectangle((0, 0, self.WIDTH-1, self.HEIGHT-1), 18, fill='white', outline='#e0e6ee')
         draw.text((24, 22), 'Configurações da partida', font=self.selector.font(23, True), fill=ink)
         draw.text((24, 58), 'Apresentação, efeitos e física das roupas.', font=self.selector.font(15), fill=muted)
-        labels = ('Habilitar mascotes', 'Efeitos pirotécnicos', 'Na abertura da partida', 'Após o gol', 'Objetos de abertura da competição', 'Física de roupas · camisa e calção')
+        labels = ('Habilitar mascotes', 'Fumaça e pirotecnia', 'Na entrada da partida', 'Após o gol do mandante', 'Objetos de abertura da competição', 'Física de roupas · camisa e calção', 'Fumaça · duração e emissores')
         for i, (label, rect) in enumerate(zip(labels, self.ROWS)):
-            active = self.cloth_enabled if i == 5 else getattr(self.options, self.store.KEYS[i])
+            active = self.cloth_enabled if i == 5 else getattr(self.options, self.store.KEYS[i]) if i<5 else False
             enabled = self.enabled(i)
             if self.focus == i:
                 draw_focus_ring(draw, rect, 8)
             draw.text((rect[0]+12, rect[1]+8), label, font=self.selector.font(16, i < 2), fill=ink if enabled else muted)
+            if i==6:
+                draw.text((500,rect[1]+11),'Abrir ›',font=self.selector.font(13,True),fill=blue)
+                continue
             cy = (rect[1]+rect[3])/2
             draw.rounded_rectangle((479, cy-12, 525, cy+12), 12, fill=blue if active and enabled else '#d6dee9')
             cx = 513 if active else 491

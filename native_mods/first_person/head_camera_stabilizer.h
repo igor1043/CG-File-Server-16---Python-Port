@@ -12,9 +12,11 @@ inline void axes(Pose& p){
 }
 struct Settings{float heading,pitch,roll,horizontal,vertical,rollGain;};
 inline Settings settings(int profile){
-    if(profile==0)return {0.05f,0.085f,0.14f,0.06f,0.10f,0.50f};
-    if(profile==2)return {0.13f,0.22f,0.32f,0.13f,0.22f,0.10f};
-    return {0.09f,0.15f,0.22f,0.10f,0.16f,0.25f};
+    // The former fixed strong setting is the user's new "Média" baseline.
+    if(profile==1)return {0.19f,0.30f,0.44f,0.18f,0.30f,0.065f};
+    if(profile==2)return {0.27f,0.42f,0.60f,0.25f,0.40f,0.035f};
+    if(profile==3)return {0.38f,0.58f,0.80f,0.34f,0.54f,0.015f};
+    return {0.13f,0.22f,0.32f,0.13f,0.22f,0.10f};
 }
 class Stabilizer {
     bool ready=false;
@@ -22,7 +24,7 @@ class Stabilizer {
     Vec localEye{},previousAnchor{};
 public:
     void reset(){ready=false;}
-    Pose update(Pose target,Vec anchor,float dt,int profile=1,bool immediateAnchor=false){
+    Pose update(Pose target,Vec anchor,float dt,int profile=0,bool immediateAnchor=false){
         const auto config=settings(profile);
         // Dampen lateral head tilt; keep deliberate heading changes intact.
         target.roll*=config.rollGain;

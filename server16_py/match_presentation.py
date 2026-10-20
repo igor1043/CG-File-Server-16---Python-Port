@@ -15,11 +15,17 @@ class PresentationOptions:
     entrance: bool = False
     goal: bool = False
     entrance_props: bool = True
+    smoke_entrance_seconds: int = 60
+    smoke_goal_seconds: int = 25
+    smoke_entrance_emitters: int = (1 << 20)-1
+    smoke_goal_emitters: int = (1 << 12)-1
 
 
 class MatchPresentation:
     """Only the dedicated mod configuration is edited; no FIFA assets or loader."""
     KEYS = ('mascots', 'pyrotechnics', 'entrance', 'goal', 'entrance_props')
+    NUMBERS = {'smoke_entrance_seconds': (15,120), 'smoke_goal_seconds': (15,120),
+               'smoke_entrance_emitters': (0,(1<<20)-1), 'smoke_goal_emitters': (0,(1<<12)-1)}
 
     def __init__(self, game_root):
         self.path = Path(game_root) / 'ModCarrerMode' / 'config' / 'match_presentation.ini'
@@ -33,15 +39,27 @@ class MatchPresentation:
     def load(self):
         parser = self._read()
         defaults = PresentationOptions()
-        return PresentationOptions(**{key: parser.getboolean('match', key, fallback=getattr(defaults, key))
-                                       for key in self.KEYS})
+        values={key:parser.getboolean('match',key,fallback=getattr(defaults,key)) for key in self.KEYS}
+        values.update({key:parser.getint('match',key,fallback=getattr(defaults,key)) for key in self.NUMBERS})
+        options=PresentationOptions(**values)
+        self.validate(options)
+        return options
+
+    @classmethod
+    def validate(cls,options):
+        for key,(low,high) in cls.NUMBERS.items():
+            value=getattr(options,key)
+            if type(value) is not int or not low<=value<=high:
+                raise ValueError('Valor inválido na configuração de fumaça: '+key)
 
     def save(self, options):
+        self.validate(options)
         parser = self._read()  # Malformed files must not be silently overwritten.
         if not parser.has_section('match'):
             parser.add_section('match')
         for key in self.KEYS:
             parser.set('match', key, '1' if getattr(options, key) else '0')
+        for key in self.NUMBERS:parser.set('match',key,str(getattr(options,key)))
         parser.set('match', 'schema', '1')
         stream = io.StringIO()
         parser.write(stream)

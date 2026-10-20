@@ -15,6 +15,7 @@ SelectorShared *g_selector = nullptr;
 LONG g_selector_draw_width=0,g_selector_draw_height=0;
 static HWND g_window;
 static WNDPROC g_original;
+static WNDPROC g_render_original;
 static bool g_keyboard[256] = {};
 static WORD g_buttons;
 static DWORD g_start_pending, g_repeat_at;
@@ -130,7 +131,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd,UINT message,WPARAM w,LPARAM l) {
         ((message>=WM_KEYFIRST && message<=WM_KEYLAST) ||
          (message>=WM_MOUSEFIRST && message<=WM_MOUSELAST) || message==WM_INPUT)) return 0;
     if (selector_shortcut_enabled() && (message==WM_KEYDOWN || message==WM_KEYUP) && w==VK_F12) return 0;
-    return CallWindowProcW(g_original,hwnd,message,w,l);
+    WNDPROC original=(hwnd==g_window && g_render_original) ? g_render_original : g_original;
+    return CallWindowProcW(original,hwnd,message,w,l);
 }
 static SHORT filter_key(int key, SHORT result) {
     if (mod_screen_captures_input()) { g_held_keys[key&255]=(result&0x8000)!=0; return 0; }
@@ -245,13 +247,24 @@ void selector_tick(HWND window,float width,float height) {
             if (g_log) { char message[120]; sprintf_s(message,"Window input hook failed: error=%lu",GetLastError()); g_log(message); }
             g_window=nullptr; return;
         }
+        // WM_INPUT and mouse messages can target the render child directly;
+        // they do not bubble through the root window's procedure.
+        if (input_window!=window) {
+            g_render_original=(WNDPROC)SetWindowLongPtrW(window,GWLP_WNDPROC,(LONG_PTR)window_proc);
+            if (!g_render_original) {
+                SetWindowLongPtrW(input_window,GWLP_WNDPROC,(LONG_PTR)g_original);
+                g_original=nullptr; g_window=nullptr;
+                if (g_log) g_log("Render child input hook failed; selector remains disabled");
+                return;
+            }
+        }
         patch_keyboard_imports(GetModuleHandleW(nullptr));
         patch_keyboard_imports(GetModuleHandleW(L"fifa16.bin"));
         ranking_input_install_cursor_import(GetModuleHandleW(nullptr));
         ranking_input_install_cursor_import(GetModuleHandleW(L"fifa16.bin"));
         mod_xinput_install(g_log);
         g_selector->ready |= 4;
-        if (g_log) g_log("Game window input hook installed (render window/root window supported)");
+        if (g_log) g_log("Exclusive window input capture installed on render and root windows");
     }
     bool foreground=game_foreground(window);
     bool shown=selector_visible();

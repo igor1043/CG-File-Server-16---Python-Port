@@ -41,6 +41,12 @@ int main() {
     assert(!earlyZero.sample(true,200,0,0,false,100));
     assert(!earlyZero.sample(true,0,0,0,false,200));
     assert(earlyZero.sample(true,0,0,0,false,700));
+    PyroLifecycle pausedOpening;
+    assert(!pausedOpening.sample(true,0,0,0,false,100));
+    assert(!pausedOpening.sample(false,0,0,0,true,200));
+    assert(!pausedOpening.sample(false,0,0,0,true,5000));
+    assert(!pausedOpening.sample(true,0,0,0,false,5100));
+    assert(!pausedOpening.sample(true,0,0,0,false,6000));
     // The old high-water score suppressed the same goal after Restart.
     PyroGoals retained;
     assert(!retained.update(100,0,0,0));

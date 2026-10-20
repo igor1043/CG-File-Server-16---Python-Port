@@ -12,7 +12,7 @@
 #include "camera_bootstrap.h"
 extern "C" {__declspec(dllexport) CameraPublicState CameraStatus{};}
 extern "C" {__declspec(dllexport) CameraTrackingPublicState CameraTrackingStatus{};}
-static volatile LONG profile=2;
+static volatile LONG profile=0;
 static volatile LONG framing=1;
 static volatile LONG fieldOfView=85,lookBias=0;
 static volatile LONG cameraMode=0;
@@ -166,7 +166,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI Enable(void*){if(stopping)return 0
 extern "C" __declspec(dllexport) DWORD WINAPI Disable(void*){InterlockedExchange(&enabled,0);return 1;}
 extern "C" __declspec(dllexport) DWORD WINAPI SetProfile(void* value){
     if(!value||stopping)return 0;const int selected=get<int>(reinterpret_cast<uintptr_t>(value));
-    if(selected<0||selected>2)return 0;InterlockedExchange(&profile,selected);return 1;
+    if(selected<0||selected>3)return 0;InterlockedExchange(&profile,selected);return 1;
 }
 extern "C" __declspec(dllexport) DWORD WINAPI Stop(void*){
     InterlockedExchange(&enabled,0);InterlockedExchange(&stopping,1);
@@ -190,7 +190,7 @@ static DWORD WINAPI controlLoop(void*){
             const int mode=channel->mode;
             const int distance=channel->distance;
             const int minLens=mode==1?60:75,maxLens=mode==1?90:150;
-            if((wanted!=0&&wanted!=1)||smoothing<0||smoothing>2||view<0||view>1||lens<minLens||lens>maxLens||bias<-10||bias>20||mode<0||mode>1||distance<0||distance>2)error=2;
+            if((wanted!=0&&wanted!=1)||smoothing<0||smoothing>3||view<0||view>1||lens<minLens||lens>maxLens||bias<-10||bias>20||mode<0||mode>1||distance<0||distance>2)error=2;
             else if(wanted){const DWORD result=Start(nullptr);if(!result)error=1;else if(result==2)error=3;}
             if(!error){InterlockedExchange(&profile,smoothing);InterlockedExchange(&framing,view);InterlockedExchange(&fieldOfView,lens);InterlockedExchange(&lookBias,bias);InterlockedExchange(&cameraMode,mode);InterlockedExchange(&cameraDistance,distance);InterlockedExchange(&enabled,wanted);}
             else InterlockedExchange(&enabled,0);

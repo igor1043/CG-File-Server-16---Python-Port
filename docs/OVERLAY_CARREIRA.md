@@ -81,6 +81,24 @@ essas ações ficam no painel do Server16. A opção normal de Configurações c
 
 ## Aposentadoria e carregamento
 
+Uso no jogo:
+
+1. Salve normalmente o progresso da carreira antes de abrir o painel.
+2. Na Central, aperte F12 ou Select + Start, entre em Aposentadoria, escolha a
+   regra e confirme. Não é necessário escolher um arquivo: é o save aberto.
+3. Quando aparecer a orientação para sair, feche o painel e saia da carreira
+   para o menu principal do FIFA, sem salvar novamente. Não precisa esperar
+   um prazo dentro da carreira nem avançar o calendário.
+4. Deixe o Server16 aberto e permaneça no menu principal. O aviso de aguarde
+   continua visível durante a preparação e aplicação. A rotina confirma a saída
+   por dois segundos antes de começar; o restante do tempo depende do save.
+5. Só reabra o mesmo slot depois da confirmação de aplicação com sucesso.
+   Essa confirmação dura cinco segundos. Se ocorrer erro, a mensagem informa
+   que o pedido não foi aplicado; não considere o pedido concluído.
+
+Salvar novamente entre a confirmação e a aplicação altera a versão do arquivo;
+o Server recusa substituir essa versão. Nesse caso, cancele e refaça o pedido.
+
 **Remover aposentadoria** limpa `isretiring` dos jogadores marcados, sem alterar
 suas idades. **Remover e rejuvenescer** também redefine a idade desses mesmos
 jogadores usando a data do calendário da carreira e preservando dia/mês do
@@ -149,6 +167,28 @@ Pedidos e recibos: `runtime/career_overlay/`. Backups com DATA e INDEX originais
 feche o FIFA e copie os dois arquivos para o slot registrado em `receipt.json`.
 
 ## Validação e build
+
+Na aba Central, as páginas de transferências mais caras e últimas transferências
+mostram até dez negócios cada, em duas colunas de cinco. Os componentes originais
+TransferInfo continuam mostrando os nomes, escudos, clubes de origem/destino e
+valores calculados pelo FIFA. A ponte amplia apenas o limite de publicação de
+três para dez, mantendo os filtros e a ordenação nativa. Quando houver menos
+negócios elegíveis, somente os registros existentes são publicados.
+
+O seletor de transferência exclui seleções, agentes livres e ligas identificadas
+como divisão de acesso. As Séries A, B, C e D continuam disponíveis. A divisão
+atual da carreira prevalece: um clube promovido da divisão de acesso permanece
+elegível quando já está na Série D do save.
+
+Enquanto o menu ou um de seus submenus estiver aberto, a ponte captura teclado,
+mouse e controle nas interfaces DirectInput ANSI/Unicode e XInput, além das
+mensagens da janela principal e da janela de renderização. Ao fechar, os botões
+pressionados precisam ser soltos antes de voltarem a agir no FIFA. Avisos de
+progresso e de sucesso continuam sem capturar comandos.
+
+Os cards de próxima partida e dados do clube usam o mesmo título de estádio,
+com acentos UTF-8 e sem o sufixo de cidade/estado do scoreboard FSW. Apelidos do
+estádio são preservados. O nome nos dados do clube tem espaço para duas linhas.
 
 ```powershell
 python -m unittest discover -s tests -p test_career_overlay.py

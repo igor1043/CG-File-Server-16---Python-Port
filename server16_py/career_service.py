@@ -22,6 +22,7 @@ from .career_active_save import read_active_save, version, ActiveCareerUnavailab
 from .career_feedback import CareerFeedback
 from .career_jobs_runtime import CareerJobsRuntime
 from .career_read import read as read_career
+from .career_transfer_catalog import transfer_catalog
 
 
 def career_page(page):
@@ -406,11 +407,11 @@ class CareerService:
             game = Path(getattr(self.app, 'exedir', self.app.base_dir))
             request['target_age'] = retirement_age(game)
         elif action == 'transfer':
+            data=transfer_catalog(self.inspection['catalog'],self.catalog)
+            if not any(league==values['league_id'] and team==values['team_id'] for league,team in data['links']):
+                raise ValueError('Escolha um clube de uma divisão disponível. Seleções, agentes livres e divisões de acesso não são destinos.')
             if request['context']['player_id'] is None:
                 profile=self.context_reader.profile(fresh=True) or {}
-                data=self.inspection['catalog']
-                if not any(league==values['league_id'] and team==values['team_id'] for league,team in data['links']):
-                    raise ValueError('O clube não pertence à divisão selecionada nesta carreira.')
                 request['team_name']=next((r['name'] for r in data['teams'] if r['id']==values['team_id']),str(values['team_id']))
                 self._start_live_request(request,profile)
                 return

@@ -13,6 +13,23 @@ import test_match_audio_panel as audio_fixtures
 
 
 class CameraRuntimeTests(unittest.TestCase):
+    def test_head_smoothing_persists_all_levels_and_survives_other_edits(self):
+        with tempfile.TemporaryDirectory() as d:
+            app=SimpleNamespace(base_dir=Path(d),memory=SimpleNamespace(is_open=lambda:False),log=Mock())
+            with patch('server16_py.first_person_runtime.MAPPING_NAME',f'Local\\camera_smoothing_test_{os.getpid()}'):
+                for profile in range(4):
+                    runtime=FirstPersonRuntime(app)
+                    try:
+                        runtime.configure(head_smoothing=profile,enabled=True,fov=150)
+                        runtime.configure(mode=1,distance=2)
+                        runtime.configure(mode=0)
+                        self.assertEqual((runtime.profile,runtime.shared.profile),(profile,profile))
+                    finally:runtime.close()
+                    runtime=FirstPersonRuntime(app)
+                    try:
+                        self.assertEqual((runtime.profile,runtime.shared.profile,runtime.shared.requested,runtime.fov),(profile,profile,1,150))
+                    finally:runtime.close()
+
     def test_preferences_validate_corrupt_and_wrong_types(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'camera.json'
@@ -38,7 +55,7 @@ class CameraRuntimeTests(unittest.TestCase):
             try:
                 self.assertEqual(runtime.status(),'Câmera original ativa.')
                 runtime.configure(enabled=True,fov=85,mode=1)
-                self.assertEqual((runtime.shared.profile,runtime.shared.framing,runtime.shared.look_bias),(2,1,0))
+                self.assertEqual((runtime.shared.profile,runtime.shared.framing,runtime.shared.look_bias),(0,1,0))
                 self.assertEqual((runtime.shared.version,runtime.shared.fov,runtime.shared.mode),(4,85,1))
                 runtime.shared.ready=1
                 runtime.tick()  # Initial pid must not discard first activation.
@@ -48,9 +65,9 @@ class CameraRuntimeTests(unittest.TestCase):
                 runtime.shared.enabled=runtime.shared.valid=1
                 self.assertEqual(runtime.status(),'Terceira pessoa ativa.')
                 saved=json.loads(runtime.path.read_text())
-                self.assertEqual(saved,{'version':4,'enabled':True,'mode':1,'fov_first_person':85,'fov_career':85,'distance':0})
+                self.assertEqual(saved,{'version':4,'enabled':True,'mode':1,'fov_first_person':85,'fov_career':85,'distance':0,'head_smoothing':0})
                 command=runtime.shared.command
-                for kwargs in ({'fov':121},{'fov':True},{'enabled':1},{'mode':2},{'mode':False},{'distance':3},{'distance':True}):
+                for kwargs in ({'fov':121},{'fov':True},{'enabled':1},{'mode':2},{'mode':False},{'distance':3},{'distance':True},{'head_smoothing':4},{'head_smoothing':True}):
                     with self.assertRaises(ValueError):runtime.configure(**kwargs)
                     self.assertEqual(runtime.shared.command,command)
                 for mode in (0,1):
@@ -188,7 +205,7 @@ class HubTests(unittest.TestCase):
     def test_music_back_and_camera_settings_do_not_leak_to_game(self):
         with tempfile.TemporaryDirectory() as d:
             selector=audio_fixtures.MatchAudioTests().make_selector(Path(d))
-            runtime=SimpleNamespace(enabled=False,fov=105,mode=0,distance=0,status=lambda:'Câmera original ativa.',configure=Mock())
+            runtime=SimpleNamespace(enabled=False,fov=105,mode=0,distance=0,profile=0,status=lambda:'Câmera original ativa.',configure=Mock())
             try:
                 selector.open(audio=True)
                 hub=selector.audio_panel
@@ -206,7 +223,7 @@ class HubTests(unittest.TestCase):
                     hub.activate(2)
                     selector.handle(6,0)
                     runtime.configure.assert_called_with(enabled=True)
-                    self.assertEqual([i[0] for i in hub.items()],['Câmera do jogador','Modo','Campo de visão','Voltar'])
+                    self.assertEqual([i[0] for i in hub.items()],['Câmera do jogador','Modo','Campo de visão','Suavização da cabeça','Voltar'])
                     selector.handle(5,0)
                     selector.handle(6,0)
                     runtime.configure.assert_called_with(mode=1)
@@ -238,6 +255,11 @@ class HubTests(unittest.TestCase):
                     selector.handle(2,0)
                     runtime.configure.assert_called_with(fov=75)
                     hub.focus=3
+                    selector.handle(3,0)
+                    runtime.configure.assert_called_with(head_smoothing=1)
+                    selector.handle(2,0)
+                    runtime.configure.assert_called_with(head_smoothing=3)
+                    hub.focus=4
                     selector.handle(6,0)
                 self.assertEqual(hub.page,'home')
                 selector.handle(7,0)

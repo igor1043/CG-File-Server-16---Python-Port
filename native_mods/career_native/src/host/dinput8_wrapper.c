@@ -3869,6 +3869,8 @@ typedef struct CallPatchSpec
     void *replacement;
 } CallPatchSpec;
 
+#include "career_transfer_cards.h"
+
 
 static BOOL write_relative_call(
     unsigned char *module_base,
@@ -3936,6 +3938,10 @@ static BOOL write_relative_call(
 
 
 static const CallPatchSpec g_call_patches[] = {
+        {"career_top_transfers",0x059BE962,0x059170A0,(void *)career_transfer_cards_publish},
+        {"career_latest_transfers",0x059BE99B,0x059170A0,(void *)career_transfer_cards_publish},
+        {"career_top_transfers_refresh",0x059C0B48,0x059170A0,(void *)career_transfer_cards_publish},
+        {"career_latest_transfers_refresh",0x059C0B81,0x059170A0,(void *)career_transfer_cards_publish},
         {
             "career_startup_object_guard",
             0x05F18BCF,
@@ -4183,6 +4189,7 @@ static DWORD WINAPI patch_standings_provider(LPVOID unused)
     g_prepare_field = (PrepareFieldFn)(module_base + 0x05A2A4F0);
     g_set_int = (SetIntFn)(module_base + 0x05A51150);
     g_set_string = (SetStringFn)(module_base + 0x05A511E0);
+    g_transfer_cards_publish=(CareerTransferPublishFn)(module_base+0x059170A0);
     g_stats_vector = (StatsVectorFn)(module_base + 0x05AC2C60);
     g_stats_provider = (StatsProviderFn)(module_base + 0x059CE0E0);
     g_stats_mark_dirty = (StatsMarkDirtyFn)(module_base + 0x05B14990);

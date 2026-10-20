@@ -11,10 +11,11 @@ import time
 from pathlib import Path
 
 MAPPING_NAME = 'Local\\FIFA16_FirstPersonCamera_v4'
-DLL_NAME = 'server16_first_person_v7.dll'
+DLL_NAME = 'server16_first_person_v11.dll'
 DEFAULT_FOV = 85
 CAREER_FOV = 85
 PREFERENCES_VERSION = 4
+HEAD_SMOOTHING = ('Média', 'Alta', 'Extra alta', 'Agressiva')
 
 
 class CameraShared(ctypes.Structure):
@@ -57,7 +58,16 @@ def load_preferences(path):
     return enabled, fovs[mode], mode
 
 
-def save_preferences(path, enabled, fov, mode=0, *, other_fov=None, distance=0):
+def load_head_smoothing(path):
+    try:
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
+        value = data.get('head_smoothing', 0) if isinstance(data, dict) else 0
+    except (OSError, ValueError):
+        value = 0
+    return value if type(value) is int and 0 <= value < len(HEAD_SMOOTHING) else 0
+
+
+def save_preferences(path, enabled, fov, mode=0, *, other_fov=None, distance=0, head_smoothing=0):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.tmp')
@@ -67,7 +77,7 @@ def save_preferences(path, enabled, fov, mode=0, *, other_fov=None, distance=0):
     temporary.write_text(json.dumps({'version': PREFERENCES_VERSION,
                                      'enabled': enabled, 'mode': mode,
                                      'fov_first_person': fovs[0], 'fov_career': fovs[1],
-                                     'distance': distance}), encoding='utf-8')
+                                     'distance': distance, 'head_smoothing': head_smoothing}), encoding='utf-8')
     temporary.replace(path)
 
 
@@ -76,7 +86,8 @@ class FirstPersonRuntime:
         self.app = app
         self.path = Path(app.base_dir) / 'runtime' / 'first_person_camera.json'
         self.enabled, self.mode, self._fovs, self.distance = _load_settings(self.path)
-        self.profile, self.framing, self.look_bias = 2, 1, 0
+        self.profile = load_head_smoothing(self.path)
+        self.framing, self.look_bias = 1, 0
         self.mapping = mmap.mmap(-1, ctypes.sizeof(CameraShared), tagname=MAPPING_NAME)
         self.shared = CameraShared.from_buffer(self.mapping)
         if self.shared.owner and self.shared.owner != os.getpid():
@@ -138,7 +149,8 @@ class FirstPersonRuntime:
                 self.shared.requested = 0
                 try:
                     save_preferences(self.path, self.enabled, self.fov, self.mode,
-                                     other_fov=self._fovs[1-self.mode], distance=self.distance)
+                                     other_fov=self._fovs[1-self.mode], distance=self.distance,
+                                     head_smoothing=self.profile)
                 except OSError as exc:
                     self.error = 'Não foi possível salvar a opção da câmera.'
                     self.app.log('First-person preference save failed', exc)
@@ -183,13 +195,15 @@ class FirstPersonRuntime:
     def fov(self):
         return self._fovs[self.mode]
 
-    def configure(self, *, enabled=None, fov=None, mode=None, distance=None):
+    def configure(self, *, enabled=None, fov=None, mode=None, distance=None, head_smoothing=None):
         if enabled is not None and type(enabled) is not bool:
             raise ValueError('Ativação inválida')
         if mode is not None and (type(mode) is not int or mode not in (0, 1)):
             raise ValueError('Modo de câmera inválido')
         if distance is not None and (type(distance) is not int or not 0 <= distance <= 2):
             raise ValueError('Distância de câmera inválida')
+        if head_smoothing is not None and (type(head_smoothing) is not int or not 0 <= head_smoothing < len(HEAD_SMOOTHING)):
+            raise ValueError('Suavização da cabeça inválida')
         selected_mode = self.mode if mode is None else mode
         low, high = fov_limits(selected_mode)
         if fov is not None and (type(fov) is not int or not low <= fov <= high):
@@ -197,11 +211,14 @@ class FirstPersonRuntime:
         selected_enabled = self.enabled if enabled is None else enabled
         selected_fov = self._fovs[selected_mode] if fov is None else fov
         selected_distance = self.distance if distance is None else distance
+        selected_profile = self.profile if head_smoothing is None else head_smoothing
         save_preferences(self.path, selected_enabled, selected_fov, selected_mode,
-                         other_fov=self._fovs[1-selected_mode], distance=selected_distance)
+                         other_fov=self._fovs[1-selected_mode], distance=selected_distance,
+                         head_smoothing=selected_profile)
         self.enabled, self.mode = selected_enabled, selected_mode
         self._fovs[selected_mode] = selected_fov
         self.distance = selected_distance
+        self.profile = selected_profile
         self.shared.profile, self.shared.framing = self.profile, self.framing
         self.shared.fov, self.shared.look_bias = self.fov, self.look_bias
         self.shared.mode = self.mode

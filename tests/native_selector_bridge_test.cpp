@@ -2,6 +2,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+static HWND simulated_foreground;
+static HWND test_foreground_window() { return simulated_foreground; }
+#define GetForegroundWindow test_foreground_window
 static wchar_t test_mapping_name[100];
 #define CGFS16_SELECTOR_MAPPING_NAME test_mapping_name
 #include "../server16_py/d3d_overlay/stadium_selector_bridge.cpp"
@@ -85,6 +88,26 @@ int main() {
     }
     selector_tick(child,1280,720);
     assert(shared->ready==7);
+    assert((WNDPROC)GetWindowLongPtrW(root,GWLP_WNDPROC)==window_proc);
+    assert((WNDPROC)GetWindowLongPtrW(child,GWLP_WNDPROC)==window_proc);
+    simulated_foreground=root;
+    for (LONG mode : {1L,2L,3L}) {
+        shared->enabled=mode; shared->visible=1; g_release_until=0;
+        assert(mod_screen_captures_input());
+        for (UINT message : {WM_KEYDOWN,WM_LBUTTONDOWN,WM_MOUSEWHEEL,WM_INPUT}) {
+            assert(window_proc(root,message,0,0)==0);
+            assert(window_proc(child,message,0,0)==0);
+        }
+        shared->visible=0;
+        assert(!mod_screen_captures_input());
+        g_release_until=GetTickCount()+250;
+        assert(mod_screen_captures_input());
+        g_release_until=0;
+    }
+    shared->visible=1; simulated_foreground=other;
+    assert(!mod_screen_captures_input());
+    simulated_foreground=nullptr; shared->visible=0;
+    puts("Exclusive capture: prematch, match and career; root/child messages; close release; focus loss passed");
     bool direction_keys[256]={};
     assert(navigation_direction(direction_keys,0,-18000,28000,0)==4);
     assert(navigation_direction(direction_keys,0,18000,20000,4)==4);

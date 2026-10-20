@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-19",
+  "exe_sha256": "fd7d419df77fa6b94beef83ec2903b4fa128c875d5a9f3a1c2226de7b3f79604",
+  "python_modules_verified": 63,
+  "camera_runtime": "server16_first_person_v11.dll",
+  "camera_first_person_fov_range": [
+    75,
+    150
+  ],
+  "head_smoothing": [
+    "Média",
+    "Alta",
+    "Extra alta",
+    "Agressiva"
+  ],
+  "camera_transition_fix_validated": false,
+  "ram_head_hiding_included_in_runtime": false,
+  "validation": [
+    "Python: camera/preferences, smoke/presentation, prematch, cloth, selector, career and transfer cards",
+    "Native: camera math/channel, full mesh wrapper copy, exclusive input, transfer preflight, stadium titles, entrance props and pyrotechnics"
+  ],
+  "pending": [
+    "First-person camera lags on kickoff and after goals. RAM experiments are source-only; no fix claimed.",
+    "Visual validation of controlled-player head restoration/shadow before RAM v12 integration."
+  ]
+}
