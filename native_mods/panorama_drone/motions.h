@@ -13,12 +13,15 @@ inline bool unit(Vec& a){const float n=std::sqrt(dot(a,a));if(!std::isfinite(n)|
 inline float smooth(float t){t=std::clamp(t,0.f,1.f);return std::clamp(t*t*t*(10+t*(-15+6*t)),0.f,1.f);}
 inline Vec mix(Vec a,Vec b,float t){return a+(b-a)*t;}
 struct Pose {Vec eye,target;float fov=55;};
+enum class MotionKind {Curve,CircleOrbit,CircleTurn,ExteriorOrbit};
 struct Motion {
  const char* id;Vec a,b,c,ta,tb,tc;float fov;
  Vec d{},td{};float endFov=0,durationScale=1;bool cubic=false,exterior=false;
+ bool pitchEdge=false;MotionKind kind=MotionKind::Curve;
+ float minimumHeight=8000;
 };
-inline constexpr Motion cinema(const char* id,Vec a,Vec b,Vec c,Vec d,Vec ta,Vec tb,Vec tc,Vec td,float from,float to,float durationScale=1,bool exterior=false){
- return {id,a,b,c,ta,tb,tc,from,d,td,to,durationScale,true,exterior};
+inline constexpr Motion cinema(const char* id,Vec a,Vec b,Vec c,Vec d,Vec ta,Vec tb,Vec tc,Vec td,float from,float to,float durationScale=1,bool exterior=false,bool pitchEdge=false){
+ return {id,a,b,c,ta,tb,tc,from,d,td,to,durationScale,true,exterior,pitchEdge};
 }
 // Centimetres in rendered world space. Exterior arrivals cross the stand rim
 // high above the pitch, descending only after the camera is inside the bowl.
@@ -48,18 +51,49 @@ inline constexpr Motion motions[]={
  cinema("pitch_sweeping_arc",{-3500,1000,-1700},{-2500,1600,-2400},{900,1900,-2300},{2700,1500,-1400}, {-1500,100,300},{-600,100,600},{900,100,500},{2500,100,100},56,60,1.25f),
  cinema("centre_circle_portrait",{-650,1300,-850},{-300,1550,-1100},{650,1550,-900},{1050,1300,-200}, {0,50,0},{0,50,0},{0,50,0},{0,50,0},48,52,1.1f),
  cinema("crossbar_cinema",{4300,320,-800},{3900,420,-300},{3300,650,500},{2700,900,1000}, {5150,150,0},{4800,140,0},{4000,120,0},{3000,100,0},50,58,1.1f),
- cinema("grandstand_parallax",{-3300,1800,-2200},{-1200,2200,-2500},{1400,2300,-2500},{3300,1900,-2200}, {-800,650,3000},{-300,800,3200},{300,800,3200},{800,650,3000},58,60,1.25f)
+ cinema("grandstand_parallax",{-3300,1800,-2200},{-1200,2200,-2500},{1400,2300,-2500},{3300,1900,-2200}, {-800,650,3000},{-300,800,3200},{300,800,3200},{800,650,3000},58,60,1.25f),
+ // Standard 105 x 68m pitch: goal planes X=+/-5250, penalty marks +/-4150.
+ // Cameras stay in front of the goal plane; only their targets reach the net.
+ cinema("goal_mouth_sweep_home",{4980,210,-620},{4920,220,-210},{4920,230,210},{4980,240,620}, {5250,120,-250},{5250,120,-90},{5250,120,90},{5250,120,250},60,60,1,false,true),
+ cinema("goal_mouth_sweep_away",{-4980,210,620},{-4920,220,210},{-4920,230,-210},{-4980,240,-620}, {-5250,120,250},{-5250,120,90},{-5250,120,-90},{-5250,120,-250},60,60,1,false,true),
+ cinema("penalty_mark_push_home",{4150,210,0},{4380,210,0},{4620,220,0},{4850,230,0}, {5250,120,0},{5250,120,0},{5250,120,0},{5250,120,0},58,60,1,false,true),
+ cinema("penalty_mark_push_away",{-4150,210,0},{-4380,210,0},{-4620,220,0},{-4850,230,0}, {-5250,120,0},{-5250,120,0},{-5250,120,0},{-5250,120,0},58,60,1,false,true),
+ cinema("halfway_line_crossing",{0,260,-3350},{0,290,-1117},{0,290,1117},{0,260,3350}, {0,40,-2650},{0,40,-417},{0,40,1817},{0,40,4050},58,58,1.25f,false,true),
+ cinema("halfway_line_return",{0,260,3350},{0,290,1117},{0,290,-1117},{0,260,-3350}, {0,40,2650},{0,40,417},{0,40,-1817},{0,40,-4050},58,58,1.25f,false,true),
+ // Both circular shots remain INSIDE the 9.15m centre circle for a full turn.
+ {"centre_circle_inner_orbit",{700,260,0},{},{},{0,60,0},{},{},58,{}, {},0,1,false,false,false,MotionKind::CircleOrbit},
+ {"centre_circle_full_turn",{0,260,0},{2200,0,0},{},{0,60,0},{},{},60,{}, {},0,1,false,false,false,MotionKind::CircleTurn},
+ cinema("crossbar_sweep_home",{4950,310,-500},{4950,320,-170},{4950,320,170},{4950,310,500}, {5250,244,-250},{5250,244,-90},{5250,244,90},{5250,244,250},56,56,1,false,true),
+ cinema("crossbar_sweep_away",{-4950,310,500},{-4950,320,170},{-4950,320,-170},{-4950,310,-500}, {-5250,244,250},{-5250,244,90},{-5250,244,-90},{-5250,244,-250},56,56,1,false,true),
+ cinema("goal_front_arc",{5000,380,-1050},{4000,650,-700},{4000,650,700},{5000,380,1050}, {5250,140,0},{5250,140,0},{5250,140,0},{5250,140,0},56,56,1,false,true),
+ cinema("goal_low_crane",{5000,190,620},{4950,300,250},{4650,850,-250},{4400,1200,-650}, {5250,120,0},{5250,140,0},{5250,170,0},{5250,200,0},58,54,1,false,true),
+ // Full ellipse outside the stands, looking inward throughout the circuit.
+ {"stadium_exterior_orbit",{11000,10800,9500},{},{},{0,50,0},{},{},56,{}, {},0,3.2f,false,true,false,MotionKind::ExteriorOrbit,10000}
 };
 inline constexpr unsigned motionCount=sizeof motions/sizeof motions[0];
-static_assert(motionCount<32,"The shot mask must fit uint32_t");
-inline constexpr uint32_t allMotionsMask=(1u<<motionCount)-1;
-inline float duration(unsigned index,float base){return std::clamp(std::clamp(base,20.f,120.f)*motions[index%motionCount].durationScale,20.f,180.f);}
-inline bool available(unsigned index,float heightLimit){return !motions[index%motionCount].exterior||heightLimit>=8000;}
+static_assert(motionCount<64,"The shot mask must fit uint64_t");
+inline constexpr uint64_t allMotionsMask=(uint64_t{1}<<motionCount)-1;
+inline float duration(unsigned index,float base){
+ const auto& m=motions[index%motionCount];const float length=std::clamp(base,20.f,120.f)*m.durationScale;
+ return m.kind==MotionKind::ExteriorOrbit?std::clamp(length,160.f,300.f):std::clamp(length,20.f,180.f);
+}
+inline bool available(unsigned index,float heightLimit){const auto& m=motions[index%motionCount];return !m.exterior||heightLimit>=m.minimumHeight;}
+// Ten-percent acceleration/deceleration ramps, with nearly constant cruise.
+// A global smoothstep would make a full exterior circuit too fast mid-shot.
+inline float orbitProgress(float progress){
+ const float p=std::clamp(progress,0.f,1.f),edge=.1f;
+ if(p<edge){const float u=p/edge;return edge*(u*u*u-.5f*u*u*u*u)/(1-edge);}
+ if(p>1-edge){const float u=(1-p)/edge;return 1-edge*(u*u*u-.5f*u*u*u*u)/(1-edge);}
+ return (p-edge*.5f)/(1-edge);
+}
 inline Vec bezier(Vec a,Vec b,Vec c,float t){return a*((1-t)*(1-t))+b*(2*(1-t)*t)+c*(t*t);}
 inline Vec bezier(Vec a,Vec b,Vec c,Vec d,float t){const float u=1-t;return a*(u*u*u)+b*(3*u*u*t)+c*(3*u*t*t)+d*(t*t*t);}
 inline Pose sample(unsigned index,float progress,float heightLimit=11000,float scale=1){
  const auto& m=motions[index%motionCount];const float t=smooth(progress);
  Pose p=m.cubic?Pose{bezier(m.a,m.b,m.c,m.d,t),bezier(m.ta,m.tb,m.tc,m.td,t),m.fov+(m.endFov-m.fov)*t}:Pose{bezier(m.a,m.b,m.c,t),bezier(m.ta,m.tb,m.tc,t),m.fov};
+ if(m.kind==MotionKind::CircleOrbit){const float angle=t*6.28318530718f;p.eye={std::cos(angle)*m.a.x,m.a.y,std::sin(angle)*m.a.x};p.target=m.ta;}
+ if(m.kind==MotionKind::CircleTurn){const float angle=t*6.28318530718f;p.eye=m.a;p.target={std::cos(angle)*m.b.x,m.ta.y,std::sin(angle)*m.b.x};}
+ if(m.kind==MotionKind::ExteriorOrbit){const float angle=orbitProgress(progress)*6.28318530718f;p.eye={std::cos(angle)*m.a.x,m.a.y,std::sin(angle)*m.a.z};p.target=m.ta;}
  scale=std::clamp(scale,.6f,1.f);p.eye.x*=scale;p.eye.z*=scale;
  p.eye.y=std::clamp(p.eye.y,180.f,std::clamp(heightLimit,1000.f,14000.f));return p;
 }

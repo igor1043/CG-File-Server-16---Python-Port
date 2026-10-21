@@ -3,6 +3,16 @@
 #include <cstddef>
 #include <stdint.h>
 enum class PyroPage { Unreadable, Outside, Match, Pause };
+inline bool pyro_shootout_page(const char* page) {
+    if(!page)return false;
+    const char* leaf=std::strrchr(page,'/');leaf=leaf?leaf+1:page;
+    const char* expected="penaltykickselect";
+    for(;*leaf && *expected;++leaf,++expected) {
+        const char c=*leaf>='A' && *leaf<='Z'?static_cast<char>(*leaf+32):*leaf;
+        if(c!=*expected)return false;
+    }
+    return !*leaf && !*expected;
+}
 inline PyroPage pyro_page(const char* text, bool known, bool matchSession=false) {
     if(!known || !text)return PyroPage::Unreadable;
     char page[192]={};
@@ -11,6 +21,8 @@ inline PyroPage pyro_page(const char* text, bool known, bool matchSession=false)
         char c=text[n];page[n]=(c>='A' && c<='Z')?static_cast<char>(c+32):c;
     }
     if(text[n])return PyroPage::Unreadable;
+    // A live-fixture overlay despite FIFA's postGameFlow directory name.
+    if(pyro_shootout_page(page))return PyroPage::Pause;
     bool blank=true;
     for(std::size_t i=0;i<n;++i)if(page[i]!=' ' && page[i]!='\r' && page[i]!='\n' && page[i]!='\t')blank=false;
     if(blank || !std::strcmp(page,"game/screens/tv/bumper") || !std::strcmp(page,"tv/bumper") ||

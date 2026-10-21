@@ -1,8 +1,16 @@
 """Read-only page signals shared by match audio and the in-game selector."""
 
 
+def penalty_shootout_page(page: str) -> bool:
+    return (page or '').strip().lower().rsplit('/', 1)[-1] == 'penaltykickselect'
+
+
 def post_match_page(page: str) -> bool:
     page = (page or "").lower()
+    # FIFA puts the taker-order screen in postGameFlow, then returns directly
+    # to the same live fixture. Its scoreboard and other match assets stay put.
+    if penalty_shootout_page(page):
+        return False
     return any(token in page for token in (
         "postgameflow", "matchdetailsendgame", "matchresults", "matchended", "matchforfeit",
     ))

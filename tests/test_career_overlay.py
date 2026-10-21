@@ -98,7 +98,7 @@ class CareerOverlayTests(unittest.TestCase):
             if svc.inspection else {'userid':0,'club_id':130190})
         return selector
 
-    def test_career_shortcut_uses_dedicated_panel_and_keeps_match_overlay_separate(self):
+    def test_career_shortcut_opens_stadium_settings_and_retains_career_tools(self):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_ready(Path(temporary))
             try:
@@ -106,6 +106,10 @@ class CareerOverlayTests(unittest.TestCase):
                 selector.shared.events[0].kind=1;selector.shared.write_index=1
                 selector.tick()
                 self.assertEqual(selector.shared.enabled,3)
+                self.assertIsNotNone(selector.frontend_panel)
+                self.assertTrue(selector._frontend_career)
+                self.assertIn(3,[i for i,r in selector.frontend_panel.targets()])
+                selector.frontend_panel.activate(3)
                 self.assertIsInstance(selector.career_panel,CareerPanel)
                 self.assertIsNone(selector.audio_panel)
                 self.assertIsNone(selector.prematch_panel)

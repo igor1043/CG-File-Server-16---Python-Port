@@ -22,6 +22,7 @@ import psutil
 from PIL import Image, ImageTk
 
 from . import __version__ as APP_VERSION
+import server16_py as features
 from .asset_runtime import AssetRuntime
 from .audio_profiles import AudioProfileRuntime
 from .db_patcher import restore_stadium_names
@@ -1132,11 +1133,13 @@ class Server16App(tk.Tk):
         self.log(f"Stadium loading notification awaiting native overlay: {stadium_name}")
 
     def show_narration_applied(self, name: str) -> None:
+        if not features.NARRATION_PICKER_AVAILABLE:return
         self.log(f'Narration applied: {name}; selection modal closed')
         self.show_narration_loading(name,100,'Narração aplicada')
         self._hide_asset_loading('narration',delay_ms=3500)
 
     def show_narration_loading(self,name: str,progress: float=5,detail: str='Carregando narração…') -> None:
+        if not features.NARRATION_PICKER_AVAILABLE:return
         self._ensure_d3d_overlay_injected()
         image_path=''
         try:
@@ -1289,6 +1292,7 @@ class Server16App(tk.Tk):
             self.stadium_loading_modal.update_idletasks()
 
     def _show_asset_loading(self, kind: str, title: str, name: str, detail: str, progress: float, image_path: str = '') -> None:
+        if kind == 'narration' and not features.NARRATION_PICKER_AVAILABLE:return
         if kind != 'narration' and not self.show_stadium_loading_var.get():
             return
         previous = self._asset_loading_hide_jobs.pop(kind, None)
@@ -3026,7 +3030,7 @@ class Server16App(tk.Tk):
             self.log(f"FIFA process already running: {self.fifaEXE}")
             return
         self.competition_icons.prepare(self.exedir, force=True)
-        subprocess.Popen([self.fifaEXE], shell=False)
+        subprocess.Popen([self.fifaEXE], cwd=str(Path(self.fifaEXE).resolve().parent), shell=False)
         self.log(f"Launched FIFA executable: {self.fifaEXE}")
 
     def _sync_competition_icons(self) -> None:

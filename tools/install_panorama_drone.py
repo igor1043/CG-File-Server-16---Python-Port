@@ -37,7 +37,8 @@ def upgrade_config(text, defaults):
         for key, old, new in (("duration_seconds", 32, 52), ("height_limit_cm", 3200, 11000)):
             if parser.getfloat(main_section, key, fallback=old) == old:
                 set_value("panorama_drone", key, new)
-        set_value("panorama_drone", "scene_pack_revision", 3)
+    if parser.getint(main_section, "scene_pack_revision", fallback=0) < 5:
+        set_value("panorama_drone", "scene_pack_revision", 5)
     default_parser = configparser.ConfigParser(interpolation=None)
     default_parser.read_string(defaults)
     for key, value in default_parser.items("shots"):
@@ -48,11 +49,11 @@ def upgrade_config(text, defaults):
 
 def install(build, destinations):
     source = Path(__file__).resolve().parents[1]
-    dll = build / "panorama_drone_v3_1.dll"
+    dll = build / "panorama_drone_v5.dll"
     if not dll.is_file():
         raise FileNotFoundError(dll)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    manifest = {"version": 3, "shots": 24, "dll_sha256": digest(dll), "destinations": []}
+    manifest = {"version": 5, "shots": 37, "dll_sha256": digest(dll), "destinations": []}
     for root in destinations:
         root = root.resolve(strict=True)
         mod = root / "ModCarrerMode"
@@ -74,7 +75,7 @@ def install(build, destinations):
                 raise RuntimeError(f"Copy verification failed: {target}")
             changed.append(str(target.relative_to(root)))
 
-        put(dll, mod / "mods/panorama_drone/panorama_drone_v3_1.dll")
+        put(dll, mod / "mods/panorama_drone/panorama_drone_v5.dll")
         for item in (source / "native_mods/panorama_drone").iterdir():
             if item.is_file():
                 put(item, mod / "source/native_mods/panorama_drone" / item.name)
@@ -98,7 +99,7 @@ def install(build, destinations):
         enabled = mod / "mods/enabled.txt"
         lines = enabled.read_text(encoding="utf-8-sig").splitlines()
         lines = [line for line in lines if not line.strip().replace("/", "\\").lower().startswith("panorama_drone\\")]
-        lines.append(r"panorama_drone\panorama_drone_v3_1.dll")
+        lines.append(r"panorama_drone\panorama_drone_v5.dll")
         text = "\n".join(lines) + "\n"
         if enabled.read_text(encoding="utf-8-sig") != text:
             previous = backup / "ModCarrerMode/mods/enabled.txt"
@@ -106,7 +107,7 @@ def install(build, destinations):
             shutil.copy2(enabled, previous)
             enabled.write_text(text, encoding="utf-8")
             changed.append("ModCarrerMode/mods/enabled.txt")
-        if enabled.read_text(encoding="utf-8").count(r"panorama_drone\panorama_drone_v3_1.dll") != 1:
+        if enabled.read_text(encoding="utf-8").count(r"panorama_drone\panorama_drone_v5.dll") != 1:
             raise RuntimeError("Expected exactly one enabled panorama DLL")
         manifest["destinations"].append({"root": str(root), "backup": str(backup), "changed": changed})
     return manifest

@@ -9,7 +9,7 @@ cl /nologo /O2 /W4 /WX /EHsc /std:c++17 /MT "%~dp0..\tests\native_panorama_drone
 if errorlevel 1 exit /b 1
 native_panorama_drone_test.exe
 if errorlevel 1 exit /b 1
-cl /nologo /O2 /W4 /WX /LD /EHsc /std:c++17 /MT "%~dp0..\native_mods\panorama_drone\panorama_drone.cpp" /Fe:panorama_drone_v3_1.dll /link /INCREMENTAL:NO
+cl /nologo /O2 /W4 /WX /LD /EHsc /std:c++17 /MT "%~dp0..\native_mods\panorama_drone\panorama_drone.cpp" /Fe:panorama_drone_v5.dll /link /INCREMENTAL:NO
 set result=%errorlevel%
 popd
 exit /b %result%

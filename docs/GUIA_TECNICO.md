@@ -1,5 +1,13 @@
 # Server16 Python — FIFA Friends
 
+## Versão 0.2.8 — 21/10/2026
+
+O [índice dos módulos nativos](../native_mods/README.md) separa os fontes e os destinos das DLLs compiladas no FIFA Friends V12. Os caminhos de execução são preservados.
+
+`server16_py/__init__.py` mantém `EXTRA_SCENES_AVAILABLE=False` e `NARRATION_PICKER_AVAILABLE=False`. Essas opções são internas ao desenvolvimento. A segunda bloqueia a entrada no seletor, a seleção automática e os avisos de progresso/aplicação; os módulos de narração continuam no código e no executável. Para liberar uma funcionalidade concluída, altere sua opção no fonte, valide e gere outro executável.
+
+O estádio de fundo depende do módulo v11 e do preparador do V12; a panorâmica usa o módulo v5 com 37 tomadas. O fluxo de pênaltis conserva o placar até os resultados e exige a pirotecnia compatível para bloquear fumaça na disputa.
+
 ## Ajustes da partida e câmera em primeira pessoa
 
 O atalho **Select + Start / F12**, durante a partida, abre Música, Gráficos e Câmera
@@ -13,7 +21,7 @@ Suavização Forte (perfil 2), enquadramento Campo e bola (1) e viés neutro (0)
 são fixos. O submenu Personalizar e os outros seletores foram removidos.
 No FIFA, selecione a câmera **Profissional** para usar a primeira pessoa.
 
-`first_person_runtime.py` controla a DLL `bin/server16_first_person_v7.dll` por mapa
+`first_person_runtime.py` controla a DLL `bin/server16_first_person_v11.dll` por mapa
 `Local\FIFA16_FirstPersonCamera_v4`, de 80 bytes, versão 4, com comandos confirmados
 pelo jogo. Os últimos quatro int32 são FOV, inclinação em graus, modo e distância (0–2). A DLL valida a versão
 e os slots nativos antes de intervir, mantém o acompanhamento na troca de jogador
@@ -83,7 +91,7 @@ Painel para configurar partidas do FIFA 16, escolher estádios e administrar apr
 | **Física de roupas** | Desativada por padrão; salva a escolha do usuário nas próximas aberturas. No pré-jogo, Configurações da partida > Física de roupas > Aplicar. Durante a partida, F12 > Ajustes da partida permite ligar/desligar imediatamente, com confirmação do jogo. Controla camisa e calção. |
 | **Público** | Ajusta a ocupação quando o módulo nativo confirma a comunicação. |
 | **Cânticos e hinos** | Usa os áudios dos clubes, perfis de volume e cânticos de rivalidade. |
-| **Narração** | Escolhe os perfis externos disponíveis; os bancos de áudio são separados. |
+| **Narração** | Código preservado para desenvolvimento; seletor, aplicação automática e avisos ocultos na versão 0.2.8. |
 | **Música de abertura** | Usa o perfil externo configurado para a apresentação. |
 | **Câmeras e vídeos** | Aplica os pacotes configurados para a partida. |
 

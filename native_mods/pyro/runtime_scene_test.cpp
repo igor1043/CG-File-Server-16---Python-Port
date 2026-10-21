@@ -57,6 +57,7 @@ static void setup() {
     for(int index:{6,21})put(scoreRows.address()+index*16+8,image+0x3acc040);
     put(image+56299464,clockObject.address());
     put(image+0x3517c10,gameClock.address());put(gameClock.address(),image+0x20ff390);
+    put(gameClock.address()+0x3c,2); // Native kickoff, as required for a true restart.
     put(image+0x20ff390+0x30,image+0x39fee10);put(image+0x20ff390+0x70,image+0x3a00d60);
     put(image+58757168,pageObjects[0].address());
     const unsigned offsets[]={232,192,136,472};
@@ -200,5 +201,35 @@ int main() {
     advance(2200,500);put(scoreRows.address()+21*16,2);advance(2300);advance(2400);
     assert(!showing && triggers==selectedGoalTriggers);
     std::puts("Selected intro/goal emitters, 15s/20s actual event bounds, zero mask and frozen current-show options: PASS");
+    // The penalty-order page belongs to postGameFlow but is not match exit.
+    assert(WritePrivateProfileStringA("match","smoke_goal_emitters","4095",config.c_str()));
+    page("");put(gameClock.address()+0x3c,7);advance(2500);
+    put(scoreRows.address()+21*16,3);advance(2600);advance(2700);
+    assert(showing && goalShow); // An ordinary in-match penalty goal still emits.
+    put(clockObject.address()+5500,7200);advance(2800);
+    put(clockObject.address()+5500,0);put(gameClock.address()+0x3c,1);
+    advance(0);advance(50,600);assert(showing && goalShow); // End-half rewind is not Restart.
+    const auto beforeShootout=triggers;
+    const auto matchKey=session.key;
+    page("game/screens/postGameFlow/PenaltyKickSelect");advance(100);
+    assert(shootout.active && !showing && !recoveringShow && consumed && session.key==matchKey);
+    const auto clearedAtShootout=clears;
+    page("");put(gameClock.address()+0x3c,11);advance(200);
+    for(int i=0;i<6;++i) {
+        put(scoreRows.address()+21*16,4+i);advance(300+i*100);
+        put(gameClock.address()+0x3c,14);advance(350+i*100);
+        page("game/screens/fluxHub/FluxHub");advance(400+i*100);
+        page("");advance(450+i*100,500,true);advance(500+i*100);
+    }
+    assert(shootout.active && !showing && triggers==beforeShootout && clears==clearedAtShootout);
+    page("game/screens/playNow/KickOffHub");advance(1200);
+    assert(!shootout.active && !session.key);
+    put(scoreRows.address()+21*16,0);put(scoreRows.address()+6*16,0);
+    put(gameClock.address()+0x3c,2);page("game/screens/misc/StadiumPan");ready=false;advance(0);
+    ready=true;cache_palette(1);advance(0,100);assert(showing && !goalShow);
+    const auto beforeNativeShootout=triggers;
+    page("");put(gameClock.address()+0x3c,11);advance(100);
+    assert(shootout.active && !showing && triggers==beforeNativeShootout);
+    std::puts("Shootout: selector/native phase, retained session, no intro or scored-kick smoke, pause/replay and next-match recovery: PASS");
     VirtualFree((void*)image,0,MEM_RELEASE);
 }

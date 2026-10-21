@@ -13,6 +13,7 @@
 #include "presentation.h"
 #include "match_presentation.h"
 #include "scene_clock.h"
+#include "shootout.h"
 
 // FIFA 16 PC x64 577de45c only. All particle mutations occur before the
 // native BatchParticles phase 0, after its previous-frame jobs have completed.
@@ -432,6 +433,24 @@ static PyroPage currentPage=PyroPage::Unreadable;
 static char currentPageName[64]={};
 static ULONGLONG lastPageSample=0;
 static bool menuCleared=false;
+static PyroShootout shootout;
+static bool shootoutCleared=false;
+static int nativeSports=-1;
+static int flow_substate() {
+    uintptr_t main=0,controller=0,stack=0,state=0,vtable=0;
+    int index=-1,substate=-1;
+    if(!get(image+0x34ea0e8,main) || !get(main+0x68,controller) ||
+       !get(controller,stack) || !get(stack+0x20,index) || index<0 || index>3 ||
+       !get(stack+static_cast<uintptr_t>(index)*8,state) || !get(state,vtable) ||
+       !same(vtable+0x18,image+0x3d89f00) || !get(state+0x440,substate) || substate<0 || substate>18)return -1;
+    return substate;
+}
+static int sports_state() {
+    uintptr_t scene=0;int sports=-1;
+    if(!get(image+0x3517c10,scene) || !same(scene,image+0x20ff390) ||
+       !get(scene+0x3c,sports) || sports<0 || sports>16)return -1;
+    return sports;
+}
 static void sample_presentation(ULONGLONG now) {
     if(!lastPageSample || now-lastPageSample>=250) {
         const unsigned int offsets[]={232,192,136,472,0};
@@ -458,7 +477,10 @@ static bool restarted(ULONGLONG now) {
     uintptr_t stats=0;int clock=0,h=0,a=0;
     const bool valid=get(image+56299464,stats) && stats && get(stats+5500,clock) &&
         clock>=0 && clock<100000000 && read_score(h,a);
-    const bool replay=currentPage!=PyroPage::Match || (sceneTime.valid && sceneTime.replay);
+    // Clock/scene rollback also occurs when a tied fixture advances to its
+    // shootout. Only a real kickoff can confirm a restart at a zero clock.
+    const bool replay=currentPage!=PyroPage::Match || (sceneTime.valid && sceneTime.replay) ||
+        (valid && clock<=100 && nativeSports!=2);
     const bool sceneReset=sceneRestart.sample(sceneTime,!replay,valid && h==0 && a==0,now);
     return lifecycle.sample(valid,clock,h,a,replay,now) || sceneReset;
 }
@@ -477,8 +499,27 @@ static void tick(void* batch) {
     if(!enabled && !stopping) return;
     if(!stopping) {
         sample_presentation(now);
+        nativeSports=sports_state();
         const auto previousScene=sceneTime;
         sceneTime=read_scene_time();
+        uintptr_t stats=0;int footballClock=-1;
+        const bool freshKickoff=shootout.active && nativeSports==2 && sceneTime.valid && !sceneTime.replay &&
+            currentPage==PyroPage::Match && get(image+56299464,stats) &&
+            get(stats+5500,footballClock) && footballClock>=0 && footballClock<=100;
+        const bool wasShootout=shootout.active;
+        if(shootout.sample(pyro_shootout_page(currentPageName),nativeSports,flow_substate(),
+                          currentPage==PyroPage::Outside,freshKickoff)) {
+            if(!wasShootout)log_event("PENALTY_SHOOTOUT_BLOCKED intro_and_goal_smoke_disabled");
+            if(configured && (!shootoutCleared || showing || recoveringShow)) {
+                uintptr_t impl=0;
+                if(!same((uintptr_t)batch,image+0x2214500) || !get((uintptr_t)batch+0x10,impl) || !impl)return;
+                batchImpl=impl;cleanup(true,"penalty_shootout");shootoutCleared=true;
+            }
+            consumed=true;restartPending=false;recoveringShow=false;replayRefresh=false;
+            return;
+        }
+        if(wasShootout && freshKickoff && session.key)restartPending=true;
+        shootoutCleared=false;
         if(sceneTime.valid) {
             if(replayKnown && sceneTime.replay!=lastReplay)replayRefresh=true;
             if(sceneTime.replay && previousScene.valid && previousScene.replay &&

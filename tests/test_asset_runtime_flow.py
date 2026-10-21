@@ -190,7 +190,7 @@ class AssetRuntimeFlowTests(unittest.TestCase):
         with patch.object(app_module.subprocess, "Popen") as launch, \
              patch.object(app_module, "copy_if_exists", side_effect=AssertionError("launch must not copy assets")):
             Server16App.launch_fifa(self.app)
-        launch.assert_called_once_with([self.app.fifaEXE], shell=False)
+        launch.assert_called_once_with([self.app.fifaEXE], cwd=str(self.root.resolve()), shell=False)
         self.app.competition_icons.prepare.assert_called_once_with(self.root, force=True)
 
     def test_bootstrap_preserves_original_movies_enabled_and_disabled_branches(self):

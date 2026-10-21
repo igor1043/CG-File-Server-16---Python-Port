@@ -1,0 +1,55 @@
+Estádio de fundo — versão 11
+
+Start/F12 nos menus abre as opções de estádio.
+Usar estádio personalizado = Não: mantém o fundo FIFA Friends.
+Usar estádio personalizado = Sim: permite escolher e aplicar um estádio.
+Voltar do seletor descarta a navegação; Aplicar confirma a escolha.
+
+No menu inicial, Automático usa o time favorito. Na carreira, cada entrada
+busca novamente o estádio do clube do save. Uma escolha manual feita dentro
+da carreira vale só para aquela sessão/clube e não altera a preferência do
+time favorito nem as atribuições dos estádios de partidas.
+
+O fundo FIFA Friends cobre a preparação e o carregamento. O cenário 3D só
+é revelado depois da sinalização de carregamento e desenho dos modelos.
+Sem estádio disponível no mod ou no catálogo nativo, mantém o fundo original.
+Nos pacotes personalizados, capacidade e ano desconhecidos são informados
+como 0. O nome vem do pacote/configuração do estádio.
+
+Os arquivos ZIP/RAR originais permanecem compactados; a cópia extraída em
+data/sceneassets/server16_frontend é um cache isolado do menu.
+
+Diagnóstico:
+ModCarrerMode/logs/frontend_stadium.log
+ModCarrerMode/runtime/frontend_stadium_live.ini
+ModCarrerMode/runtime/frontend_stadium_install.json (backup e hashes)
+
+Depois de atualizar a DLL ou o helper, reabrir o FIFA. Se o executável do
+Server16 também foi atualizado, reabrir o Server16 antes de abrir o FIFA.
+
+O comando de troca usa o parâmetro nativo de recarga forçada,
+necessário quando o ID do perfil permanece igual e só o pacote 3D muda.
+Pedidos recusados pelo estado nativo são repetidos com limite; o painel
+informa falha em vez de esperar indefinidamente. A abertura conserva a
+imagem FIFA Friends enquanto o estádio não está pronto.
+Essa cobertura também vale durante o intervalo em que o carregador nativo
+deixa o nome da página vazio, evitando mostrar a foto do estádio do perfil.
+
+Versão 9: separa a ordem de início da confirmação de fundo pronto. O estado
+nativo 14 já representa uma troca aceita, esperando a confirmação da imagem.
+A ponte envia a confirmação nativa 0x1a uma vez nesse estado para continuar
+o carregamento normal do estádio. Não aciona esse caminho no estado de boot
+11 nem sem um pacote preparado para uma troca solicitada pelo usuário.
+Pedidos com falha são encerrados e não voltam à fila sem um novo Aplicar.
+Ao instalar a DLL é necessário reabrir o FIFA uma vez; cada troca posterior
+usa Aplicar dentro da mesma sessão do jogo.
+
+Versão 10: mantém o FIFA Friends também no intervalo sem uma página ativa
+ao sair da carreira, mesmo quando o modelo 3D já terminou de carregar.
+Evita restaurar a fotografia do estádio do perfil nesse intervalo. Quando
+o menu está pronto, volta a exibir o estádio selecionado normalmente.
+O fluxo de recarga e confirmação da versão 9 foi preservado.
+
+Versão 11: painel anterior ao seletor 10% menor, com interruptor visual.
+Uma configuração nova começa desativada. A escolha é gravada ao alternar
+e restaurada nas próximas aberturas; atualizações preservam a escolha salva.

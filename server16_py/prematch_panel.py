@@ -7,18 +7,20 @@ from .input_hints import action_label, navigation_hint, controller_connected, fo
 from .match_settings_panel import MatchSettingsPanel
 from .narration_panel import NarrationPanel
 from .panel_navigation import move_focus
+from .extra_scenes_panel import ExtraScenesPanel
+import server16_py as features
 
 
 class PrematchPanel:
     WIDTH, HEIGHT = 600, 390
-    CARDS = ((24,91,291,205),(309,91,576,205),(24,220,291,334),(309,220,576,334))
     BACK = (24, 278, 576, 320)
 
     def __init__(self, selector, crowd=False):
         self.selector = selector
         self.crowd = crowd
-        self.HEIGHT = 390 if crowd else 460
-        self.BACK = (24,278,576,320) if crowd else (24,350,576,392)
+        rows = (len(self.cards())+1)//2
+        self.HEIGHT = 390 if crowd else 193+rows*129
+        self.BACK = (24,278,576,320) if crowd else (24,self.HEIGHT-101,576,self.HEIGHT-59)
         self.focus = 0
         self.column = 0
         self.message = ''
@@ -27,6 +29,22 @@ class PrematchPanel:
         shared = selector.crowd_control.shared
         self.value = shared.current_percent if shared.ack==shared.command and 0 <= shared.current_percent <= 100 else None
         self.dirty = False
+
+    def cards(self):
+        items = [(0, ('Controle de','público')), (1, ('Escolha seu','estádio')),
+                 (2, ('Configurações','da partida'))]
+        if features.NARRATION_PICKER_AVAILABLE:items.append((3, ('Escolha os','narradores')))
+        if features.EXTRA_SCENES_AVAILABLE:items.append((4, ('Cenas extras','Técnico e mascote')))
+        cards = []
+        for position,(action,labels) in enumerate(items):
+            left = 24 if position%2==0 else 309
+            right = 576 if position==len(items)-1 and position%2==0 else left+267
+            top = 91+(position//2)*129
+            cards.append((action,(left,top,right,top+114),labels))
+        return cards
+
+    def back(self):
+        self.selector.show_menu()
 
     def tick(self):
         if not self.crowd:
@@ -52,6 +70,7 @@ class PrematchPanel:
             return
         selector = self.selector
         if not self.crowd:
+            if focus != 5 and focus not in {action for action,_,_ in self.cards()}:return
             if focus == 0:
                 selector.prematch_panel = PrematchPanel(selector, crowd=True)
                 selector.render()
@@ -67,6 +86,9 @@ class PrematchPanel:
                 selector.render()
             elif focus == 3:
                 selector.prematch_panel = NarrationPanel(selector)
+                selector.render()
+            elif focus == 4:
+                selector.prematch_panel = ExtraScenesPanel(self, prematch=True)
                 selector.render()
             else:
                 selector.close()
@@ -89,18 +111,19 @@ class PrematchPanel:
         if kind == 11:
             selector.close()
             return
-        if kind == 7 or (kind == 16 and value == (3 if self.crowd else 5)):
+        if kind == 7 or (kind == 16 and self.crowd and value == 3):
             selector.show_menu() if self.crowd else selector.close()
             return
         if kind == 16:
             if not self.crowd:
-                self.activate(value-1)
+                cards = self.cards()
+                if 1 <= value <= len(cards):self.activate(cards[value-1][0])
             elif value == 1:
                 self.activate(2)
             elif value == 2:
                 self.activate(1)
             return
-        targets = [(0, (40, 148, 560, 190)), (1, (24, 278, 292, 320)), (2, (308, 278, 576, 320))] if self.crowd else [(i, rect) for i, rect in enumerate(self.CARDS)]+[(4,self.BACK)]
+        targets = [(0, (40, 148, 560, 190)), (1, (24, 278, 292, 320)), (2, (308, 278, 576, 320))] if self.crowd else [(action, rect) for action,rect,_ in self.cards()]+[(5,self.BACK)]
         if kind in (8, 12, 15):
             x, y = value & 65535, (value >> 16) & 65535
             target = next((focus for focus, rect in targets if rect[0]<=x<=rect[2] and rect[1]<=y<=rect[3]), None)
@@ -149,7 +172,7 @@ class PrematchPanel:
         text(24,22,'Público da partida' if self.crowd else 'Prepare sua partida',23,bold=True)
         text(24,59,'Uma alteração manual vale somente para esta partida.' if self.crowd else 'Escolha o que deseja ajustar antes de entrar em campo.',15,muted)
         if not self.crowd:
-            for i,(rect,labels) in enumerate(zip(self.CARDS,(('Controle de','público'),('Escolha seu','estádio'),('Configurações','da partida'),('Escolha os','narradores')))):
+            for shortcut,(i,rect,labels) in enumerate(self.cards(),1):
                 draw.rounded_rectangle(rect,14,fill='#f5f8fc',outline='#dce5ee')
                 if self.focus==i: draw_focus_ring(draw,rect,14)
                 cx=rect[0]+53
@@ -166,16 +189,19 @@ class PrematchPanel:
                     for dy,dx in ((0,-15),(15,13),(30,-3)):
                         draw.line((cx-30,129+dy+top,cx+30,129+dy+top),fill=blue,width=3)
                         draw.ellipse((cx+dx-6,123+dy+top,cx+dx+6,135+dy+top),fill='white',outline=blue,width=2)
-                else:
+                elif i==3:
                     draw.rounded_rectangle((cx-11,120+top,cx+11,156+top),11,outline=blue,width=3)
                     draw.arc((cx-22,139+top,cx+22,171+top),0,180,fill=blue,width=3)
                     draw.line((cx,172+top,cx,183+top),fill=blue,width=3)
+                else:
+                    draw.rounded_rectangle((cx-30,127+top,cx+15,163+top),6,outline=blue,width=3)
+                    draw.line(((cx+15,138+top),(cx+32,129+top),(cx+32,161+top),(cx+15,152+top),(cx+15,138+top)),fill=blue,width=3)
                 font=self.selector.font(16,True)
                 for row,label in enumerate(labels):
                     draw.text((rect[0]+108,rect[1]+29+row*22),label,font=font,fill=ink)
                 if not controller_connected(self.selector):
-                    text(rect[0]+108,rect[1]+80,panel_function_key(i+1),13,muted)
-            button(self.BACK,'Fechar',4,panel_function_key(5),'B')
+                    text(rect[0]+108,rect[1]+80,panel_function_key(shortcut),13,muted)
+            button(self.BACK,'Fechar',5,'Esc','B')
         else:
             shared=self.selector.crowd_control.shared
             text(40,104,'Ocupação do estádio',19,bold=True)

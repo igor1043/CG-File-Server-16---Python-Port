@@ -1,5 +1,6 @@
 #include "presentation.h"
 #include "goals.h"
+#include "shootout.h"
 #include <cassert>
 #include <cstdio>
 #include <initializer_list>
@@ -20,6 +21,17 @@ int main() {
         if(pyro_can_start(page,true))openingConsumed=true;
     }
     assert(!openingConsumed);
+    assert(pyro_page("game/screens/postGameFlow/PenaltyKickSelect",true,true)==PyroPage::Pause);
+    assert(pyro_shootout_page("GAME/SCREENS/POSTGAMEFLOW/PENALTYKICKSELECT"));
+    PyroShootout shootout;
+    assert(!shootout.sample(false,7,14,false)); // A regulation penalty remains eligible.
+    assert(shootout.sample(false,11,14,false)); // Native shootout, no selector (player career).
+    for(int sports:{14,15,-1,7})assert(shootout.sample(false,sports,14,false));
+    assert(!shootout.sample(false,14,14,true)); // Genuine results/menu.
+    assert(shootout.sample(true,14,14,false)); // Exact observed selector page.
+    assert(shootout.sample(false,14,14,false));
+    assert(!shootout.sample(false,2,14,false,true)); // A real fresh kickoff.
+    assert(shootout.sample(false,1,13,false)); // Native pre-shootout overlay before the selector.
     MatchPresentationOptions switches;
     switches.pyrotechnics=true;switches.entrance=true;switches.goal=true;
     assert(switches.entrance_allowed() && switches.goal_allowed());

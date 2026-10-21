@@ -120,7 +120,8 @@ class CareerPanel:
         if self.page == 'home':
             return [('Transferir para outro clube','Escolha país / região, divisão e clube'),
                     ('Finanças','Solicitar verba para transferências'),
-                    ('Aposentadoria','Remover aposentadoria ou rejuvenescer'), ('Fechar','Voltar ao FIFA')]
+                    ('Aposentadoria','Remover aposentadoria ou rejuvenescer'),
+                    ('Estádio de fundo','Trocar o cenário 3D do clube da carreira'), ('Fechar','Voltar ao FIFA')]
         if self.page == 'retirement':
             return [('Remover aposentadoria','Manter a idade dos jogadores'),
                     ('Remover e rejuvenescer',f'Jogadores em aposentadoria voltam a ter {self.target_age} anos'),
@@ -193,6 +194,8 @@ class CareerPanel:
                         self.page='status'
                     else:
                         self.page=('clubs','finances','retirement')[index]
+                elif index==3:
+                    self.selector.open(frontend=True,career=True);return
                 else:
                     self.selector.close();return
                 self.focus=0

@@ -22,10 +22,13 @@ from .match_state import pause_page
 from .crowd_control import CrowdControl
 from .prematch_panel import PrematchPanel
 from .narration_runtime import narration_runtime
+import server16_py as features
 from .intro_music_runtime import intro_music_runtime
 from .match_hub_panel import MatchHubPanel
 from .career_service import CareerService, career_page, safe_exit_page
 from .career_panel import CareerPanel
+from .frontend_stadium_panel import FrontendStadiumPanel
+from .frontend_stadium_selection import frontend_page, selection as frontend_selection, save_selection as save_frontend_selection, automatic_entry, live_state as frontend_live_state
 
 SELECTOR_MAPPING_NAME = 'Local\\CGFS16_Selector_v1'
 
@@ -56,6 +59,12 @@ class StadiumSelector:
         self.query = self.draft = self.country = ''
         self.index = self.focus = self.key_index = 0
         self.keyboard = self.opened = False
+        self.frontend_mode = False
+        self._frontend_team=0
+        self._frontend_career=False
+        self._frontend_signature=None
+        self._frontend_session=0
+        self.frontend_panel=None
         self.applying = False
         self.audio_panel = None
         self.career_panel = None
@@ -155,7 +164,7 @@ class StadiumSelector:
         prematch_eligible = app.memory.is_open() and prematch_page(app.lastpagename)
         runtime=getattr(app,'_narration_runtime',None)
         game_root=Path(getattr(app,'exedir',app.base_dir))
-        if runtime is not None or (game_root/'Narrations').is_dir() or (game_root/'IntroMusic').is_dir():
+        if features.NARRATION_PICKER_AVAILABLE and (runtime is not None or (game_root/'Narrations').is_dir()):
             narration_runtime(app).tick(prematch_eligible)
         music_runtime=getattr(app,'_intro_music_runtime',None)
         if music_runtime is not None or (game_root/'IntroMusic').is_dir():
@@ -164,7 +173,12 @@ class StadiumSelector:
         career_eligible = app.memory.is_open() and (self.career_service.in_career(app.lastpagename) or
             ((self.career_service.pending or self.career_service.notice_available()) and
              (safe_exit_page(app.lastpagename) or self.career_service.context_reader.exited_hub(app.lastpagename))))
-        mode = 1 if prematch_eligible else 3 if career_eligible else 2 if self.match_eligible() else 0
+        # A stale fixture/clock context must not turn Profile or the main hub
+        # into the match panel. FIFA explicitly exposes the start flag.
+        reader=self.career_service.context_reader
+        known_hub=not (app.lastpagename or '').lower().endswith('/fluxhub') or career_eligible or reader.session() is False
+        frontend_eligible=app.memory.is_open() and not prematch_eligible and (frontend_page(app.lastpagename) or career_eligible) and reader.started()!=1 and known_hub
+        mode = 1 if prematch_eligible else 3 if career_eligible else 1 if frontend_eligible else 2 if self.match_eligible() else 0
         page=(app.lastpagename or '').lower()
         # Keep attendance through walkout/loading, pause and gameplay, but not
         # Career menus or post-match pages. Editing is still pre-match only.
@@ -174,15 +188,26 @@ class StadiumSelector:
                             self.crowd_control.shared.requested_percent>=0)) or
              ('stadiumpan' in page and self.crowd_control.shared.requested_percent>=0)))
         self.crowd_control.tick(prematch_eligible,crowd_phase)
-        opened_mode = 3 if self.career_panel else 2 if self.audio_panel else 1
-        if self.opened and (not mode or opened_mode != mode or
+        opened_mode = 3 if self.career_panel or (self.frontend_mode and self._frontend_career) else 2 if self.audio_panel else 1
+        if self.opened and (not mode or opened_mode != mode or (self.frontend_mode and not frontend_eligible) or
                             (mode != 3 and self.context != self._context())):
             self.close()
-        if stadium_eligible and time.monotonic() >= self._next_preload:
+        if (stadium_eligible or frontend_eligible) and time.monotonic() >= self._next_preload:
             self._preload_catalog()
             self._next_preload = time.monotonic()+5.0
         self._drain_catalog()
         self._drain_images()
+        if self.opened and self.frontend_mode:
+            state=frontend_live_state(app.exedir)
+            signature=tuple(state.get(key) for key in ('request','phase','error'))
+            if signature!=self._frontend_signature:
+                self._frontend_signature=signature
+                if state.get('pid')==app._resolve_fifa_pid() and state.get('team')==self._frontend_team:
+                    self.message={0:'Fundo FIFA Friends ativado.',1:'Preparando o estádio…',2:'Recarregando o fundo no FIFA…',
+                                  3:'Estádio carregado.',4:'Clube sem estádio disponível: fundo FIFA Friends.',
+                                  -1:'A recarga falhou. Consulte o log do estádio.'}.get(state.get('phase'),'')
+                    if self.frontend_panel:self.frontend_panel.message=self.message
+                    self.render()
         if self.opened and self.prematch_panel:
             self.prematch_panel.tick()
         if self.opened and self.audio_panel:
@@ -216,7 +241,9 @@ class StadiumSelector:
             shared.read_index=(shared.read_index+1)%64
             if kind==1:
                 if shared.enabled and shared.ready==7:
-                    self.open(audio=shared.enabled==2,hub=shared.enabled==1,career=shared.enabled==3)
+                    self.open(audio=shared.enabled==2,hub=shared.enabled==1 and not frontend_eligible,
+                              career=shared.enabled==3,
+                              frontend=frontend_eligible and shared.enabled in (1,3))
                 else:
                     app.log(f'Stadium selector shortcut rejected: enabled={shared.enabled} native_ready={shared.ready}/7')
                     self.close()
@@ -225,6 +252,7 @@ class StadiumSelector:
 
     def _context(self):
         app=self.app
+        if getattr(self,'frontend_mode',False):return ('frontend',self._frontend_team,int(self._frontend_career),'','')
         return (app._kickoff_generation,app.HID,app.AID,app.TOURNAME,app.TOURROUNDID)
 
     def _preload_catalog(self):
@@ -252,17 +280,29 @@ class StadiumSelector:
         self._catalog_thread=threading.Thread(target=load,name='stadium-catalog',daemon=True)
         self._catalog_thread.start()
 
-    def open(self, audio=False, hub=False, career=False):
+    def open(self, audio=False, hub=False, career=False, frontend=False, frontend_picker=False):
+        self.frontend_mode=frontend
+        if frontend:
+            state=frontend_live_state(self.app.exedir)
+            valid=state.get('pid')==self.app._resolve_fifa_pid()
+            self._frontend_team=state.get('team',0) if valid else 0
+            self._frontend_career=career or (bool(state.get('career')) if valid else False)
+            self._frontend_session=state.get('session',0) if valid else 0
+            self._frontend_signature=None
         self.context=self._context()
         self.applying=False
         self.audio_panel=MatchHubPanel(self) if audio else None
-        self.career_panel=CareerPanel(self,self.career_service) if career else None
+        self.career_panel=CareerPanel(self,self.career_service) if career and not frontend else None
         self.prematch_panel=None
+        self.frontend_panel=FrontendStadiumPanel(self) if frontend and not frontend_picker else None
         self.return_to_menu=False
         self.country=self.query=self.draft=self.message=''
         self.index=0; self.focus=2; self.keyboard=False
         self.opened=True
-        if career:
+        if self.frontend_panel:
+            self._opening_selection_names=();self.loading=False
+            self.render();return
+        if career and not frontend:
             self._opening_selection_names=()
             self.loading=False
             self.render()
@@ -295,7 +335,10 @@ class StadiumSelector:
         self.render()
 
     def back(self):
-        if self.return_to_menu:
+        if self.frontend_mode:
+            # Browsing is a preview; only Apply commits a new choice.
+            self.open(frontend=True,career=self._frontend_career)
+        elif self.return_to_menu:
             self.show_menu()
         else:
             self.close()
@@ -311,6 +354,8 @@ class StadiumSelector:
 
     def _preferred_stadium_names(self):
         app=self.app
+        if getattr(self,'frontend_mode',False):
+            return (frontend_selection(app.exedir,self._frontend_team,career=self._frontend_career,session=self._frontend_session),)
         names=[]
         pending=getattr(app.stadium_runtime,'pending_selection',None)
         if getattr(app,'_stadium_task_running',False) and pending and pending[0]==self.context[:3]:
@@ -342,7 +387,7 @@ class StadiumSelector:
                 self._catalog_ready=True
                 self._catalog_cache=entries
                 self.app.log(f'Stadium selector catalog ready: {len(entries)} installed packages')
-            if self.opened and not self.audio_panel and not self.prematch_panel:
+            if self.opened and not self.audio_panel and not self.prematch_panel and not self.frontend_panel:
                 selected=self.results[self.index].name if self.results else ''
                 preferred=self._opening_selection_names or ((selected,) if selected else ())
                 self.loading=False
@@ -354,6 +399,8 @@ class StadiumSelector:
                 self._request_preview(entries[0])
 
     def close(self):
+        self.frontend_panel=None
+        self.frontend_mode=False
         self._opening_selection_names=()
         self._image_generation+=1
         self._preview_selection=None
@@ -388,6 +435,8 @@ class StadiumSelector:
 
     def refresh(self,preferred_names=()):
         self.results=filter_catalog(self.entries,self.query,self.country)
+        if getattr(self,'frontend_mode',False) and not self.query and not self.country:
+            self.results=[automatic_entry(self.app.exedir)]+self.results
         for name in preferred_names:
             key=self._stadium_key(name)
             match=next((i for i,entry in enumerate(self.results) if self._stadium_key(entry.name)==key),None)
@@ -398,6 +447,22 @@ class StadiumSelector:
         self.render()
 
     def apply(self):
+        if getattr(self,'frontend_mode',False):
+            if not self.results:return False
+            state=frontend_live_state(self.app.exedir)
+            if not self._frontend_team or state.get('pid')!=self.app._resolve_fifa_pid():
+                self.message='Reinicie o FIFA para ativar a recarga do estádio.';self.render();return False
+            if (state.get('team')!=self._frontend_team or bool(state.get('career'))!=self._frontend_career
+                    or self._frontend_career and state.get('session')!=self._frontend_session):
+                self.message='O clube mudou. Feche e abra o seletor novamente.';self.render();return False
+            try:
+                save_frontend_selection(self.app.exedir,self.results[self.index].name,self._frontend_team,
+                                        career=self._frontend_career,session=self._frontend_session)
+                self.message='Preparando a troca do estádio de fundo…'
+            except (OSError,ValueError) as exc:
+                self.message='Não foi possível salvar o fundo';self.app.log(self.message,exc)
+                self.render();return False
+            self.render();return True
         if not self.results or self.context!=self._context() or not prematch_page(self.app.lastpagename):
             self.message='Seleção indisponível nesta tela'; self.render(); return
         entry=self.results[self.index]
@@ -482,6 +547,9 @@ class StadiumSelector:
             return
         if self.career_panel:
             self.career_panel.handle(kind,value)
+            return
+        if self.frontend_panel:
+            self.frontend_panel.handle(kind,value)
             return
         if self.prematch_panel:
             self.prematch_panel.handle(kind,value)
@@ -635,6 +703,9 @@ class StadiumSelector:
         self._preview_transition=False
 
     def render(self):
+        if self.frontend_panel:
+            self._publish(self.frontend_panel.render(),self.frontend_panel.WIDTH,self.frontend_panel.HEIGHT)
+            return
         if self.career_panel:
             self._publish(self.career_panel.render(), self.career_panel.WIDTH, self.career_panel.HEIGHT)
             return
@@ -665,12 +736,15 @@ class StadiumSelector:
             th=font.getbbox(label)[3]/2
             icon_offset=12 if action in ('cancel','apply') else 0
             draw.text(((rect[0]+rect[2]-tw)/2+icon_offset,(rect[1]+rect[3]-th)/2-1),label,font=font,fill='#ffffff' if primary else ink)
-            icon_x=rect[0]+78; icon_y=(rect[1]+rect[3])//2
+            icon_x=(rect[0]+rect[2]-tw)/2+icon_offset-18; icon_y=(rect[1]+rect[3])//2
             if action=='apply':
                 draw.line(((icon_x-5,icon_y),(icon_x,icon_y+5),(icon_x+10,icon_y-7)),fill='#ffffff',width=2)
             elif action=='cancel':
-                draw.line(((icon_x-5,icon_y-5),(icon_x+5,icon_y+5)),fill=muted,width=2)
-                draw.line(((icon_x-5,icon_y+5),(icon_x+5,icon_y-5)),fill=muted,width=2)
+                if self.frontend_mode:
+                    draw.line(((icon_x+5,icon_y-6),(icon_x-2,icon_y),(icon_x+5,icon_y+6)),fill=muted,width=2)
+                else:
+                    draw.line(((icon_x-5,icon_y-5),(icon_x+5,icon_y+5)),fill=muted,width=2)
+                    draw.line(((icon_x-5,icon_y+5),(icon_x+5,icon_y-5)),fill=muted,width=2)
             self.targets.append((rect,action))
         def chevron(cx,cy,direction,color=ink,width=3):
             draw.line([(cx-direction*3,cy-7),(cx+direction*4,cy),(cx-direction*3,cy+7)],fill=color,width=width)
@@ -686,7 +760,7 @@ class StadiumSelector:
         if self.focus==0 and not self.keyboard: draw_focus_ring(draw,search_rect,12)
         draw.ellipse((41,36,55,50),outline='#738499',width=2)
         draw.line((53,48,60,55),fill='#738499',width=2)
-        text(76,35,self.draft or 'Buscar estádio...',18,color=ink if self.draft else muted,max_width=404)
+        text(76,35,self.draft or ('Estádio de fundo · buscar...' if getattr(self,'frontend_mode',False) else 'Buscar estádio...'),18,color=ink if self.draft else muted,max_width=404)
         text(510,39,'Y / Tab',13,color=muted,max_width=56)
         self.targets.append((search_rect,'search'))
         countries=['']+sorted({entry.country for entry in self.entries},key=lambda code:COUNTRIES.get(code,code))
@@ -747,6 +821,8 @@ class StadiumSelector:
             chevron(cx,246,direction)
             self.targets.append((rect,action))
         stadium_icon(51,402)
+        if self.frontend_mode:
+            text(96,365,'ESTÁDIO DE FUNDO · '+('CARREIRA' if self._frontend_career else 'PERFIL'),12,color=muted,max_width=370)
         if entry:
             text(96,385,self.stadium_title(entry),22,bold=True,max_width=370)
             if entry.team_id:
@@ -766,14 +842,15 @@ class StadiumSelector:
             text(96,390,'Selecione um estádio',21,color=muted,max_width=370)
             text(576-draw.textlength(self.position_label(),font=self.font(13)),438,self.position_label(),13,color=muted,max_width=150)
         draw.line((1,467,598,467),fill='#e9eef4',width=1)
-        button((24,481,292,529),f'Voltar · {panel_function_key(2)} / B' if self.return_to_menu else f'Cancelar · {panel_function_key(2)} / B','cancel',self.focus==4)
-        button((308,481,576,529),f'Aplicar · {panel_function_key(1)}','apply',self.focus==3,primary=True)
+        button((24,481,292,529),f'Voltar · {panel_function_key(2)} / B' if self.return_to_menu or self.frontend_mode else f'Cancelar · {panel_function_key(2)} / B','cancel',self.focus==4)
+        button((308,481,576,529),('Aplicar agora' if self.frontend_mode else 'Aplicar')+f' · {panel_function_key(1)}','apply',self.focus==3,primary=True)
         if self.message:
             text(24,554,self.message,13,color='#8c5b24',max_width=552)
         else:
             hint={0:'Busca selecionada · A / Enter Digitar',1:'País selecionado · ← → Trocar país',
                   2:'Estádio selecionado · ← → Trocar · A / Enter Aplicar',
                   3:'Aplicar selecionado · A / Enter Confirmar',4:'Cancelar selecionado · A / Enter Fechar'}[self.focus]
+            if self.frontend_mode and self.focus==4:hint='Voltar confirma a escolha e recarrega o fundo'
             text(24,554,hint,12,color=ink,max_width=552)
         if self.keyboard:
             # A single transport texture, but two separate screen panels.

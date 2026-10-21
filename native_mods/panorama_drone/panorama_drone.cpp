@@ -18,7 +18,7 @@ static Director director;
 static uint64_t lastTick=0;
 static uint32_t profile=0;
 extern "C" {__declspec(dllexport) struct PublicStatus {
- uint32_t version=3,size=sizeof(PublicStatus),ready=0,enabled=0,active=0;
+ uint32_t version=5,size=sizeof(PublicStatus),ready=0,enabled=0,active=0;
  int32_t shot=-1;
  uint64_t frames=0,applied=0;
  float progress=0,weight=0,eye[3]{},target[3]{};
@@ -151,7 +151,7 @@ static Settings load(uint32_t& profileId){
  cfg.gap=static_cast<float>(value(section,L"original_interval_seconds",24,10,180));cfg.initial=static_cast<float>(value(section,L"initial_original_seconds",8,0,120));
  cfg.transition=static_cast<float>(value(section,L"transition_seconds",3,1,8));cfg.heightLimit=static_cast<float>(value(section,L"height_limit_cm",11000,1000,14000));
  cfg.scale=value(section,L"route_scale_percent",100,60,100)*.01f;cfg.mask=0;
- for(unsigned i=0;i<motionCount;++i){wchar_t key[64]{};MultiByteToWideChar(CP_UTF8,0,motions[i].id,-1,key,64);if(value(L"shots",key,1,0,1))cfg.mask|=1u<<i;}
+ for(unsigned i=0;i<motionCount;++i){wchar_t key[64]{};MultiByteToWideChar(CP_UTF8,0,motions[i].id,-1,key,64);if(value(L"shots",key,1,0,1))cfg.mask|=uint64_t{1}<<i;}
  // The frontend mod can route many stadiums through a shared slot. Hash its
  // actual stadium name, rather than treating slot 176/261 as its identity.
  wchar_t name[256]{};GetPrivateProfileStringW(L"frontend_stadium",L"name",L"",name,256,routePath);

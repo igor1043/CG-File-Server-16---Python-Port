@@ -7,6 +7,8 @@ from .input_hints import navigation_hint, footer_y, panel_function_key
 from .match_audio_panel import MatchAudioPanel
 from .cloth_motion_switch import ClothMotionSwitch
 from .first_person_runtime import first_person_runtime, fov_limits, HEAD_SMOOTHING
+from .extra_scenes_panel import ExtraScenesPanel
+import server16_py as features
 
 
 class MatchHubPanel:
@@ -37,9 +39,12 @@ class MatchHubPanel:
 
     def items(self):
         if self.page == 'home':
-            return [('Música', 'Cânticos, torcida e hinos de gol'),
+            items = [('Música', 'Cânticos, torcida e hinos de gol'),
                     ('Gráficos', 'Física de roupas'),
-                    ('Câmera', 'Primeira pessoa e terceira pessoa · carreira'), ('Fechar', 'Voltar à partida')]
+                    ('Câmera', 'Primeira pessoa e terceira pessoa · carreira')]
+            if features.EXTRA_SCENES_AVAILABLE:
+                items.append(('Cenas extras', 'Técnico e mascote · rosto ou corpo inteiro'))
+            return items + [('Fechar', 'Voltar à partida')]
         if self.page == 'graphics':
             live = self.cloth.live_enabled(pid=self.selector.app._resolve_fifa_pid())
             value = self.cloth_value if live is None else live
@@ -53,7 +58,7 @@ class MatchHubPanel:
         return items + [('Voltar', 'Ajustes da partida')]
 
     def targets(self):
-        pitch, height = (58,52) if self.page == 'camera' and len(self.items())==5 else (72,60)
+        pitch, height = (58,52) if self.page in ('home','camera') and len(self.items())==5 else (72,60)
         return [(i, (24, 98+i*pitch, 576, 98+i*pitch+height)) for i in range(len(self.items()))]
 
     def tick(self):
@@ -90,6 +95,8 @@ class MatchHubPanel:
                 self.child.HEIGHT = self.HEIGHT
             elif index in (1, 2):
                 self.page = 'graphics' if index == 1 else 'camera'
+            elif index == 3 and features.EXTRA_SCENES_AVAILABLE:
+                self.child = ExtraScenesPanel(self)
             else:
                 self.selector.close();return
             self.focus = 0

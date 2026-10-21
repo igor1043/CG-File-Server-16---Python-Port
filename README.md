@@ -4,7 +4,16 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Atualizado em:** 19/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.8 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+
+## Atualização — 21/10/2026
+
+- **Estádio de fundo:** seleção para o menu inicial e a carreira, com preparação do pacote antes da recarga nativa. A escolha fica salva; o recurso começa desligado. No automático, a carreira usa o clube do save. A imagem do FIFA Friends é preservada quando não há estádio disponível ou o recurso está desligado.
+- **Panorâmica:** 37 tomadas, incluindo travessias do campo, aproximações do gol e órbita externa do estádio, com o módulo compatível do V12.
+- **Pênaltis:** o placar permanece ativo durante a disputa; a pirotecnia compatível bloqueia os disparos nessa fase.
+- **Recursos em desenvolvimento:** cenas extras de técnicos/mascotes desativadas. Seleção automática/manual de narrador, progresso e aviso de narração aplicada ficam ocultos; o código permanece preservado.
+
+As DLLs compiladas para o jogo ficam no [pacote FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12). Este repositório mantém os fontes, scripts e testes. Consulte o [índice dos módulos nativos](native_mods/README.md) para localizar cada componente.
 
 ## Overlay da carreira — 19/10/2026
 
@@ -78,7 +87,6 @@ reduz a chance de o cabelo aparecer nas viradas.
 - **Física de roupas:** movimento das camisas e calções; começa desligado e preserva a escolha feita por você. Recurso experimental do V12.
 - **Torcida:** ajuste de ocupação e volume, com confirmação dos módulos compatíveis.
 - **Cânticos e hinos:** áudios dos clubes, rivalidades e perfis de volume.
-- **Narração:** escolha entre os perfis e bancos de áudio instalados.
 - **Música de abertura:** perfil de áudio para a apresentação.
 - **Placar, TV e vídeos:** pacotes associados às competições e partidas.
 - **Ícones das competições:** importação de PNG, JPG, WEBP ou BMP para a carreira.
@@ -110,7 +118,7 @@ Nomes desconhecidos, duplicados ou ambíguos e imagens inválidas são explicado
 
 | Ação | Atalho |
 |---|---|
-| Aplicar nos painéis de configurações, público e narração | **F3** |
+| Aplicar nos painéis de configurações e público | **F3** |
 | Voltar ou cancelar nesses painéis | **F4** |
 | Alternar a física de roupas, com o módulo compatível | **F6** |
 | Painel durante a partida | **F12**, conforme o contexto |

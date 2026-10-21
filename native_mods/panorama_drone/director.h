@@ -3,9 +3,9 @@
 #include <cstring>
 namespace panorama {
 inline bool eligibleCamera(int phase,const char* name){return phase==1&&name&&!std::strncmp(name,"BC: Stadium FE ",15)&&name[15]>='0'&&name[15]<='9';}
-struct Settings {bool enabled=true;float duration=52,gap=24,initial=8,transition=3,heightLimit=11000,scale=1;uint32_t mask=allMotionsMask;};
+struct Settings {bool enabled=true;float duration=52,gap=24,initial=8,transition=3,heightLimit=11000,scale=1;uint64_t mask=allMotionsMask;};
 struct Decision {bool active=false;unsigned motion=0;float progress=0,opacity=0;};
-// Rotation starts with a new aerial arrival, then uses a full-cycle permutation;
+// Rotation starts with the new exterior orbit, then uses a full-cycle permutation;
 // repetition, and all enabled scenes are visited before a repeat.
 class Director {
  enum class Stage {Gap,FadeOutNative,CutToDrone,FadeInDrone,Drone,FadeOutDrone,CutToNative,FadeInNative};
@@ -28,7 +28,7 @@ public:
   case Stage::Gap:{
    if(elapsed_<0)return {};
    bool found=false;
-   for(unsigned attempt=0;attempt<motionCount;++attempt){const unsigned n=(cursor_*5+12)%motionCount;++cursor_;if((cfg.mask&(1u<<n))&&available(n,cfg.heightLimit)){selected_=n;found=true;break;}}
+   for(unsigned attempt=0;attempt<motionCount;++attempt){const unsigned n=(cursor_*5+36)%motionCount;++cursor_;if((cfg.mask&(uint64_t{1}<<n))&&available(n,cfg.heightLimit)){selected_=n;found=true;break;}}
    if(!found)return {};shotElapsed_=0;advance(Stage::FadeOutNative);result.motion=selected_;return result;
   }
   case Stage::FadeOutNative:
