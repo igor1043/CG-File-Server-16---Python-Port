@@ -1,4 +1,5 @@
 """Code-drawn Xbox glyphs; no external images or font-symbol dependency."""
+from .overlay_canvas import fit_text
 
 PANEL_FUNCTION_KEYS = ('F3', 'F4', 'F5', 'F8', 'F9')
 
@@ -30,6 +31,7 @@ def action_label(draw, selector, rect, label, key, button, color='#344651', size
     icon = pad and show_icon
     font = selector.font(size)
     caption = label if pad else f'{label} · {key}'
+    caption = fit_text(draw, caption, font, rect[2]-rect[0]-32-(27 if icon else 0))
     width = draw.textlength(caption, font=font) + (27 if icon else 0)
     x = (rect[0]+rect[2]-width)/2
     y = (rect[1]+rect[3])/2
@@ -43,13 +45,13 @@ def navigation_hint(draw, selector, y, confirm='Confirmar', back='Voltar'):
     font = selector.font(12)
     muted = '#728397'
     if not controller_connected(selector):
-        draw.text((24, y), f'Setas: selecionar / ajustar · Enter: {confirm.lower()}', font=font, fill=muted)
+        draw.text((24, y), f'Setas: selecionar / ajustar · Enter: {confirm.lower()}', font=font, fill=muted,max_width=552)
         return
     # A small D-pad glyph, followed by only the actions actually handled.
     draw.rounded_rectangle((24, y+2, 46, y+10), 2, fill=muted)
     draw.rounded_rectangle((31, y-5, 39, y+17), 2, fill=muted)
-    draw.text((54, y-2), 'Selecionar / ajustar', font=font, fill=muted)
+    draw.text((54, y-2), 'Selecionar / ajustar', font=font, fill=muted,max_width=168)
     xbox_button(draw, selector, 237, y+6, 'A', 9)
-    draw.text((252, y-2), confirm, font=font, fill=muted)
+    draw.text((252, y-2), confirm, font=font, fill=muted,max_width=129)
     xbox_button(draw, selector, 398, y+6, 'B', 9)
-    draw.text((413, y-2), back, font=font, fill=muted)
+    draw.text((413, y-2), back, font=font, fill=muted,max_width=163)

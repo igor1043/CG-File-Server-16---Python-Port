@@ -156,11 +156,11 @@ class CareerPanel:
         if self.data_gate():
             return [(0,(24,500,576,558))]
         if self.page == 'clubs':
-            return [(i,(24,110+i*128,576,220+i*128)) for i in range(3)] + [
-                (3,(24,500,576,550)),(4,(24,562,576,600))]
+            return [(i,(24,110+i*116,576,214+i*116)) for i in range(3)] + [
+                (3,(24,466,576,514)),(4,(24,526,576,574))]
         if self.page == 'funds':
             return [(i,(24+(i%3)*190,192+(i//3)*65,196+(i%3)*190,247+(i//3)*65)) for i in range(12)] + [
-                (12,(24,470,576,520)),(13,(24,535,576,590))]
+                (12,(24,466,576,514)),(13,(24,526,576,574))]
         if self.page in ('confirm','status'):
             return [(i,(24,430+i*72,576,490+i*72)) for i in range(count)]
         pitch = 72
@@ -325,10 +325,7 @@ class CareerPanel:
         draw.rounded_rectangle((0,0,599,self.HEIGHT-1),18,fill='white',outline='#dbe3ed')
         ink,muted,blue='#344651','#728397','#0968f8'
         def text(x,y,value,size=15,color=ink,bold=False,width=552):
-            value=str(value)
-            while len(value)>1 and draw.textlength(value,font=self.selector.font(size,bold))>width:
-                value=value[:-2]+'…'
-            draw.text((x,y),value,font=self.selector.font(size,bold),fill=color)
+            draw.text((x,y),str(value),font=self.selector.font(size,bold),fill=color,max_width=width)
         gate=self.data_gate()
         if gate:
             text(24,22,'Modo carreira',25,bold=True)
@@ -404,11 +401,12 @@ class CareerPanel:
                 text(rect[0]+16,rect[1]+9,label,17,bold=True,width=width)
                 if detail and rect[3]-rect[1]>42:text(rect[0]+16,rect[1]+33,detail,12,muted,width=width)
         if self.page=='home':
-            text(24,408,'Carreira em execução',15,bold=True)
-            text(24,434,self.service.selected['title'] if self.service.selected else 'Identificação automática em andamento…',13,muted)
-            text(24,460,'Clubes: proposta para você aceitar pelo FIFA.',14,bold=True)
-            text(24,486,'Finanças e aposentadoria: salve antes do pedido.',14,muted)
-            text(24,512,'Essas alterações são aplicadas após sair da carreira.',13,muted)
+            info_y=max(rect[3] for _,rect in self.targets())+24
+            save=self.service.selected['title'] if self.service.selected else 'Identificando…'
+            text(24,info_y,'Carreira em execução: '+save,13,bold=True)
+            text(24,info_y+24,'Clubes: proposta para você aceitar pelo FIFA.',14,bold=True)
+            text(24,info_y+48,'Finanças e aposentadoria: salve antes do pedido.',14,muted)
+            text(24,info_y+72,'Essas alterações são aplicadas após sair da carreira.',13,muted)
         elif self.page=='retirement':
             text(24,370,'As duas opções afetam jogadores marcados para se aposentar.',13,muted)
             text(24,400,'Salve seu progresso antes de confirmar o pedido.',14,bold=True)
@@ -467,6 +465,6 @@ class CareerPanel:
             candidate=(lines[-1]+' '+word).strip()
             if draw.textlength(candidate,font=self.selector.font(12))>550 and lines[-1]:lines.append(word)
             else:lines[-1]=candidate
-        for i,line in enumerate(lines[:2]):text(24,605+i*16,line,12,muted)
+        for i,line in enumerate(lines[:2]):text(24,590+i*18,line,12,muted)
         navigation_hint(draw,self.selector,footer_y(self.HEIGHT),'Selecionar','Voltar')
         return image

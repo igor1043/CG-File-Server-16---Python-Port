@@ -71,7 +71,8 @@ class NarrationPanel:
         image=Image.new('RGBA',(self.WIDTH*2,self.HEIGHT*2));draw=OverlayDraw(image)
         ink,muted,blue='#344651','#8797ab','#0968f8'
         draw.rounded_rectangle((0,0,self.WIDTH-1,self.HEIGHT-1),18,fill='white',outline='#e0e6ee')
-        def text(x,y,label,size=16,color=ink,bold=False):draw.text((x,y),label,font=self.selector.font(size,bold),fill=color)
+        def text(x,y,label,size=16,color=ink,bold=False,width=None):
+            draw.text((x,y),label,font=self.selector.font(size,bold),fill=color,max_width=576-x if width is None else width)
         text(24,22,'Narração da partida',23,bold=True);text(24,58,'Escolha antes de entrar em campo.',15,muted)
         if len(self.options)>3:text(470,58,f'{self.offset+1}–{min(self.offset+3,len(self.options))} / {len(self.options)}',13,muted)
         if len(self.options)>3:
@@ -91,7 +92,9 @@ class NarrationPanel:
                     draw.ellipse((65,r[1]+5,103,r[1]+43),fill='white',outline='#dce5ee',width=1)
                     image.alpha_composite(photo,(132,r[1]*2+12))
                 except (OSError,ValueError):pass
-            text(116 if portrait else 72,r[1]+9,p['name'],17,bold=True);text(302,r[1]+12,p['commentator'],13,muted)
+            left=116 if portrait else 72
+            text(left,r[1]+9,p['name'],17,bold=True,width=286-left)
+            text(302,r[1]+12,p['commentator'],13,muted,width=167 if p['name']==self.runtime.current else 258)
             if p['name']==self.runtime.current:text(485,r[1]+12,'Atual',13,blue)
         if not self.options:text(24,115,'Crie uma subpasta por narrador em Narrations.',16,muted)
         for f,r,label,key,pad in ((3,self.BACK,'Voltar',panel_function_key(2),'B'),(4,self.APPLY,'Aplicar',panel_function_key(1),'A')):

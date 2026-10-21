@@ -104,7 +104,7 @@ class ExtraScenesPanel:
                 preview,('Frequência','Teste · sempre que houver espaço' if v['test_mode'] else 'Normal · exibição ocasional'),
                 ('Voltar','Prévia da partida' if self.prematch else 'Ajustes da partida')]
 
-    def targets(self):return [(i,(24,94+i*50,576,140+i*50)) for i in range(6)]
+    def targets(self):return [(i,(24,94+i*52,576,136+i*52)) for i in range(6)]
 
     def activate(self,index,direction=1,adjust=False):
         eligible=(self.selector.app.memory.is_open() and prematch_page(self.selector.app.lastpagename)) if self.prematch else self.selector.match_eligible()
@@ -164,8 +164,9 @@ class ExtraScenesPanel:
         for (index,rect),(label,detail) in zip(self.targets(),self.items()):
             draw.rounded_rectangle(rect,10,fill='#f4f7fb',outline='#dbe3ed')
             if self.focus==index:draw_focus_ring(draw,rect)
-            draw.text((40,rect[1]+7),label,font=self.selector.font(18,True),fill=ink)
-            draw.text((40,rect[1]+30),detail,font=self.selector.font(12),fill=muted)
+            available=470 if not self.selector.controller_connected else 520
+            draw.text((40,rect[1]+5),label,font=self.selector.font(18,True),fill=ink,max_width=available)
+            draw.text((40,rect[1]+26),detail,font=self.selector.font(12),fill=muted,max_width=available)
             if not self.selector.controller_connected:
                 draw.text((527,rect[1]+15),panel_function_key(index+1) if index<5 else 'Esc',font=self.selector.font(12,True),fill='#0968f8')
         message=self.message or self._status or ('Escolhas salvas para a partida e para as próximas sessões.' if self.prematch else self.store.status(self.selector.app._resolve_fifa_pid()))

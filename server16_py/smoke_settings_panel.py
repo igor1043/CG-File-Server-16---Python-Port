@@ -6,7 +6,7 @@ from .panel_navigation import move_focus
 
 
 class SmokeSettingsPanel:
-    WIDTH,HEIGHT=600,620
+    WIDTH,HEIGHT=600,650
     # Same global numbering as the native machineSites array (1 through 20).
     SIDELINES=((190,242),(190,482),(255,242),(255,482),
                (345,242),(345,482),(410,242),(410,482))
@@ -71,7 +71,7 @@ class SmokeSettingsPanel:
     def render(self):
         image=Image.new('RGBA',(self.WIDTH*2,self.HEIGHT*2));draw=OverlayDraw(image)
         ink,muted,blue='#344651','#728397','#0968f8'
-        draw.rounded_rectangle((0,0,599,619),18,fill='white',outline='#e0e6ee')
+        draw.rounded_rectangle((0,0,self.WIDTH-1,self.HEIGHT-1),18,fill='white',outline='#e0e6ee')
         def text(x,y,value,size=14,bold=False,color=ink):draw.text((x,y),value,font=self.selector.font(size,bold),fill=color)
         text(24,21,'Fumaça · tempo e emissores',23,True)
         text(24,55,'Escolha abaixo; depois volte e selecione Aplicar.',13,color=muted)

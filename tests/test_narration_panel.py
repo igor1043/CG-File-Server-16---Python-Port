@@ -5,6 +5,11 @@ from unittest.mock import Mock,patch
 import test_stadium_selector as fixtures
 
 class NarrationPanelTests(unittest.TestCase):
+    def setUp(self):
+        # This preserved developer UI is intentionally hidden in public builds.
+        gate=patch('server16_py.NARRATION_PICKER_AVAILABLE',True)
+        gate.start();self.addCleanup(gate.stop)
+
     def test_narrator_selection_applies_and_returns_to_prematch_menu(self):
         options=[dict(name=n,commentator='Caio Ribeiro') for n in ('Tiago Leifert','Vilani','Luiz Roberto')]
         runtime=SimpleNamespace(current='Tiago Leifert',pending=None,error='',profiles=lambda:options,apply=Mock())

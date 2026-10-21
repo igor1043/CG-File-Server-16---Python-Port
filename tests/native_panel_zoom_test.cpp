@@ -8,7 +8,9 @@
 #include "../server16_py/d3d_overlay/selector_layout.h"
 
 int main() {
-    for (LONG height : {390L,435L,440L,460L,600L}) {
+    // Uncapped layouts preserve the zoom exactly. Taller cards are checked
+    // below across viewports, where fitting can reduce their scale.
+    for (LONG height : {390L,435L,440L,460L,545L,600L,650L}) {
         auto layout=selector_layout(1920.f,1080.f,600,height);
         float oldScale=1.05f*(height==440 ? 1.f : .6f);
         assert(std::abs(layout.card_scale-oldScale*1.5f)<.0001f);
@@ -22,7 +24,7 @@ int main() {
     assert(keyboard.card_y+600.f*keyboard.card_scale<keyboard.keyboard_y);
     for (auto viewport : {std::pair<float,float>(640,480),{800,600},{1280,720},
                            {1920,1080},{3440,1440},{720,1280}}) {
-        for (LONG height : {390L,435L,440L,460L,600L,830L}) {
+        for (LONG height : {390L,435L,440L,460L,545L,600L,650L,680L,830L}) {
             auto layout=selector_layout(viewport.first,viewport.second,height==830?1000:600,height);
             assert(layout.card_scale>0);
             assert(layout.card_x>=0 && layout.card_y>=0);

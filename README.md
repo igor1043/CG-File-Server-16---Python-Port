@@ -4,10 +4,12 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.8 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.9 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 ## Atualização — 21/10/2026
 
+- **Painéis revisados:** informações da carreira ficam abaixo das opções, com espaço próprio para avisos e rodapé. Fumaça, configurações, áudio e câmera receberam ajustes de espaçamento e limites de texto.
+- **Teclado QWERTY:** números separados e fileiras de letras escalonadas como em notebook. Desenho, mouse e navegação pelo controle usam as mesmas posições. São 117 testes aprovados e 52 estados renderizados para conferência; validação visual no FIFA pendente.
 - **Estádio de fundo:** seleção para o menu inicial e a carreira, com preparação do pacote antes da recarga nativa. A escolha fica salva; o recurso começa desligado. No automático, a carreira usa o clube do save. A imagem do FIFA Friends é preservada quando não há estádio disponível ou o recurso está desligado.
 - **Panorâmica:** 37 tomadas, incluindo travessias do campo, aproximações do gol e órbita externa do estádio, com o módulo compatível do V12. A volta externa leva cerca de 83 segundos no padrão, com velocidade dobrada e transições suaves.
 - **Pênaltis:** o placar permanece ativo durante a disputa; a pirotecnia compatível bloqueia os disparos nessa fase.

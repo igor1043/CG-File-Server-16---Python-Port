@@ -190,7 +190,7 @@ class MatchAudioPanel:
         blue, ink, muted = '#0968f8', '#344651', '#8797ab'
         draw.rounded_rectangle((0, 0, self.WIDTH-1, self.HEIGHT-1), 18, fill='white', outline='#e0e6ee')
         def text(x, y, label, size=17, color=ink, bold=False):
-            draw.text((x, y), label, font=self.selector.font(size, bold), fill=color)
+            draw.text((x, y), label, font=self.selector.font(size, bold), fill=color,max_width=576-x)
         def fit(label, size):
             font = self.selector.font(size)
             while len(label) > 1 and draw.textlength(label, font=font) > 550:
@@ -223,7 +223,7 @@ class MatchAudioPanel:
         if self.include_cloth:
             rect=self.CLOTH;active=self.cloth_enabled;available=self.cloth.available()
             if self.focus==5:draw_focus_ring(draw,rect,8)
-            text(36,311,'Física de roupas · aplica agora',16,ink if available else muted)
+            draw.text((36,311),'Física de roupas · aplica agora',font=self.selector.font(16),fill=ink if available else muted,max_width=427)
             draw.rounded_rectangle((479,308,525,332),12,fill=blue if active and available else '#d6dee9')
             cx=513 if active else 491;draw.ellipse((cx-9,311,cx+9,329),fill='white')
             text(535,311,'Sim' if active else 'Não',12,ink if available else muted)

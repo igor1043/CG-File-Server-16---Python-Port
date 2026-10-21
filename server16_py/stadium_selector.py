@@ -17,6 +17,7 @@ from .stadium_catalog import COUNTRIES, COUNTRY_FLAGS, build_catalog, filter_cat
 from .file_tools import STADIUM_ARCHIVE_SUFFIXES
 from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
 from .input_hints import panel_function_key
+from .panel_navigation import move_focus
 from .match_audio_panel import MatchAudioPanel
 from .match_state import pause_page
 from .crowd_control import CrowdControl
@@ -491,6 +492,21 @@ class StadiumSelector:
         else: self.draft=(self.draft+label)[:80]
         self.render()
 
+    def keyboard_targets(self):
+        # Physical QWERTY rows. Drawing, mouse and directional input share
+        # these rectangles, so staggered rows stay aligned for every device.
+        targets=[]
+        for row,(letters,left) in enumerate((('1234567890',24),('QWERTYUIOP',34),
+                                             ('ASDFGHJKL',80),('ZXCVBNM',126))):
+            y=self.HEIGHT+44+row*36
+            for column,key in enumerate(letters):
+                x=left+column*94
+                targets.append((self.KEYS.index(key),(x,y,x+82,y+26)))
+        for key,left,right in (('Espaço',24,456),('Apagar',464,640),
+                               ('Limpar',648,784),('Buscar',792,976)):
+            targets.append((self.KEYS.index(key),(left,self.HEIGHT+190,right,self.HEIGHT+222)))
+        return targets
+
     def action(self, action):
         self._opening_selection_names=()
         if action=='search': self.keyboard=True; self.key_index=0; self.focus=0; self.render()
@@ -570,7 +586,10 @@ class StadiumSelector:
             elif value==2:
                 if self.keyboard: self.keyboard=False; self.focus=2; self.render()
                 else: self.back()
-        elif kind==9: self.action('search')
+        elif kind==9:
+            if self.keyboard:
+                self.key_index=move_focus(self.key_index,kind,self.keyboard_targets());self.render()
+            else:self.action('search')
         elif kind==8:
             x,y=value&65535,(value>>16)&65535
             for rect,action in self.targets:
@@ -579,17 +598,8 @@ class StadiumSelector:
             self.key('Apagar' if value==8 else chr(value))
         elif self.keyboard:
             if kind==6: self.key(self.KEYS[self.key_index])
-            else:
-                if kind in (2,3):
-                    self.key_index=(self.key_index+(1 if kind==3 else -1))%len(self.KEYS)
-                elif kind==4:
-                    if self.key_index>=36: self.key_index=24+(self.key_index-36)*12//4
-                    elif self.key_index<12: self.key_index=36+self.key_index*4//12
-                    else: self.key_index-=12
-                elif kind==5:
-                    if self.key_index>=36: self.key_index=(self.key_index-36)*12//4
-                    elif self.key_index>=24: self.key_index=36+(self.key_index-24)*4//12
-                    else: self.key_index+=12
+            elif kind in (2,3,4,5):
+                self.key_index=move_focus(self.key_index,kind,self.keyboard_targets())
                 self.render()
         elif kind==6:
             self.action({0:'search',1:'country_next',2:'apply',3:'apply',4:'cancel'}[self.focus])
@@ -850,7 +860,7 @@ class StadiumSelector:
             hint={0:'Busca selecionada · A / Enter Digitar',1:'País selecionado · ← → Trocar país',
                   2:'Estádio selecionado · ← → Trocar · A / Enter Aplicar',
                   3:'Aplicar selecionado · A / Enter Confirmar',4:'Cancelar selecionado · A / Enter Fechar'}[self.focus]
-            if self.frontend_mode and self.focus==4:hint='Voltar confirma a escolha e recarrega o fundo'
+            if self.frontend_mode and self.focus==4:hint='Voltar às opções · use Aplicar agora para trocar o fundo'
             text(24,554,hint,12,color=ink,max_width=552)
         if self.keyboard:
             # A single transport texture, but two separate screen panels.
@@ -861,12 +871,7 @@ class StadiumSelector:
             draw.rounded_rectangle((0,self.HEIGHT,self.KEYBOARD_WIDTH-1,height-1),16,fill='#ffffff',outline='#dce5ee')
             text(20,self.HEIGHT+14,'TECLADO',16,bold=True)
             text(165,self.HEIGHT+16,'Setas + A para digitar • Buscar confirma • B retorna ao estádio',14,color=muted,max_width=805)
-            for i,key in enumerate(self.KEYS):
-                # The final row reserves wider keys for the four actions.
-                if i>=36:
-                    x=20+(i-36)*240; y=self.HEIGHT+174
-                    button((x,y,x+232,y+40),key,'key:'+key,i==self.key_index,primary=key=='Buscar')
-                else:
-                    x=20+(i%12)*80; y=self.HEIGHT+48+(i//12)*38
-                    button((x,y,x+72,y+32),key,'key:'+key,i==self.key_index)
+            for i,rect in self.keyboard_targets():
+                key=self.KEYS[i]
+                button(rect,key,'key:'+key,i==self.key_index,primary=key=='Buscar')
         self._publish(image,self.KEYBOARD_WIDTH if self.keyboard else self.WIDTH,height)

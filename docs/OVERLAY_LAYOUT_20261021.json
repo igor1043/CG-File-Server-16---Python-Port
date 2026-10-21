@@ -1,0 +1,36 @@
+{
+  "version": "0.2.9",
+  "date": "2026-10-21",
+  "python_tests": {
+    "tests": 117,
+    "failures": 0,
+    "errors": 0,
+    "passed": true
+  },
+  "native_viewport_and_mouse_mapping": "passed for 600x650/680 panels and 1000x830 keyboard across six viewports",
+  "rendered_preview_states": 52,
+  "visual_review": "offline images reviewed; FIFA validation pending user",
+  "public_development_gates": {
+    "narration_picker": false,
+    "extra_scenes": false
+  },
+  "runtime": {
+    "bytes": 45710208,
+    "sha256": "7589634a7e89d6cf3b3e40e20d0c6afdac3d34a531f6db8bbf875545483e599f",
+    "preserved_archive_members": 3056,
+    "preserved_python_modules": 667
+  },
+  "source_modules": {
+    "server16_py": "9f997445195db9124e8755b3ea6d8fddb36ad5f466a8c3f912f4093ca76685e4",
+    "server16_py.career_panel": "fb7177cc64281d79ee2b140c76990c86b532a29648c5bd012ae25be579c59840",
+    "server16_py.extra_scenes_panel": "a482c03f1ab10b518dcfd116ac6806ffd8165ba28ccbba2cfbdd4ed4f47a3b70",
+    "server16_py.input_hints": "4397574c63e085f7a969e5d244139584bb3d0217256b27918b6ff96431dc74e7",
+    "server16_py.match_audio_panel": "8e239a7a3175a2ba2da4ea7b3fc084b063cc6c01a9fcc65698a86bd0891f5a16",
+    "server16_py.match_hub_panel": "9aeb628a0f2b57ba89e0302938922ce9fdce98b21115db5339bdb4d4609dc00e",
+    "server16_py.match_settings_panel": "965b35b169a33c2994cf92af13a3e6302c5b66733a64a003247c5cba4ea939d8",
+    "server16_py.narration_panel": "aef7b1e148954bd8424d3681eb6b63d813788054a54ec3353d024f7eba494e29",
+    "server16_py.overlay_canvas": "8338364533956ede33f2e16de961b9ba2fac2f05a797b28777d69bb45af727b2",
+    "server16_py.smoke_settings_panel": "4ac6bc9aafe162064eeac38581b3eeb0a7f59976970c82755f310a3d9dc74ab4",
+    "server16_py.stadium_selector": "9af0b616d506ab0d457321e2169c4b66611ff8d0cd78d02a468043d9ac4410f3"
+  }
+}

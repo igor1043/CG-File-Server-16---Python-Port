@@ -58,7 +58,7 @@ class MatchHubPanel:
         return items + [('Voltar', 'Ajustes da partida')]
 
     def targets(self):
-        pitch, height = (58,52) if self.page in ('home','camera') and len(self.items())==5 else (72,60)
+        pitch, height = (58,48) if self.page in ('home','camera') and len(self.items())==5 else (72,60)
         return [(i, (24, 98+i*pitch, 576, 98+i*pitch+height)) for i in range(len(self.items()))]
 
     def tick(self):
@@ -164,8 +164,9 @@ class MatchHubPanel:
         for (index,rect),(label,detail) in zip(self.targets(),self.items()):
             draw.rounded_rectangle(rect,10,fill='#f4f7fb',outline='#dbe3ed')
             if self.focus==index:draw_focus_ring(draw,rect)
-            draw.text((40,rect[1]+9),label,font=self.selector.font(18,True),fill=ink)
-            draw.text((40,rect[1]+31),detail,font=self.selector.font(13),fill=muted)
+            available=470 if not self.selector.controller_connected else 520
+            draw.text((40,rect[1]+9),label,font=self.selector.font(18,True),fill=ink,max_width=available)
+            draw.text((40,rect[1]+31),detail,font=self.selector.font(13),fill=muted,max_width=available)
             if not self.selector.controller_connected:
                 draw.text((527,rect[1]+21),panel_function_key(index+1),font=self.selector.font(13,True),fill=blue)
         message=self.message

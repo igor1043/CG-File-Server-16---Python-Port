@@ -10,8 +10,8 @@ from .smoke_settings_panel import SmokeSettingsPanel
 
 class MatchSettingsPanel:
     WIDTH, HEIGHT = 600, 545
-    ROWS = ((24, 85, 576, 123), (24, 130, 576, 168),
-            (48, 175, 576, 213), (48, 220, 576, 258), (24, 265, 576, 303), (24, 310, 576, 348), (24,355,576,397))
+    ROWS = ((24, 85, 576, 120), (24, 130, 576, 165),
+            (48, 175, 576, 210), (48, 220, 576, 255), (24, 265, 576, 300), (24, 310, 576, 345), (24,355,576,397))
     BACK, APPLY = (24, 427, 292, 469), (308, 427, 576, 469)
 
     def __init__(self, selector):
@@ -124,7 +124,8 @@ class MatchSettingsPanel:
             enabled = self.enabled(i)
             if self.focus == i:
                 draw_focus_ring(draw, rect, 8)
-            draw.text((rect[0]+12, rect[1]+8), label, font=self.selector.font(16, i < 2), fill=ink if enabled else muted)
+            draw.text((rect[0]+12, rect[1]+8), label, font=self.selector.font(16, i < 2), fill=ink if enabled else muted,
+                      max_width=(484 if i==6 else 463)-(rect[0]+12))
             if i==6:
                 draw.text((500,rect[1]+11),'Abrir ›',font=self.selector.font(13,True),fill=blue)
                 continue
@@ -140,7 +141,7 @@ class MatchSettingsPanel:
                 draw_focus_ring(draw, rect)
             action_label(draw, self.selector, rect, label, key, button, 'white' if primary else ink)
         if self.message:
-            draw.text((24, footer_y(self.HEIGHT)), self.message, font=self.selector.font(11), fill=muted)
+            draw.text((24, footer_y(self.HEIGHT)), self.message, font=self.selector.font(11), fill=muted,max_width=552)
         else:
             navigation_hint(draw, self.selector, footer_y(self.HEIGHT), 'Alternar / aplicar')
         return image

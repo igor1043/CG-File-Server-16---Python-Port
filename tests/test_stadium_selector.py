@@ -258,8 +258,9 @@ class StadiumSelectorTests(unittest.TestCase):
                 for i,(a,_) in enumerate(keys):
                     for b,_ in keys[i+1:]:
                         self.assertFalse(a[0]<b[2] and a[2]>b[0] and a[1]<b[3] and a[3]>b[1])
-                selector.key_index=35; selector.handle(5,0); self.assertEqual(selector.KEYS[selector.key_index],'Buscar')
-                selector.handle(4,0); self.assertTrue(24<=selector.key_index<=35)
+                selector.key_index=selector.KEYS.index('9')
+                selector.handle(5,0); self.assertEqual(selector.KEYS[selector.key_index],'O')
+                selector.handle(4,0); self.assertEqual(selector.KEYS[selector.key_index],'9')
                 selector.handle(7,0)
                 cancel=next(rect for rect,action in selector.targets if action=='cancel')
                 x=(cancel[0]+cancel[2])//2; y=(cancel[1]+cancel[3])//2
@@ -315,8 +316,10 @@ class StadiumSelectorTests(unittest.TestCase):
                 self.assertEqual(selector.focus,1)
                 selector.handle(9,0)
                 draft=selector.draft
-                selector.handle(15,((selector.HEIGHT+70)<<16)|140)
-                self.assertEqual(selector.key_index,1)
+                rect=dict(selector.keyboard_targets())[selector.KEYS.index('W')]
+                x,y=(rect[0]+rect[2])//2,(rect[1]+rect[3])//2
+                selector.handle(15,(y<<16)|x)
+                self.assertEqual(selector.KEYS[selector.key_index],'W')
                 self.assertEqual(selector.draft,draft)
                 selector.app.stadium_runtime.apply_manual_stadium.assert_not_called()
             finally: selector.shutdown()
