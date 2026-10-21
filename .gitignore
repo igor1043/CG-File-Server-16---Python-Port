@@ -93,6 +93,6 @@ runtime/dev_deps/
 bin/server16_first_person.dll
 bin/server16_first_person_v[2-4].dll
 
-# Rejected camera revisions; v11 is the supported runtime.
+# Rejected camera experiments; v12 is the current runtime.
 bin/server16_first_person_v[8-9].dll
 bin/server16_first_person_v10.dll

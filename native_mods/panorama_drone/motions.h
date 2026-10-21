@@ -13,7 +13,7 @@ inline bool unit(Vec& a){const float n=std::sqrt(dot(a,a));if(!std::isfinite(n)|
 inline float smooth(float t){t=std::clamp(t,0.f,1.f);return std::clamp(t*t*t*(10+t*(-15+6*t)),0.f,1.f);}
 inline Vec mix(Vec a,Vec b,float t){return a+(b-a)*t;}
 struct Pose {Vec eye,target;float fov=55;};
-enum class MotionKind {Curve,CircleOrbit,CircleTurn,ExteriorOrbit};
+enum class MotionKind {Curve,CircleOrbit,CircleTurn,ExteriorOrbit,ExteriorProfileOrbit,LineTravel};
 struct Motion {
  const char* id;Vec a,b,c,ta,tb,tc;float fov;
  Vec d{},td{};float endFov=0,durationScale=1;bool cubic=false,exterior=false;
@@ -22,6 +22,9 @@ struct Motion {
 };
 inline constexpr Motion cinema(const char* id,Vec a,Vec b,Vec c,Vec d,Vec ta,Vec tb,Vec tc,Vec td,float from,float to,float durationScale=1,bool exterior=false,bool pitchEdge=false){
  return {id,a,b,c,ta,tb,tc,from,d,td,to,durationScale,true,exterior,pitchEdge};
+}
+inline constexpr Motion lineTravel(const char* id,Vec from,Vec to,Vec aimFrom,Vec aimTo,float fov,float durationScale){
+ return {id,from,{},{},aimFrom,{},{},fov,to,aimTo,fov,durationScale,true,false,true,MotionKind::LineTravel};
 }
 // Centimetres in rendered world space. Exterior arrivals cross the stand rim
 // high above the pitch, descending only after the camera is inside the bowl.
@@ -68,20 +71,29 @@ inline constexpr Motion motions[]={
  cinema("goal_front_arc",{5000,380,-1050},{4000,650,-700},{4000,650,700},{5000,380,1050}, {5250,140,0},{5250,140,0},{5250,140,0},{5250,140,0},56,56,1,false,true),
  cinema("goal_low_crane",{5000,190,620},{4950,300,250},{4650,850,-250},{4400,1200,-650}, {5250,120,0},{5250,140,0},{5250,170,0},{5250,200,0},58,54,1,false,true),
  // Full ellipse outside the stands, looking inward throughout the circuit.
- {"stadium_exterior_orbit",{11000,10800,9500},{},{},{0,50,0},{},{},56,{}, {},0,1.6f,false,true,false,MotionKind::ExteriorOrbit,10000}
+ {"stadium_exterior_orbit",{11000,10800,9500},{},{},{0,50,0},{},{},56,{}, {},0,1.9f,false,true,false,MotionKind::ExteriorOrbit,10000},
+ // A wider, lower circuit frames the stadium's horizontal profile. Its
+ // target is above the pitch, so this view deliberately includes the skyline.
+ {"stadium_horizontal_profile_orbit",{16500,6500,14500},{},{},{0,2000,0},{},{},56,{}, {},0,2.5f,false,true,false,MotionKind::ExteriorProfileOrbit,6500},
+ // Complete 68m halfway line, at walking height, with steady cruise between
+ // short acceleration/deceleration ramps instead of an extended centre surge.
+ lineTravel("halfway_line_full_traverse",{0,240,-3400},{0,240,3400},{0,180,-2700},{0,180,4100},58,1.35f)
 };
 inline constexpr unsigned motionCount=sizeof motions/sizeof motions[0];
 static_assert(motionCount<64,"The shot mask must fit uint64_t");
 inline constexpr uint64_t allMotionsMask=(uint64_t{1}<<motionCount)-1;
 inline float duration(unsigned index,float base){
  const auto& m=motions[index%motionCount];const float length=std::clamp(base,20.f,120.f)*m.durationScale;
- return m.kind==MotionKind::ExteriorOrbit?std::clamp(length,80.f,150.f):std::clamp(length,20.f,180.f);
+ if(m.kind==MotionKind::ExteriorOrbit)return std::clamp(length,95.f,180.f);
+ if(m.kind==MotionKind::ExteriorProfileOrbit)return std::clamp(length,120.f,220.f);
+ return std::clamp(length,20.f,180.f);
 }
 inline bool available(unsigned index,float heightLimit){const auto& m=motions[index%motionCount];return !m.exterior||heightLimit>=m.minimumHeight;}
 // Ten-percent acceleration/deceleration ramps, with nearly constant cruise.
 // A global smoothstep would make a full exterior circuit too fast mid-shot.
-inline float orbitProgress(float progress){
- const float p=std::clamp(progress,0.f,1.f),edge=.1f;
+inline constexpr float exteriorOrbitRamp=.1f*1.6f/1.9f;
+inline float orbitProgress(float progress,float edge=.1f){
+ const float p=std::clamp(progress,0.f,1.f);
  if(p<edge){const float u=p/edge;return edge*(u*u*u-.5f*u*u*u*u)/(1-edge);}
  if(p>1-edge){const float u=(1-p)/edge;return 1-edge*(u*u*u-.5f*u*u*u*u)/(1-edge);}
  return (p-edge*.5f)/(1-edge);
@@ -93,7 +105,14 @@ inline Pose sample(unsigned index,float progress,float heightLimit=11000,float s
  Pose p=m.cubic?Pose{bezier(m.a,m.b,m.c,m.d,t),bezier(m.ta,m.tb,m.tc,m.td,t),m.fov+(m.endFov-m.fov)*t}:Pose{bezier(m.a,m.b,m.c,t),bezier(m.ta,m.tb,m.tc,t),m.fov};
  if(m.kind==MotionKind::CircleOrbit){const float angle=t*6.28318530718f;p.eye={std::cos(angle)*m.a.x,m.a.y,std::sin(angle)*m.a.x};p.target=m.ta;}
  if(m.kind==MotionKind::CircleTurn){const float angle=t*6.28318530718f;p.eye=m.a;p.target={std::cos(angle)*m.b.x,m.ta.y,std::sin(angle)*m.b.x};}
- if(m.kind==MotionKind::ExteriorOrbit){const float angle=orbitProgress(progress)*6.28318530718f;p.eye={std::cos(angle)*m.a.x,m.a.y,std::sin(angle)*m.a.z};p.target=m.ta;}
+ if(m.kind==MotionKind::ExteriorOrbit||m.kind==MotionKind::ExteriorProfileOrbit){
+  // Retain the high orbit's original 8.32s endpoint ramps at the default
+  // timing; the additional time slows the moving part of the circuit.
+  const float edge=m.kind==MotionKind::ExteriorOrbit?exteriorOrbitRamp:.1f;
+  const float angle=orbitProgress(progress,edge)*6.28318530718f;
+  p.eye={std::cos(angle)*m.a.x,m.a.y,std::sin(angle)*m.a.z};p.target=m.ta;
+ }
+ if(m.kind==MotionKind::LineTravel){const float u=orbitProgress(progress);p.eye=mix(m.a,m.d,u);p.target=mix(m.ta,m.td,u);}
  scale=std::clamp(scale,.6f,1.f);p.eye.x*=scale;p.eye.z*=scale;
  p.eye.y=std::clamp(p.eye.y,180.f,std::clamp(heightLimit,1000.f,14000.f));return p;
 }

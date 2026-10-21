@@ -1,6 +1,6 @@
 # Panoramicas cinematograficas de drone
 
-Acrescenta 37 trajetos a panoramica FE dos menus do FIFA 16, build
+Acrescenta 39 trajetos a panoramica FE dos menus do FIFA 16, build
 `577DE45C`. Nao altera os arquivos DAT/BIG nem os pacotes MUSE originais.
 O motor continua executando e selecionando suas tomadas. O diretor libera
 o enquadramento original por 8 segundos na entrada e 24 segundos entre os
@@ -35,12 +35,23 @@ visitar tambem as tomadas acima da posicao 31 sem truncar a lista.
 
 A v5 acrescenta uma orbita externa de 360 graus: elipse com semieixos de
 110m e 95m, camera a 108m e alvo no centro do campo. O trajeto contorna o
-estadio inteiro e fecha na mesma pose. Aceleracao e desaceleracao ocupam
-10% do percurso cada, com velocidade quase constante no restante. A duracao
-padrao e aproximadamente 83 segundos, limitada a 80–150 segundos. O ajuste
-de velocidade de 21/10/2026 reduz pela metade o tempo anterior de 166 segundos,
-mantendo o mesmo trajeto e as transicoes. Perfis com limite de altura abaixo de 100m
-excluem essa orbita. Ela passa a ser a primeira tomada extra habilitada.
+estadio inteiro e fecha na mesma pose. Na revisao 6 das tomadas, a duracao
+padrao passa de 83,2 para 98,8 segundos, limitada a 95–180 segundos. A
+velocidade durante a rotacao diminui cerca de 17%, preservando os 8,32 segundos
+de aceleracao e desaceleracao nas pontas, no padrao. Os cortes e o trajeto
+permanecem iguais. Perfis com limite de altura abaixo de 100m excluem essa orbita.
+
+A revisao 6 acrescenta duas cenas. `stadium_horizontal_profile_orbit` completa
+uma elipse de 165m por 145m de semieixos, a 65m de altura, olhando para um
+ponto a 20m no centro do estadio. Esse alvo enquadra o perfil da estrutura,
+com inclinacao de aproximadamente 15–17 graus para baixo, incluindo o horizonte.
+A volta dura 130 segundos no padrao, limitada a 120–220 segundos. Perfis com
+altura maxima abaixo de 65m excluem essa cena. `halfway_line_full_traverse`
+percorre os 68m completos da linha de meio-campo, de uma lateral a outra,
+a 2,4m de altura e olhando para a frente. O ritmo e constante no trecho
+central, com rampas curtas nas pontas; a duracao padrao e 70,2 segundos.
+A sequencia comeca pela orbita alta, a nova orbita horizontal e a travessia,
+seguindo pelas outras tomadas sem repetir antes de completar o ciclo habilitado.
 
 As coordenadas sao relativas ao campo, em centimetros. As 18 tomadas
 internas anteriores ficam dentro de X +/-45m, Z +/-26m. As novas tomadas
@@ -48,10 +59,12 @@ perto das linhas chegam a X +/-50m e Z +/-33,5m, dentro de um campo padrao
 105 x 68m. As cameras param antes do plano das redes; as marcas de penalti
 ficam a X +/-41,5m e os gols a +/-52,5m. As seis aereas anteriores chegam a 118m
 no eixo longitudinal e 108m no lateral, com altura maxima padrao de 110m.
+Somente a nova orbita de perfil amplia o raio para 165m/145m; o novo
+percurso central chega exatamente a Z +/-34m nas laterais.
 Elas passam por cima da borda das arquibancadas antes de descer para o
 campo. Perfis com altura maxima abaixo de 80m excluem as aereas em vez de
 achatar a camera contra a cobertura. Os trajetos foram testados abaixo de
-5m/s na duracao padrao, exceto a orbita externa acelerada, abaixo de 10m/s.
+5m/s na duracao padrao, exceto as duas orbitas externas, abaixo de 10m/s.
 As lentes permanecem entre 48 e 68 graus.
 
 Isso nao e deteccao de colisao: modelos com coberturas excepcionais ou
@@ -68,7 +81,7 @@ alteracao no EXE do Server16. Inicia com o jogo e funciona sem overlay.
 Configuracao: `ModCarrerMode/config/panorama_drone.ini`, relida a cada 500ms.
 
 - `enabled=0`: volta as panoramicas originais.
-- `duration_seconds`: 20 a 120, padrao 52; chegadas aereas multiplicam esse tempo por 1,4 ou 1,6, limitadas a 180 segundos. A orbita externa multiplica por 1,6, com limite de 80–150 segundos.
+- `duration_seconds`: 20 a 120, padrao 52; chegadas aereas multiplicam esse tempo por 1,4 ou 1,6, limitadas a 180 segundos. A orbita alta multiplica por 1,9 (95–180 segundos), a de perfil por 2,5 (120–220 segundos) e a travessia completa por 1,35.
 - `original_interval_seconds`: 10 a 180, padrao 24.
 - `initial_original_seconds`: 0 a 120, padrao 8.
 - `transition_seconds`: 1 a 8, padrao 3; metade para escurecer, metade para revelar, mais pausa preta de aproximadamente 180ms.
@@ -115,7 +128,7 @@ mas a aprovacao visual e a compatibilidade de cada estadio sao verificacoes
 separadas.
 
 Build: `scripts/build_panorama_drone.cmd`, MSVC x64. Os testes cobrem os
-37 trajetos, limites, velocidade, matriz, perfis, intervalos originais,
+39 trajetos, limites, velocidade, matriz, perfis, intervalos originais,
 transicoes, cortes totalmente pretos nos dois sentidos com FPS alto/baixo,
 rotacao completa, desativacao e saida da panoramica.
 
@@ -128,3 +141,7 @@ Na v4, a migracao acrescenta os doze novos interruptores e atualiza apenas
 scene_pack_revision. Duracoes, cenas desabilitadas e perfis existentes sao
 preservados. As novas cenas entram habilitadas. Reabra o FIFA uma vez para
 carregar a nova DLL; o EXE do Server16 nao precisa ser recompilado.
+
+A revisao 6 conserva o nome da DLL v5 e sua API, atualizando apenas as
+tomadas e sua ordem. O instalador acrescenta os dois interruptores novos e
+atualiza `scene_pack_revision=6`, preservando as escolhas ja salvas.

@@ -1,6 +1,6 @@
 # Primeira pessoa no Server16
 
-Componente x64 `server16_first_person_v11.dll`, carregado pelo Server usando o helper
+Componente x64 `server16_first_person_v12.dll`, carregado pelo Server usando o helper
 existente `cgfs16_inject.exe`. O controle é o mapa `Local\FIFA16_FirstPersonCamera_v4`,
 80 bytes, versão 4, declarado em `camera_channel.h` e `first_person_runtime.CameraShared`.
 O Server publica owner/heartbeat e comando; a DLL publica ack/estado/erro. Não há
@@ -15,11 +15,11 @@ consultar o osso antes disso aciona a inicialização preguiçosa contra uma tab
 ainda ausente e derruba o jogo. O erro transitório 3 indica espera, mantém a escolha
 salva e tenta de novo automaticamente, sem chamar o resolvedor durante a espera.
 
-O protótipo usa o BCEngine desta compilação do FIFA (timestamp 577DE45C), com dois
+O protótipo usa o BCEngine desta compilação do FIFA (timestamp 577DE45C), com três
 desvios de vtable verificados antes da escrita. Captura Head pela matriz animada,
 com a fonte no sexto argumento do coletor, e substitui a saída do comportamento
 ThirdPerson após a função original. Valida jogador, GameData, idade, matriz e estado
-2 (KickOff), 14 (OutOfPlay, incluindo espera para reinício) ou 15 (Play). A rotina
+2–15, incluindo as cobranças, reposicionamento e bola em jogo. A rotina
 nativa atualiza o jogador selecionado antes de ler a fase; excluir 14 interrompia
 o acompanhamento antes de a bola entrar em jogo. O modo de jogo usa FOV
 85 graus por padrão, mantendo a lente constante com ou sem a bola para conciliar
@@ -36,8 +36,8 @@ ocultação da cabeça não está disponível. A revisão v11 restaura essa posi
 
 Modo 1 (Terceira pessoa · carreira) usa `career_camera.h`: câmera 480 cm atrás da
 raiz e 230 cm acima, com referência de mira 850 cm à frente / 110 cm de altura.
-Órbita horizontal com resposta de 400 ms, limite de 1,5 rad/s e aceleração de
-4 rad/s². A translação da raiz passa por dois filtros (100 e 140 ms), sem copiar
+Órbita horizontal com resposta de 600 ms, limite de 0,75 rad/s e aceleração de
+1,8 rad/s², com referência corporal filtrada e zona de 2 graus. A translação da raiz passa por dois filtros (100 e 140 ms), sem copiar
 altura/pitch/roll animados da cabeça. A bola à frente atrai parcialmente a direção;
 o corpo inteiro cabe no FOV padrão 85°. Sem teste de colisão contra o cenário.
 Não usa `headClearance`, que empurraria a câmera para dentro da posição de primeira
@@ -85,8 +85,44 @@ Na terceira pessoa, trocas de jogador de até 25 m preservam o filtro em vez de
 reiniciá-lo. Trocas mais distantes, pausa longa, novo contexto ou mudança de fase
 readquirem a câmera para evitar travessias longas do estádio. Os filtros de translação descritos são exclusivos da terceira pessoa.
 
-## Validação pendente
+## Histórico da validação v11
 
-O teste em jogo de 19/10/2026 confirmou atraso na saída de bola e na retomada após gol, mesmo com o reset matemático da âncora. Portanto, esta revisão não resolve essas duas transições. O acompanhamento durante lances normais foi relatado como correto.
+O teste em jogo de 19/10/2026 confirmou atraso na saída de bola e na retomada após gol na revisão v11, mesmo com o reset matemático da âncora. A revisão v12 abaixo corrige o fluxo e ainda aguarda validação visual. O acompanhamento durante lances normais foi relatado como correto na v11.
 
-A pasta `experimental/` preserva o teste v12 de cabeça oculta/recuo e os observadores de transição em RAM. Esses fontes não são incluídos no EXE nem carregados automaticamente. `head_mesh_filter.h` preserva o wrapper nativo completo de 232 bytes e a revisão do descritor, mas continua fora do runtime v11. A integração da ocultação e a correção do atraso dependem de validação adicional em jogo.
+A pasta `experimental/` preserva o teste v12 de cabeça oculta/recuo e os observadores de transição em RAM. Esses fontes não são incluídos no EXE nem carregados automaticamente. `head_mesh_filter.h` preserva o wrapper nativo completo de 232 bytes e a revisão do descritor, mas continua fora do runtime instalado. A ocultação permanece experimental; a correção das transições usa o fluxo da revisão v12 abaixo.
+
+## Revisão v12 — 21/10/2026
+
+A leitura da enumeração nativa GameplayGameState confirmou as fases de cobrança
+3–13. Elas eram excluídas pelo módulo, que só aceitava KickOff (2), OutOfPlay
+(14) e Play (15); isso devolvia o controle ao efeito de aproximação nativo.
+Agora mantém a pose nas fases 2–15, com matriz válida e fresca, e suspende a
+substituição nas fases de limite da partida/criação.
+
+Um hook adicional no adaptador CameraModule::Update (BCEngine +123E40) corrige
+a pose após a interpolação e reconstrói a conversão nativa de projeção/viewport.
+Só age quando o gerador produziu uma pose modificada durante essa mesma chamada
+e pertence à mesma interface. Preserva os campos nativos de clipping/lente.
+As flags locais do frame dofForceOff e motionBlurForceOffCamera/Ball/Players
+são ativadas nos quadros modificados para evitar desfoque com FOV ampliado;
+nenhum parâmetro global do render é alterado. A atualização nativa seguinte
+restabelece as flags quando a câmera modificada deixa de atuar.
+
+A terceira pessoa conserva distância, altura e FOV. A referência é a orientação
+horizontal válida da raiz, com trajetória filtrada como alternativa; a cabeça
+animada só inicia a direção quando não há uma referência corporal. Pequenas
+oscilações da raiz ficam dentro de uma zona de 4 cm. A órbita limita-se a
+0,75 rad/s e 1,8 rad/s², com resposta de 600 ms, referência filtrada e menor
+atração da bola distante. Toques próximos não puxam a câmera.
+
+O indicador nativo areUsersLockedToPlayers (+9C1) fixa o atleta por contexto
+de partida; o foco temporário da câmera Profissional não troca esse vínculo.
+Modos que controlam o time continuam seguindo a seleção nativa. Não há hook
+Player::GetLod, modificação de malha, máscara de desenho ou ocultação de atores.
+
+Validação: matemática/limites/FPS/oscilações, fases de cobrança, vínculo do atleta,
+campos preservados, flags de desfoque e protocolo real da DLL passaram nos testes
+isolados. São 9 testes Python da câmera e 10 da física de roupas aprovados.
+O usuário relatou melhora significativa em 21/10/2026 após instalar a revisão.
+Casos específicos ainda aguardam validação; a invisibilidade continua em
+investigação e não foi corrigida por este módulo.

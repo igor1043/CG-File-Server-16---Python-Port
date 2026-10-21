@@ -37,8 +37,8 @@ def upgrade_config(text, defaults):
         for key, old, new in (("duration_seconds", 32, 52), ("height_limit_cm", 3200, 11000)):
             if parser.getfloat(main_section, key, fallback=old) == old:
                 set_value("panorama_drone", key, new)
-    if parser.getint(main_section, "scene_pack_revision", fallback=0) < 5:
-        set_value("panorama_drone", "scene_pack_revision", 5)
+    if parser.getint(main_section, "scene_pack_revision", fallback=0) < 6:
+        set_value("panorama_drone", "scene_pack_revision", 6)
     default_parser = configparser.ConfigParser(interpolation=None)
     default_parser.read_string(defaults)
     for key, value in default_parser.items("shots"):
@@ -53,7 +53,7 @@ def install(build, destinations):
     if not dll.is_file():
         raise FileNotFoundError(dll)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    manifest = {"version": 5, "shots": 37, "dll_sha256": digest(dll), "destinations": []}
+    manifest = {"version": 5, "scene_pack_revision": 6, "shots": 39, "dll_sha256": digest(dll), "destinations": []}
     for root in destinations:
         root = root.resolve(strict=True)
         mod = root / "ModCarrerMode"

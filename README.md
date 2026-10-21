@@ -4,16 +4,18 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.9 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.10 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 ## Atualização — 21/10/2026
 
+- **Câmeras — revisão 12:** acompanhamento nas cobranças e reinícios, correção da pose após a transição nativa e flags de desfoque desligadas nos quadros modificados. A terceira pessoa reduz oscilações e limita as viradas; no modo de um jogador, o vínculo do atleta permanece fixo. Testes isolados aprovados; usuário relatou melhora significativa. Casos específicos ainda aguardam validação.
+- **Física de roupas:** começa desligada e mantém a escolha salva, inclusive ao atualizar a instalação.
 - **Painéis revisados:** informações da carreira ficam abaixo das opções, com espaço próprio para avisos e rodapé. Fumaça, configurações, áudio e câmera receberam ajustes de espaçamento e limites de texto.
 - **Teclado QWERTY:** números separados e fileiras de letras escalonadas como em notebook. Desenho, mouse e navegação pelo controle usam as mesmas posições. São 117 testes aprovados e 52 estados renderizados para conferência; validação visual no FIFA pendente.
 - **Estádio de fundo:** seleção para o menu inicial e a carreira, com preparação do pacote antes da recarga nativa. A escolha fica salva; o recurso começa desligado. No automático, a carreira usa o clube do save. A imagem do FIFA Friends é preservada quando não há estádio disponível ou o recurso está desligado.
-- **Panorâmica:** 37 tomadas, incluindo travessias do campo, aproximações do gol e órbita externa do estádio, com o módulo compatível do V12. A volta externa leva cerca de 83 segundos no padrão, com velocidade dobrada e transições suaves.
+- **Panorâmica:** 39 tomadas. A órbita alta leva cerca de 99 segundos por volta, com rotação mais lenta e o tempo de parada preservado. Entraram uma órbita mais baixa para ver o perfil do estádio e uma travessia dos 68 m da linha central, de uma lateral à outra.
 - **Pênaltis:** o placar permanece ativo durante a disputa; a pirotecnia compatível bloqueia os disparos nessa fase.
-- **Logo nos hubs:** [interface nativa com a logo FIFA Friends](tools/career_branding/README.md), substituindo a faixa de reconexão na carreira e no menu inicial, alinhada à direita. A revisão 7 mantém a faixa EA transparente desde o primeiro desenho, inclusive entre telas; funcionamento e transições confirmados pelo usuário dentro do FIFA.
+- **Logo nos hubs:** troca da faixa online pela logo desativada para isolar o crash recorrente do Robson. A interface anterior foi restaurada; os arquivos modificados e seus fontes foram preservados.
 - **Recursos em desenvolvimento:** cenas extras de técnicos/mascotes desativadas. Seleção automática/manual de narrador, progresso e aviso de narração aplicada ficam ocultos; o código permanece preservado.
 
 As DLLs compiladas para o jogo ficam no [pacote FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12). Este repositório mantém os fontes, scripts e testes. Consulte o [índice dos módulos nativos](native_mods/README.md) para localizar cada componente.

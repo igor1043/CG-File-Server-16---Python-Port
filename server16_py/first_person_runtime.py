@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 MAPPING_NAME = 'Local\\FIFA16_FirstPersonCamera_v4'
-DLL_NAME = 'server16_first_person_v11.dll'
+DLL_NAME = 'server16_first_person_v12.dll'
 DEFAULT_FOV = 85
 CAREER_FOV = 85
 PREFERENCES_VERSION = 4

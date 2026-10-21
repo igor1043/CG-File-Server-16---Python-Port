@@ -1,5 +1,11 @@
 # Logo no menu inicial e no cabeçalho da carreira
 
+> Desativado em 21/10/2026 por solicitação do usuário, para isolar o crash
+> recorrente do Robson. As três interfaces anteriores foram restauradas. Os
+> arquivos modificados ficam em `ModCarrerMode/disabled/career_branding/` e os
+> fontes permanecem disponíveis. `Disable-CareerBranding.ps1 -GameRoot PASTA`
+> aplica a mesma restauração com backup; não há uma DLL dessa funcionalidade.
+
 Substitui a faixa superior direita dos hubs inicial e da carreira pela logo enviada pelo
 usuário. O globo com X, a mensagem de reconexão, o escudo EA, a tecla Q/RS e
 o painel branco ficam ocultos juntos. A arte mantém a transparência sobre o

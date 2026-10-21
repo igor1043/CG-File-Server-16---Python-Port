@@ -1,0 +1,24 @@
+{
+  "version": "0.2.10",
+  "output": "Server16Python.exe",
+  "bytes": 45711821,
+  "sha256": "1dcabfb8d8c587324b899d930f1d74916c904e9b63f1d0b45221cfe86c80e422",
+  "source_sha256": "7589634a7e89d6cf3b3e40e20d0c6afdac3d34a531f6db8bbf875545483e599f",
+  "camera_resource": "bin\\server16_first_person_v12.dll",
+  "camera_sha256": "e727faa0a57741a042534e655e1f89c528688b04490e997e2aa3d4569d774604",
+  "preserved_archive_members": 3055,
+  "preserved_python_modules": 676,
+  "python_modules": {
+    "server16_py": "3010fe44bec5739ab0f4c2c99b68babe8acd4b6ff7cc57e98e1fd0e188392600",
+    "server16_py.first_person_runtime": "37ac89cee539cd5dcef146c5dbd97acafd7a68205b0c429ba8cd1c82e199fa3c"
+  },
+  "native_math_test": "passed",
+  "native_dll_protocol": "passed (separate mapping; does not touch FIFA)",
+  "python_camera_tests": 9,
+  "python_cloth_tests": 10,
+  "installer_cloth_false_default_and_true_persistence": "passed",
+  "visual_validation": "user reported substantial improvement on 2026-10-21; individual edge cases still pending",
+  "mesh_visibility": "unresolved; needs a live recurrence for diagnosis",
+  "branding": "disabled; prior interfaces restored",
+  "preferences_unchanged": true
+}

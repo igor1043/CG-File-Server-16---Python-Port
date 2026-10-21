@@ -5,8 +5,8 @@ namespace panorama {
 inline bool eligibleCamera(int phase,const char* name){return phase==1&&name&&!std::strncmp(name,"BC: Stadium FE ",15)&&name[15]>='0'&&name[15]<='9';}
 struct Settings {bool enabled=true;float duration=52,gap=24,initial=8,transition=3,heightLimit=11000,scale=1;uint64_t mask=allMotionsMask;};
 struct Decision {bool active=false;unsigned motion=0;float progress=0,opacity=0;};
-// Rotation starts with the new exterior orbit, then uses a full-cycle permutation;
-// repetition, and all enabled scenes are visited before a repeat.
+// Show the high orbit, the lower profile and the full halfway line first.
+// The remaining 36 shots use a coprime permutation, without early repetition.
 class Director {
  enum class Stage {Gap,FadeOutNative,CutToDrone,FadeInDrone,Drone,FadeOutDrone,CutToNative,FadeInNative};
  double elapsed_=0,shotElapsed_=0;unsigned cursor_=0,selected_=0;bool ready_=false;
@@ -28,7 +28,11 @@ public:
   case Stage::Gap:{
    if(elapsed_<0)return {};
    bool found=false;
-   for(unsigned attempt=0;attempt<motionCount;++attempt){const unsigned n=(cursor_*5+36)%motionCount;++cursor_;if((cfg.mask&(uint64_t{1}<<n))&&available(n,cfg.heightLimit)){selected_=n;found=true;break;}}
+   for(unsigned attempt=0;attempt<motionCount;++attempt){
+    const unsigned position=cursor_++%motionCount,priority=motionCount-36;
+    const unsigned n=position<priority?36+position:((position-priority)*5)%36;
+    if((cfg.mask&(uint64_t{1}<<n))&&available(n,cfg.heightLimit)){selected_=n;found=true;break;}
+   }
    if(!found)return {};shotElapsed_=0;advance(Stage::FadeOutNative);result.motion=selected_;return result;
   }
   case Stage::FadeOutNative:

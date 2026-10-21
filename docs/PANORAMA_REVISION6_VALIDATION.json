@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-21",
+  "native_api": 5,
+  "scene_pack_revision": 6,
+  "shots": 39,
+  "high_orbit": {
+    "default_seconds": 98.8,
+    "endpoint_ramp_seconds": 8.32,
+    "cruise_speed_ratio_to_previous": 0.8275862068965516
+  },
+  "horizontal_profile_orbit": {
+    "default_seconds": 130,
+    "height_cm": 6500,
+    "target_height_cm": 2000,
+    "ellipse_semiaxes_cm": [
+      16500,
+      14500
+    ]
+  },
+  "halfway_line_full_traverse": {
+    "length_cm": 6800,
+    "height_cm": 240,
+    "default_seconds": 70.2
+  },
+  "validation": {
+    "native_39_route_checks": "passed",
+    "python_installer_tests": 6,
+    "exports_preserved": true,
+    "visual": "pending user test after FIFA restart"
+  },
+  "dll": {
+    "path": "ModCarrerMode/mods/panorama_drone/panorama_drone_v5.dll",
+    "bytes": 189952,
+    "sha256": "9d9b1320779e72073965cc9275bdb63450df90f8b6728c76c19d760ff72844e3"
+  }
+}

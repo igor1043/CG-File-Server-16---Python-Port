@@ -1,6 +1,8 @@
 #include "../native_mods/first_person/game_framing.h"
 #include "../native_mods/first_person/career_camera.h"
 #include "../native_mods/first_person/camera_bootstrap.h"
+#include "../native_mods/first_person/camera_subject.h"
+#include "../native_mods/first_person/camera_final_pose.h"
 #include <cassert>
 #include <cstdio>
 #include <limits>
@@ -73,8 +75,8 @@ int main(){
     assert(after.pose.pitch<.21f); // Look back up after releasing the ball.
     for(int i=0;i<120;++i)after=view.update(head,{0,0,0},ball,false,1.f/120.f);
     assert(std::fabs(after.fov-1.5707963f)<.004f);
-    assert(fp::playerCameraPhase(2)&&fp::playerCameraPhase(14)&&fp::playerCameraPhase(15));
-    for(int phase:{0,1,3,5,16})assert(!fp::playerCameraPhase(phase));
+    for(int phase=2;phase<=15;++phase)assert(fp::playerCameraPhase(phase));
+    for(int phase:{-1,0,1,16,29})assert(!fp::playerCameraPhase(phase));
     fp::PossessionFraming plain,precision;
     auto normal=plain.update(head,{0,0,0},ball,true,0);
     auto controlled=precision.update(head,{0,0,0},ball,true,0,true);
@@ -127,19 +129,19 @@ int main(){
     auto translated=career.update(head,{100,0,0},{1000,10,0},1.f/60,75);
     assert(translated.pose.eye.x>third.pose.eye.x&&translated.pose.eye.x<third.pose.eye.x+10.f);
     for(int i=0;i<180;++i)translated=career.update(head,{100,0,0},{1000,10,0},1.f/60,75);
-    assert(std::fabs(translated.pose.eye.x-third.pose.eye.x-100.f)<.01f);
+    assert(std::fabs(translated.pose.eye.x-third.pose.eye.x-96.f)<.01f);
     head.heading=1.f;
-    auto orbit=career.update(head,{100,0,0},{1000,10,0},1.f/60,75);
+    auto orbit=career.update(head,{100,0,0},{1000,10,0},1.f/60,75,0,false,true,1.f);
     assert(orbit.pose.heading>0&&orbit.pose.heading<.1f); // Strong orbit smoothing.
     float priorHeading=orbit.pose.heading,priorSpeed=priorHeading*60.f;
     for(int i=0;i<180;++i){
-        orbit=career.update(head,{100,0,0},{100.f+900.f*std::cos(1.f),10.f,-900.f*std::sin(1.f)},1.f/60,75);
+        orbit=career.update(head,{100,0,0},{100.f+900.f*std::cos(1.f),10.f,-900.f*std::sin(1.f)},1.f/60,75,0,false,true,1.f);
         const float speed=fp::wrap(orbit.pose.heading-priorHeading)*60.f;
-        assert(std::fabs(speed)<=1.501f);
-        assert(std::fabs(speed-priorSpeed)<=4.f/60.f+.001f);
+        assert(std::fabs(speed)<=.751f);
+        assert(std::fabs(speed-priorSpeed)<=1.8f/60.f+.001f);
         priorHeading=orbit.pose.heading;priorSpeed=speed;
     }
-    assert(std::fabs(orbit.pose.heading-1.f)<.005f);
+    assert(std::fabs(orbit.pose.heading-1.f)<.06f);
     career.reset();
     auto reset=career.update(head,{2000,0,0},{2900,10,0},1.f/60,75);
     assert(reset.pose.heading>.5f); // New selected player/context acquires immediately.
@@ -160,15 +162,15 @@ int main(){
     auto newPlayer=handoff.update(head,{1000,0,0},{1900,10,0},1.f/60,85,0,true);
     assert(newPlayer.pose.eye.x>oldPlayer.pose.eye.x&&newPlayer.pose.eye.x<oldPlayer.pose.eye.x+50.f);
     for(int i=0;i<180;++i)newPlayer=handoff.update(head,{1000,0,0},{1900,10,0},1.f/60,85);
-    assert(std::fabs(newPlayer.pose.eye.x-520.f)<.01f);
+    assert(std::fabs(newPlayer.pose.eye.x-516.f)<.01f);
     const auto remote=handoff.update(head,{9000,0,0},{9900,10,0},1.f/60,85,0,true);
     assert(remote.pose.eye.x==8520.f); // No long sweep across the stadium.
     fp::CareerCamera fps60,fps120;
     head.heading=0;fps60.update(head,{0,0,0},{900,10,0},0,85);fps120.update(head,{0,0,0},{900,10,0},0,85);
     head.heading=1.f;
     fp::FramedView at60{},at120{};
-    for(int i=0;i<120;++i)at60=fps60.update(head,{100,0,0},{1000,10,0},1.f/60,85);
-    for(int i=0;i<240;++i)at120=fps120.update(head,{100,0,0},{1000,10,0},1.f/120,85);
+    for(int i=0;i<120;++i)at60=fps60.update(head,{100,0,0},{1000,10,0},1.f/60,85,0,false,true,1.f);
+    for(int i=0;i<240;++i)at120=fps120.update(head,{100,0,0},{1000,10,0},1.f/120,85,0,false,true,1.f);
     assert(std::fabs(at60.pose.heading-at120.pose.heading)<.01f);
     assert(std::fabs(at60.pose.eye.x-at120.pose.eye.x)<5.f);
     fp::PossessionFraming defaultWide;
@@ -179,6 +181,35 @@ int main(){
     assert(defaultOn.fov==defaultOff.fov);
     auto defaultFeet=defaultWide.update(head,{0,0,0},{14,10,0},true,0,false,85);
     assert(std::atan2(head.eye.y-10.f,25.f)-defaultFeet.pose.pitch<defaultFeet.fov*.5f);
+    fp::CareerCamera jitter;
+    head.heading=0;fp::axes(head);
+    const auto baseline=jitter.update(head,{0,0,0},{80,10,0},0,85,0,false,true,0);
+    float peak=0;
+    for(int i=0;i<1200;++i){
+        const float phase=i/120.f;
+        head.heading=.6f*std::sin(phase*13.f);
+        const auto stable=jitter.update(head,{2.f*std::sin(phase*17.f),0,2.f*std::cos(phase*17.f)},
+                                        {80.f,10,50.f*std::sin(phase*10.f)},1.f/120,85,0,false,true,0);
+        peak=std::max(peak,std::fabs(stable.pose.heading));
+        assert(fp::dot(stable.pose.eye-baseline.pose.eye,stable.pose.eye-baseline.pose.eye)<.01f);
+    }
+    assert(peak<.001f); // Head gaze, root sway and close touches cannot orbit the camera.
+    fp::CameraSubject bound;
+    assert(bound.resolve(0x1234,9,true)==9);
+    for(int candidate:{0,10,45,-1,32})assert(bound.resolve(0x1234,candidate,true)==9);
+    assert(bound.resolve(0x5678,32,true)==32); // A new match gets a new subject.
+    assert(bound.resolve(0x5678,11,false)==11); // Team mode still follows manual selection.
+    float source[28]{},native[28]{};
+    for(int i=0;i<28;++i){source[i]=static_cast<float>(i+1);native[i]=100.f+i;}
+    source[1]=180.f;source[12]=150.f*.01745329252f;
+    assert(fp::finiteCameraData(source));
+    fp::applyFinalPose(native,source);
+    for(int i:{0,1,2,4,5,6,12,13,14,16,17})assert(native[i]==source[i]);
+    for(int i:{3,7,8,9,10,11,15,18,19,20,21,22,23,24,25,26,27})assert(native[i]==100.f+i);
+    unsigned char module[0x180]{};fp::clearNativeCameraEffects(module);
+    for(int i=0;i<0x180;++i)assert(module[i]==((i==0x141||i==0x158||i==0x159||i==0x15a)?1:0));
+    source[0]=std::numeric_limits<float>::quiet_NaN();assert(!fp::finiteCameraData(source));
+    std::puts("PASS: body/trajectory orbit rejects head/root/dribble jitter; locked subject survives restart focus; final pose preserves clipping and disables native blur flags only");
     std::puts("PASS: ball/field balance, FOV/tilt personalization, hair clearance, immediate kickoff anchor and pose reacquisition");
     std::puts("PASS: career third person, whole-body framing, stable height/roll, root tracking and smooth orbit");
 }

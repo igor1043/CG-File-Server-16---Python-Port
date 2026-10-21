@@ -3,10 +3,12 @@
 #include "head_camera_stabilizer.h"
 namespace fp {
 inline float clamp(float value,float low,float high){return value<low?low:value>high?high:value;}
-// The native Professional behavior keeps updating the selected player during
-// OutOfPlay (14), including the wait before a restart. Rejecting 14 returned
-// to the native camera while the player could already move before the whistle.
-inline bool playerCameraPhase(int state){return state==2||state==14||state==15;}
+// GameplayGameState registration in this executable: 2 KickOff, 3 ThrowIn,
+// 4 QuickThrowIn, 5 CornerKick, 6 GoalKick, 7 PenaltyKick, 8 FreeKick,
+// 9 FreeKick_Choreography, 10 QuickFreeKick, 11 ShootOut, 12 DropBall,
+// 13 Reposition, 14 OutOfPlay, 15 Play. Keep the mod through these restarts.
+// 0/1 and 16+ are match-boundary/creation states, not active player views.
+inline bool playerCameraPhase(int state){return state>=2&&state<=15;}
 inline Pose gameFraming(Pose head,Vec root,Vec ball){
     // Keep the player's heading, while reducing animation-driven nodding.
     head.pitch=clamp(head.pitch*0.45f+0.10f,-0.18f,0.70f);

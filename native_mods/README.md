@@ -8,7 +8,7 @@ informa os destinos e as configurações.
 | Diretório | Componente / destino |
 |---|---|
 | `frontend_stadium/` | Estádio de fundo: `ModCarrerMode/mods/frontend_stadium/frontend_stadium_native_v11.dll`; preparador em `ModCarrerMode/tools/` |
-| `panorama_drone/` | 37 tomadas: `ModCarrerMode/mods/panorama_drone/panorama_drone_v5.dll` |
+| `panorama_drone/` | 39 tomadas: `ModCarrerMode/mods/panorama_drone/panorama_drone_v5.dll` |
 | `mascot/` | Mascotes: `ModCarrerMode/mods/mascot_single/mascot_goal_line.dll` |
 | `pyro/` | Pirotecnia e bloqueio durante os pênaltis: `ModCarrerMode/mods/stadium_pyrotechnics/stadium_pyrotechnics.dll` |
 | `first_person/` | Câmeras do jogador; biblioteca embutida no Server16 |
