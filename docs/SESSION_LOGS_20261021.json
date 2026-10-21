@@ -1,0 +1,26 @@
+{
+  "server": "Server16Python.exe",
+  "output": "Server16Python.exe",
+  "modules": {
+    "server16_py": "f6a74c00f7fade4f49b0916f9be046401e3515ee562aa25a55daed38ff6ae7d6",
+    "server16_py.app": "7e5feee90ec52523ca3c8644866c3bbaaf89799f83d4ec5a1d0f42440511ffeb",
+    "server16_py.startup_diagnostics": "5c2851b7706622dcf0d808fe77f08e1f04c349a7a9b1d78d58bdeb4fe7165950"
+  },
+  "sha256": "234ecb19dd582c19e3974cc6bff4e81b76dcbba1e434b190428c28321c023350",
+  "preserved_archive_members": 3057,
+  "preserved_python_modules": 676,
+  "version": "0.2.12",
+  "installed_at": "2026-10-21T20:58:37",
+  "tests": 51,
+  "session_logs": {
+    "reset": "before launch through Server, only .log files",
+    "separate_mod_files": true,
+    "finished_zip_preserved": true,
+    "dump_association": "PID when available, otherwise session time",
+    "dump_metadata_real_robson_sample": "passed",
+    "dump_copy_max_bytes": 16777216
+  },
+  "camera_dll_unchanged": true,
+  "camera_visual_validation": "pending user test",
+  "preferences_unchanged": true
+}

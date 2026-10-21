@@ -17,6 +17,86 @@ import psutil
 from .memory_access import MODULEENTRY32W
 
 
+def log_paths(root):
+    root = Path(root)
+    paths = list((root/'ModCarrerMode/logs').glob('*.log'))
+    return sorted(set(paths + [root/'runtime/server16.log', root/'ReShade.log']))
+
+
+def log_marker(path):
+    try:
+        with Path(path).open('rb') as stream:
+            stat = os.fstat(stream.fileno())
+            stream.seek(max(0, stat.st_size-64))
+            return {'offset': stat.st_size, 'identity': stat.st_ino,
+                    'anchor': stream.read(64).hex()}
+    except OSError:
+        return {'offset': 0, 'identity': None, 'anchor': ''}
+
+
+def session_log(path, marker, limit=1048576):
+    """Return only this session's appended bytes, including rotated logs."""
+    with Path(path).open('rb') as stream:
+        stat = os.fstat(stream.fileno()); start = marker.get('offset', 0)
+        rotated = marker.get('identity') not in (None, stat.st_ino) or stat.st_size < start
+        if start and not rotated:
+            anchor = bytes.fromhex(marker.get('anchor', ''))
+            stream.seek(max(0, start-len(anchor)))
+            rotated = stream.read(len(anchor)) != anchor
+        if rotated:
+            start = 0
+        at = max(start, stat.st_size-limit)
+        stream.seek(at)
+        return stream.read(limit), {'start_offset': start, 'end_offset': stat.st_size,
+                                    'rotated_or_truncated': rotated, 'tail_limited': at > start}
+
+
+def crash_summary(path):
+    """Read minidump metadata only; the faulting module is not proof of cause."""
+    result = {}
+    try:
+        with Path(path).open('rb') as stream:
+            header = stream.read(32)
+            if header[:4] != b'MDMP' or len(header) != 32:
+                return {'format': 'unrecognized'}
+            count, directory = struct.unpack_from('<II', header, 8)
+            if count > 128:
+                return {'format': 'minidump', 'metadata': 'stream count unsupported'}
+            def read(at, size):
+                if at < 0 or size > 1048576:
+                    raise ValueError('Unsupported minidump metadata size')
+                stream.seek(at); data = stream.read(size)
+                if len(data) != size:
+                    raise ValueError('Incomplete minidump metadata')
+                return data
+            entries = read(directory, count*12)
+            streams = {kind:(size,at) for kind,size,at in struct.iter_unpack('<III', entries)}
+            result['format'] = 'minidump'
+            if 15 in streams and streams[15][0] >= 12:
+                misc = read(streams[15][1], 12)
+                if struct.unpack_from('<I', misc, 4)[0] & 1:
+                    result['pid'] = struct.unpack_from('<I', misc, 8)[0]
+            if 6 in streams and streams[6][0] >= 40:
+                exception = read(streams[6][1], 40)
+                result['exception_code'] = f'0x{struct.unpack_from("<I", exception, 8)[0]:08x}'
+                fault = struct.unpack_from('<Q', exception, 24)[0]
+                result['fault_address'] = hex(fault)
+                if 4 in streams:
+                    at = streams[4][1]; modules = struct.unpack('<I', read(at,4))[0]
+                    if modules > 4096:
+                        raise ValueError('Module count unsupported')
+                    for i in range(modules):
+                        base,size,_,_,name_at = struct.unpack('<QIIII', read(at+4+i*108,24))
+                        if base <= fault < base+size:
+                            length = struct.unpack('<I',read(name_at,4))[0]
+                            result['fault_module'] = read(name_at+4,min(length,8192)).decode('utf-16le',errors='replace')
+                            result['fault_rva'] = hex(fault-base)
+                            break
+    except (OSError, ValueError, struct.error) as exc:
+        result['metadata_error'] = str(exc)
+    return result
+
+
 def file_evidence(path, with_hash=True):
     path = Path(path)
     try:
@@ -124,10 +204,12 @@ def version_info(path):
 
 
 class StartupSession:
-    def __init__(self, folder, pid, executable, reference, version):
+    def __init__(self, folder, pid, executable, reference, version, markers=None):
         self.folder = Path(folder); self.folder.mkdir(parents=True, exist_ok=False)
         self.pid = pid; self.root = Path(executable).resolve().parent
         self.reference = reference; self.version = version
+        self.started_wall = time.time()
+        self.log_markers = markers if markers is not None else {str(p):log_marker(p) for p in log_paths(self.root)}
         self.stopped = threading.Event(); self.lock = threading.RLock()
         self.started = time.monotonic(); self.page = ''; self.errors = 0
         self.page_at = self.started
@@ -195,26 +277,54 @@ class StartupSession:
     def finish(self):
         self.state['page_read_pending'] = self.errors
         self.state['last_page_elapsed_s'] = round(time.monotonic()-self.page_at, 3)
-        logs = self.folder/'mod_logs'; logs.mkdir(exist_ok=True)
-        for relative in ('runtime/server16.log','ModCarrerMode/logs/career_loader.log',
-                         'ModCarrerMode/logs/host.log','ModCarrerMode/logs/career_ui_assets.log',
-                         'ModCarrerMode/logs/swiss_delta_loader.log','ReShade.log'):
-            path = self.root/relative
+        collected = []
+        for path in log_paths(self.root):
             try:
-                with path.open('rb') as stream:
-                    stream.seek(max(0, path.stat().st_size-1048576))
-                    (logs/path.name).write_bytes(stream.read(1048576))
+                contents, window = session_log(path, self.log_markers.get(str(path), {}))
+                category = 'server' if path.name == 'server16.log' else 'graphics' if path.name == 'ReShade.log' else 'mods'
+                destination = self.folder/'logs'/category/path.name
+                destination.parent.mkdir(parents=True,exist_ok=True)
+                destination.write_bytes(contents)
+                collected.append({'source':str(path),'file':destination.relative_to(self.folder).as_posix(),
+                                  'bytes':len(contents), **window})
             except OSError:
                 pass
+        self.save('logs.json',collected)
+        dumps = []
+        for path in sorted(self.root.glob('*.dmp')):
+            try:
+                if path.stat().st_mtime < self.started_wall-2:
+                    continue
+                entry = {'path':str(path), **file_evidence(path), **crash_summary(path)}
+                if entry.get('pid',self.pid) != self.pid:
+                    continue
+                entry['association'] = 'matching_pid' if 'pid' in entry else 'same_session_time_only'
+                if path.stat().st_size <= 16777216:
+                    destination=self.folder/'crash'/path.name
+                    destination.parent.mkdir(exist_ok=True)
+                    with path.open('rb') as stream:
+                        data=stream.read(16777217)
+                    if len(data)<=16777216:
+                        destination.write_bytes(data)
+                        entry['included_file']=destination.relative_to(self.folder).as_posix()
+                dumps.append(entry)
+            except OSError:
+                pass
+        self.state['crash_dumps']=dumps
+        self.state['log_files']=len(collected)
+        self.state['session_id']=self.folder.name
         self.save('summary.json', self.state)
         mismatches = self.state.get('file_issues', [])
-        text = [f'Diagnóstico FIFA16 / Server16 {self.version}', f'PID: {self.pid}',
+        text = [f'Diagnóstico FIFA16 / Server16 {self.version}', f'Sessão: {self.folder.name}',f'PID: {self.pid}',
                 f'Estado: {self.state["status"]}', f'Última tela: {self.page or "ainda indisponível"}',
                 f'Saída do processo: {self.state.get("exit_code", "não observada")}',
                 f'Arquivos de referência: {len(self.reference.get("files", []))}',
                 'Comparação: disponível' if self.state.get('audit_available') else 'ATENÇÃO: referência ausente; arquivos não foram validados',
                 f'Ausências/divergências: {len(mismatches)}',
                 'Diferença de arquivo ou DLL extra é evidência para investigar, não prova de causa.', '',
+                f'Logs separados por mod: {len(collected)} arquivos em logs/.',
+                'Dump desta sessão: '+(', '.join(Path(d['path']).name for d in dumps) or 'não encontrado na pasta do jogo; enviar manualmente com este ZIP'),
+                *[f'Falha registrada: {d.get("exception_code","?")} em {d.get("fault_module","módulo não identificado")} + {d.get("fault_rva","?")}' for d in dumps], '',
                 'DLLs gráficas extras na pasta do jogo:', *self.state.get('extra_graphics_dlls', []), '',
                 'Arquivos para conferir:', *[f'{r["status"]}: {r["path"]} ({r["role"]})' for r in mismatches], '',
                 'Enviar este ZIP com o crash.dmp da mesma tentativa. Não inclui saves nem arquivos de configuração com credenciais.']
@@ -296,12 +406,33 @@ class StartupDiagnostics:
         self.directory = Path(base_dir)/'runtime/diagnostics'
         self.directory.mkdir(parents=True, exist_ok=True)
         self.version = version; self.log = log; self.sessions = {}; self.current = None
+        self.pending_markers = None
         try:
             path = Path(resource_dir)/'server16_py/assets/startup_baseline.json'
             self.reference = json.loads(path.read_text(encoding='utf8'))
         except (OSError, ValueError) as exc:
             self.reference = {'files': []}
             self.log(f'Startup diagnostics: reference unavailable ({exc}); module/page evidence remains enabled')
+
+    def prepare_launch(self, executable):
+        """Called before Popen, never truncate a log while FIFA is running."""
+        try:
+            if self.current and self.current.thread.is_alive():
+                self.current.stopped.set(); self.current.thread.join(3)
+                if self.current.thread.is_alive():
+                    self.log('Startup diagnostics: previous session still finalizing; active logs were preserved')
+                    return
+            root=Path(executable).resolve().parent
+            for path in log_paths(root):
+                if path.is_file():
+                    try:
+                        path.write_bytes(b'')
+                    except OSError as exc:
+                        self.log(f'Startup diagnostics: could not reset {path.name}: {exc}')
+            self.pending_markers={str(p):log_marker(p) for p in log_paths(root)}
+            self.current=None
+        except Exception as exc:
+            self.log(f'Startup diagnostics: log reset unavailable: {exc}')
 
     def attach(self, pid, executable):
         try:
@@ -311,7 +442,8 @@ class StartupDiagnostics:
             if key in self.sessions:
                 return
             folder = self.directory/(datetime.now().strftime('%Y%m%d_%H%M%S_%f')+f'_pid{pid}')
-            session = StartupSession(folder, pid, executable, self.reference, self.version)
+            session = StartupSession(folder, pid, executable, self.reference, self.version,self.pending_markers)
+            self.pending_markers=None
             self.sessions[key] = self.current = session
             session.thread.start()
             self.log(f'Startup diagnostics: PID {pid}; report and automatic ZIP in {folder}')

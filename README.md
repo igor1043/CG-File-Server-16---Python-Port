@@ -4,11 +4,11 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.11 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.12 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 ## Atualização — 21/10/2026
 
-- **Diagnóstico da abertura:** relatório por execução com comparação de 729 arquivos, versões das DLLs carregadas, última tela e saída observada do FIFA. O Server gera um ZIP em `runtime/diagnostics/`. [Uso e limites da coleta](docs/DIAGNOSTICO_INICIALIZACAO.md).
+- **Diagnóstico por sessão:** ao abrir FIFA pelo Server, os logs ativos são zerados. Cada mod tem seu próprio arquivo, e o encerramento gera um ZIP com última tela, comparação de 729 arquivos, DLLs e dados do dump da tentativa, quando disponível. Os ZIPs ficam em `runtime/diagnostics/`. [Uso e limites da coleta](docs/DIAGNOSTICO_INICIALIZACAO.md).
 - **Câmeras — revisão 13:** primeira pessoa usa compensação de lente mais leve e sem ampliação adicional, com a nitidez confirmada em teste de RAM. As viradas fortes limitam o atraso para evitar a cabeça no enquadramento. A terceira pessoa acompanha mais a bola sem a posse, mantendo a órbita suave. Testes isolados aprovados; os ajustes finais aguardam validação no jogo.
 - **Câmeras — revisão 12:** acompanhamento nas cobranças e reinícios, correção da pose após a transição nativa e flags de desfoque desligadas nos quadros modificados. A terceira pessoa reduz oscilações e limita as viradas; no modo de um jogador, o vínculo do atleta permanece fixo. Testes isolados aprovados; usuário relatou melhora significativa. Casos específicos ainda aguardam validação.
 - **Física de roupas:** começa desligada e mantém a escolha salva, inclusive ao atualizar a instalação.

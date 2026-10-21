@@ -3036,6 +3036,9 @@ class Server16App(tk.Tk):
             self.log(f"FIFA process already running: {self.fifaEXE}")
             return
         self.competition_icons.prepare(self.exedir, force=True)
+        diagnostics = getattr(self, '_startup_diagnostics', None)
+        if diagnostics:
+            diagnostics.prepare_launch(self.fifaEXE)
         subprocess.Popen([self.fifaEXE], cwd=str(Path(self.fifaEXE).resolve().parent), shell=False)
         self.log(f"Launched FIFA executable: {self.fifaEXE}")
 
