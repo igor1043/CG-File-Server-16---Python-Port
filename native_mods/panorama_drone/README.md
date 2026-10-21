@@ -1,6 +1,6 @@
 # Panoramicas cinematograficas de drone
 
-Acrescenta 37 trajetos lentos a panoramica FE dos menus do FIFA 16, build
+Acrescenta 37 trajetos a panoramica FE dos menus do FIFA 16, build
 `577DE45C`. Nao altera os arquivos DAT/BIG nem os pacotes MUSE originais.
 O motor continua executando e selecionando suas tomadas. O diretor libera
 o enquadramento original por 8 segundos na entrada e 24 segundos entre os
@@ -37,8 +37,9 @@ A v5 acrescenta uma orbita externa de 360 graus: elipse com semieixos de
 110m e 95m, camera a 108m e alvo no centro do campo. O trajeto contorna o
 estadio inteiro e fecha na mesma pose. Aceleracao e desaceleracao ocupam
 10% do percurso cada, com velocidade quase constante no restante. A duracao
-padrao e aproximadamente 166 segundos, limitada a 160–300 segundos para
-conservar o passeio lento. Perfis com limite de altura abaixo de 100m
+padrao e aproximadamente 83 segundos, limitada a 80–150 segundos. O ajuste
+de velocidade de 21/10/2026 reduz pela metade o tempo anterior de 166 segundos,
+mantendo o mesmo trajeto e as transicoes. Perfis com limite de altura abaixo de 100m
 excluem essa orbita. Ela passa a ser a primeira tomada extra habilitada.
 
 As coordenadas sao relativas ao campo, em centimetros. As 18 tomadas
@@ -50,7 +51,8 @@ no eixo longitudinal e 108m no lateral, com altura maxima padrao de 110m.
 Elas passam por cima da borda das arquibancadas antes de descer para o
 campo. Perfis com altura maxima abaixo de 80m excluem as aereas em vez de
 achatar a camera contra a cobertura. Os trajetos foram testados abaixo de
-5m/s na duracao padrao, com lente entre 48 e 68 graus.
+5m/s na duracao padrao, exceto a orbita externa acelerada, abaixo de 10m/s.
+As lentes permanecem entre 48 e 68 graus.
 
 Isso nao e deteccao de colisao: modelos com coberturas excepcionais ou
 campo fora do padrao precisam de validacao/perfil. A visualizacao do lado
@@ -66,7 +68,7 @@ alteracao no EXE do Server16. Inicia com o jogo e funciona sem overlay.
 Configuracao: `ModCarrerMode/config/panorama_drone.ini`, relida a cada 500ms.
 
 - `enabled=0`: volta as panoramicas originais.
-- `duration_seconds`: 20 a 120, padrao 52; chegadas aereas multiplicam esse tempo por 1,4 ou 1,6, limitadas a 180 segundos. A orbita externa multiplica por 3,2, com limite de 160–300 segundos.
+- `duration_seconds`: 20 a 120, padrao 52; chegadas aereas multiplicam esse tempo por 1,4 ou 1,6, limitadas a 180 segundos. A orbita externa multiplica por 1,6, com limite de 80–150 segundos.
 - `original_interval_seconds`: 10 a 180, padrao 24.
 - `initial_original_seconds`: 0 a 120, padrao 8.
 - `transition_seconds`: 1 a 8, padrao 3; metade para escurecer, metade para revelar, mais pausa preta de aproximadamente 180ms.

@@ -29,14 +29,14 @@ int main(){
    assert(p.fov>=48&&p.fov<=68);
    Vec right{mat[0],mat[1],mat[2]},up{mat[4],mat[5],mat[6]},back{mat[8],mat[9],mat[10]};
    assert(dot(cross(right,up),back)>.999f);
-   if(i){const auto d=p.eye-last.eye;const float dt=duration(m,52)/3200.f;assert(std::sqrt(dot(d,d))/dt<500.f);} // <5m/s including the long exterior approaches.
+   if(i){const auto d=p.eye-last.eye;const float dt=duration(m,52)/3200.f;const float speedLimit=motions[m].kind==MotionKind::ExteriorOrbit?1000.f:500.f;assert(std::sqrt(dot(d,d))/dt<speedLimit);} // Only the full exterior circuit runs at twice its former speed.
    last=p;
   }
   assert(sample(m,.5f,1200).eye.y<=1200);
   const auto full=sample(m,.5f),scaled=sample(m,.5f,11000,.6f);assert(std::fabs(scaled.eye.x-full.eye.x*.6f)<.01f);
   const auto begin=sample(m,0),nearBegin=sample(m,.0001f),end=sample(m,1),nearEnd=sample(m,.9999f);
   assert(dot(begin.eye-nearBegin.eye,begin.eye-nearBegin.eye)<.01f&&dot(end.eye-nearEnd.eye,end.eye-nearEnd.eye)<.01f);
-  assert(duration(m,52)>=52&&duration(m,52)<=(motions[m].kind==MotionKind::ExteriorOrbit?300.f:84.f));
+  assert(duration(m,52)>=52&&duration(m,52)<=(motions[m].kind==MotionKind::ExteriorOrbit?150.f:84.f));
  }
  Settings cfg;Director d;uint64_t seen=0;unsigned previous=99;bool active=false;double nativeSeconds=0;float previousOpacity=0,lastProgress=0;
  for(unsigned i=0;i<motionCount*15000;++i){auto r=d.tick(.01,true,cfg);
@@ -101,10 +101,11 @@ int main(){
    quadrants|=1u<<((p.eye.x<0?1u:0u)+(p.eye.z<0?2u:0u));last=p;
   }
   assert(quadrants==15&&std::fabs(rotation-6.2831853f)<.002f&&dot(last.eye-first.eye,last.eye-first.eye)<.01f);
-  assert(duration(m,20)==160&&duration(m,120)==300);
+  assert(duration(m,20)==80&&duration(m,120)==150);
+  assert(std::fabs(duration(m,52)-83.2f)<.001f);
   assert(!available(m,9900)&&available(m,10000));
   Settings orbit;orbit.initial=0;orbit.mask=uint64_t{1}<<m;orbit.heightLimit=9900;
   Director excluded;for(unsigned i=0;i<500;++i)assert(!excluded.tick(.1,true,orbit).active);
  }
- std::puts("PASS: 37 slow routes, full exterior stadium orbit, both goals, halfway line, inner-circle rotation, 64-bit selection, native windows and black cuts at high/low FPS");
+ std::puts("PASS: 37 routes, twice-faster exterior stadium orbit, both goals, halfway line, inner-circle rotation, 64-bit selection, native windows and black cuts at high/low FPS");
 }

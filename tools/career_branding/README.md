@@ -57,7 +57,8 @@ Leitura da RAM confirmou as classes carregadas no FIFA aberto. O teste local
 da máquina de ações APT verificou entrada, saída, repetição de dados, atualização
 da conexão, recriação do widget, modo torneio, ausência do widget e inicialização
 repetida. Também foi verificada a textura com transparência e a preservação dos
-recursos anteriores. **A validação visual dentro do FIFA ainda está pendente.**
+recursos anteriores. **O usuário confirmou a revisão 7 dentro do FIFA, incluindo
+as transições entre telas, em 21/10/2026.**
 O usuário confirmou a logo e a ocultação da faixa na carreira com a revisão 2.
 A revisão 3 acrescentou a logo ao menu inicial e o alinhamento à direita. O usuário
 confirmou a logo no menu inicial, mas a faixa original continuou por baixo.
@@ -92,8 +93,8 @@ logo, alinhamento e correção do crash. Os três BIG mantêm o mesmo tamanho.
 O teste local agora distingue a string do objeto global, em vez de aceitar os
 dois opcodes como equivalentes. A revisão 5 falha nesse teste, reproduzindo a
 ausência de propriedade da ocultação; a revisão 6 passa em todos os fluxos de
-criação tardia, atualização de conexão e transição entre hubs. A confirmação
-visual da revisão 6 foi confirmada pelo usuário dentro do FIFA em 21/10/2026.
+criação tardia, atualização de conexão e transição entre hubs. O usuário
+confirmou visualmente a revisão 6 dentro do FIFA em 21/10/2026.
 
 Na transição entre telas, o usuário observou que a faixa original ainda piscava
 antes da logo. A revisão 7 mantém idênticos os BIG da carreira e do menu inicial
@@ -109,7 +110,8 @@ O teste agora cobre o estado anterior ao construtor, a ausência de dono entre
 hubs e atualizações nativas que voltam a definir opacidade. A revisão 6 falha
 na verificação da colocação inicial; a revisão 7 passa. Os 55 recursos internos
 anteriores continuam preservados, exceto pelos pontos APT descritos. A
-validação visual das transições da revisão 7 ainda está pendente.
+validação visual das transições da revisão 7 foi confirmada pelo usuário
+dentro do FIFA em 21/10/2026: o card deixou de piscar entre telas.
 
 A primeira instalação falhou na abertura. O dump e a leitura da RAM localizaram
 a instrução exata: `Function2.name` era nulo e o carregador em

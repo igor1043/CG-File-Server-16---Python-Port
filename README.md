@@ -9,9 +9,9 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 ## Atualização — 21/10/2026
 
 - **Estádio de fundo:** seleção para o menu inicial e a carreira, com preparação do pacote antes da recarga nativa. A escolha fica salva; o recurso começa desligado. No automático, a carreira usa o clube do save. A imagem do FIFA Friends é preservada quando não há estádio disponível ou o recurso está desligado.
-- **Panorâmica:** 37 tomadas, incluindo travessias do campo, aproximações do gol e órbita externa do estádio, com o módulo compatível do V12.
+- **Panorâmica:** 37 tomadas, incluindo travessias do campo, aproximações do gol e órbita externa do estádio, com o módulo compatível do V12. A volta externa leva cerca de 83 segundos no padrão, com velocidade dobrada e transições suaves.
 - **Pênaltis:** o placar permanece ativo durante a disputa; a pirotecnia compatível bloqueia os disparos nessa fase.
-- **Logo nos hubs:** [interface nativa com a logo FIFA Friends](tools/career_branding/README.md), substituindo a faixa de reconexão na carreira e no menu inicial, alinhada à direita. A revisão 6 foi confirmada pelo usuário; a revisão 7 mantém a faixa EA transparente desde o primeiro desenho, inclusive entre telas, com validação visual das transições pendente.
+- **Logo nos hubs:** [interface nativa com a logo FIFA Friends](tools/career_branding/README.md), substituindo a faixa de reconexão na carreira e no menu inicial, alinhada à direita. A revisão 7 mantém a faixa EA transparente desde o primeiro desenho, inclusive entre telas; funcionamento e transições confirmados pelo usuário dentro do FIFA.
 - **Recursos em desenvolvimento:** cenas extras de técnicos/mascotes desativadas. Seleção automática/manual de narrador, progresso e aviso de narração aplicada ficam ocultos; o código permanece preservado.
 
 As DLLs compiladas para o jogo ficam no [pacote FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12). Este repositório mantém os fontes, scripts e testes. Consulte o [índice dos módulos nativos](native_mods/README.md) para localizar cada componente.

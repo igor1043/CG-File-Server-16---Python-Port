@@ -68,14 +68,14 @@ inline constexpr Motion motions[]={
  cinema("goal_front_arc",{5000,380,-1050},{4000,650,-700},{4000,650,700},{5000,380,1050}, {5250,140,0},{5250,140,0},{5250,140,0},{5250,140,0},56,56,1,false,true),
  cinema("goal_low_crane",{5000,190,620},{4950,300,250},{4650,850,-250},{4400,1200,-650}, {5250,120,0},{5250,140,0},{5250,170,0},{5250,200,0},58,54,1,false,true),
  // Full ellipse outside the stands, looking inward throughout the circuit.
- {"stadium_exterior_orbit",{11000,10800,9500},{},{},{0,50,0},{},{},56,{}, {},0,3.2f,false,true,false,MotionKind::ExteriorOrbit,10000}
+ {"stadium_exterior_orbit",{11000,10800,9500},{},{},{0,50,0},{},{},56,{}, {},0,1.6f,false,true,false,MotionKind::ExteriorOrbit,10000}
 };
 inline constexpr unsigned motionCount=sizeof motions/sizeof motions[0];
 static_assert(motionCount<64,"The shot mask must fit uint64_t");
 inline constexpr uint64_t allMotionsMask=(uint64_t{1}<<motionCount)-1;
 inline float duration(unsigned index,float base){
  const auto& m=motions[index%motionCount];const float length=std::clamp(base,20.f,120.f)*m.durationScale;
- return m.kind==MotionKind::ExteriorOrbit?std::clamp(length,160.f,300.f):std::clamp(length,20.f,180.f);
+ return m.kind==MotionKind::ExteriorOrbit?std::clamp(length,80.f,150.f):std::clamp(length,20.f,180.f);
 }
 inline bool available(unsigned index,float heightLimit){const auto& m=motions[index%motionCount];return !m.exterior||heightLimit>=m.minimumHeight;}
 // Ten-percent acceleration/deceleration ramps, with nearly constant cruise.
