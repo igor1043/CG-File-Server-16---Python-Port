@@ -47,7 +47,7 @@ static bool read(uintptr_t a,void* out,size_t n){
 }
 template<class T>static T get(uintptr_t a){T x{};read(a,&x,sizeof x);return x;}
 struct Head {float m[16]{};ULONGLONG tick=0;uintptr_t table=0;fp::Vec root{};bool anchored=false,bodyValid=false;float bodyHeading=0.f;};
-struct State{uintptr_t behavior=0,output=0;LONG64 serial=0;int selected=-1,gameState=0;Head head{};fp::Pose pose{};float original[28]{},result[28]{};bool valid=false,modded=false;fp::Pose raw{};};
+struct State{uintptr_t behavior=0,output=0;LONG64 serial=0;int selected=-1,gameState=0,mode=0;Head head{};fp::Pose pose{};float original[28]{},result[28]{};bool valid=false,modded=false;fp::Pose raw{};};
 static SRWLOCK headLock=SRWLOCK_INIT,stateLock=SRWLOCK_INIT;
 static Head heads[46]{};
 static State state{};
@@ -86,7 +86,7 @@ static void __fastcall generatorHook(void* self,void* output){
         s.valid=s.head.anchored&&s.head.table==data+0x3470&&GetTickCount64()-s.head.tick<200&&fp::solve(s.head.m,s.raw);
         if(s.valid&&InterlockedCompareExchange(&enabled,0,0)&&!stopping){
             LARGE_INTEGER now{};QueryPerformanceCounter(&now);
-            const int mode=InterlockedCompareExchange(&cameraMode,0,0);
+            const int mode=InterlockedCompareExchange(&cameraMode,0,0);s.mode=mode;
             const bool contextChanged=previousBehavior!=s.behavior||previousTable!=s.head.table||previousPhase!=s.gameState||previousMode!=mode;
             const bool playerChanged=previousPlayer!=s.selected;
             if(contextChanged||playerChanged){stabilizer.reset();gameView.reset();}
@@ -94,13 +94,13 @@ static void __fastcall generatorHook(void* self,void* output){
             const float dt=previousTime.QuadPart?static_cast<float>(static_cast<double>(now.QuadPart-previousTime.QuadPart)/static_cast<double>(timerFrequency.QuadPart)):0.f;
             auto target=s.raw;
             const float baseFov=static_cast<float>(InterlockedCompareExchange(&fieldOfView,0,0));
+            const bool possessing=get<int>(s.behavior+0xa30)==s.selected;
             float fov=baseFov*.01745329252f;
             if(mode==1){
-                const auto view=careerView.update(s.raw,s.head.root,get<fp::Vec>(s.behavior+0xa20),dt,baseFov,InterlockedCompareExchange(&cameraDistance,0,0),playerChanged,s.head.bodyValid,s.head.bodyHeading);
+                const auto view=careerView.update(s.raw,s.head.root,get<fp::Vec>(s.behavior+0xa20),dt,baseFov,InterlockedCompareExchange(&cameraDistance,0,0),playerChanged,s.head.bodyValid,s.head.bodyHeading,possessing);
                 s.pose=view.pose;fov=view.fov;
             }else{
               if(InterlockedCompareExchange(&framing,0,0)){
-                const bool possessing=get<int>(s.behavior+0xa30)==s.selected;
                 const bool closeControl=get<int>(s.behavior+0xa10)==1; // Native isInPaceControl, not a generic animation id.
                 const auto view=gameView.update(target,s.head.root,get<fp::Vec>(s.behavior+0xa20),possessing,dt,closeControl,baseFov);
                 target=view.pose;fov=view.fov;
@@ -147,7 +147,7 @@ static void __fastcall moduleUpdateHook(void* self,void* timing){
     fp::applyFinalPose(finalData,s.result);
     fixup(reinterpret_cast<void*>(module),finalData);
     std::memcpy(reinterpret_cast<void*>(module+0xad0),finalData,0x64);
-    fp::clearNativeCameraEffects(reinterpret_cast<unsigned char*>(module));
+    fp::clearNativeCameraEffects(reinterpret_cast<unsigned char*>(module),s.mode==0);
 }
 static bool exchange(uintptr_t slot,uintptr_t oldValue,uintptr_t newValue){
     DWORD old=0;if(!VirtualProtect(reinterpret_cast<void*>(slot),8,PAGE_READWRITE,&old))return false;

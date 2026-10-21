@@ -9,19 +9,20 @@ class CareerCamera {
     float heading=0.f;
     float yawSpeed=0.f;
     float reference=0.f,ballBias=0.f;
+    int rearBallSide=0;
     Vec velocity{};
     float boom=480.f,height=230.f;
     float boomTarget=480.f,heightTarget=230.f;
     Vec previousRoot{},anchorTarget{},anchor{};
 public:
     void reset(){ready=false;}
-    FramedView update(const Pose& head,Vec root,Vec ball,float dt,float baseFov,int distancePreset=0,bool playerChanged=false,bool bodyValid=false,float bodyHeading=0.f){
+    FramedView update(const Pose& head,Vec root,Vec ball,float dt,float baseFov,int distancePreset=0,bool playerChanged=false,bool bodyValid=false,float bodyHeading=0.f,bool possessing=true){
         constexpr float degrees=.01745329252f;
         const Vec travel=root-previousRoot;
         const float maxTravel=playerChanged?2500.f:350.f;
         const bool continuous=ready&&std::isfinite(dt)&&dt>0&&dt<=.25f&&dot(travel,travel)<=maxTravel*maxTravel;
         const bool body=bodyValid&&std::isfinite(bodyHeading);
-        if(!continuous||playerChanged){reference=body?bodyHeading:head.heading;velocity={};ballBias=0.f;}
+        if(!continuous||playerChanged){reference=body?bodyHeading:head.heading;velocity={};ballBias=0.f;rearBallSide=0;}
         else {
             const Vec instantaneous{travel.x/dt,0.f,travel.z/dt};
             velocity=velocity+(instantaneous-velocity)*response(dt,.35f);
@@ -35,14 +36,20 @@ public:
             reference=wrap(reference+wrap(desired-reference)*response(dt,.32f));
         }
         float wantedBias=0.f;
+        if(possessing)rearBallSide=0;
         const Vec ballDelta=ball-root;
         const float distance=std::hypot(ballDelta.x,ballDelta.z);
-        if(std::isfinite(distance)&&distance>250.f&&distance<5000.f){
+        if(std::isfinite(distance)&&distance>250.f&&distance<(possessing?5000.f:20000.f)){
             const float direction=std::atan2(-ballDelta.z,ballDelta.x);
-            const float angle=wrap(direction-reference);
-            // Give a forward ball some space without circling the player
-            // toward a ball behind them or changing the selected player.
-            if(std::fabs(angle)<1.5707963f)
+            float angle=wrap(direction-reference);
+            // Without possession, turn partway toward the play. Hysteresis
+            // keeps a ball directly behind from choosing alternate orbit sides.
+            if(!possessing){
+                if(std::fabs(angle)<2.2f)rearBallSide=0;
+                else if(!rearBallSide&&std::fabs(angle)>2.6f)rearBallSide=angle<0.f?-1:1;
+                if(rearBallSide&&std::fabs(angle)>2.2f)angle=std::copysign(std::fabs(angle),static_cast<float>(rearBallSide));
+                wantedBias=clamp(angle*.45f,-.8f,.8f)*clamp((distance-250.f)/800.f,0.f,1.f);
+            }else if(std::fabs(angle)<1.5707963f)
                 wantedBias=clamp(angle,-.65f,.65f)*.12f*clamp((distance-250.f)/800.f,0.f,1.f);
         }
         ballBias=continuous?ballBias+(wantedBias-ballBias)*response(dt,.65f):wantedBias;

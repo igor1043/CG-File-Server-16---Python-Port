@@ -1,6 +1,6 @@
 # Primeira pessoa no Server16
 
-Componente x64 `server16_first_person_v12.dll`, carregado pelo Server usando o helper
+Componente x64 `server16_first_person_v13.dll`, carregado pelo Server usando o helper
 existente `cgfs16_inject.exe`. O controle é o mapa `Local\FIFA16_FirstPersonCamera_v4`,
 80 bytes, versão 4, declarado em `camera_channel.h` e `first_person_runtime.CameraShared`.
 O Server publica owner/heartbeat e comando; a DLL publica ack/estado/erro. Não há
@@ -126,3 +126,33 @@ isolados. São 9 testes Python da câmera e 10 da física de roupas aprovados.
 O usuário relatou melhora significativa em 21/10/2026 após instalar a revisão.
 Casos específicos ainda aguardam validação; a invisibilidade continua em
 investigação e não foi corrigida por este módulo.
+
+## Revisão v13 — 21/10/2026
+
+A nitidez com FOV amplo foi isolada em RAM: além das flags de desfoque, o motor
+aplicava sua curva de distorção retangular entre 80 e 120 graus, chegando a 0,4
+e zoom inverso 0,78. Desligar a curva melhorou o centro, mas o usuário relatou
+deformação excessiva nas laterais. O teste com correção 0,25 e zoom inverso 1
+preservou a nitidez e melhorou as proporções, com ajuste restante nos cantos.
+
+A revisão usa metade da compensação nativa, limitada a 0,20, e zoom inverso 1,
+somente na primeira pessoa. Não altera o FOV escolhido, a resolução, a curva
+nativa nem recursos do render. A terceira pessoa mantém os parâmetros de lente
+do motor; lentes explicitamente desativadas continuam desativadas. A versão
+anterior com distorção completamente desligada não foi publicada.
+
+Na primeira pessoa, a suavização mantém no máximo 20 graus de atraso horizontal
+nas viradas fortes. A proteção de posição usa também a direção final da câmera,
+mantendo o centro da cabeça ao menos 23 cm atrás do plano da câmera, sem ocultar
+malhas. Os filtros de pequenos movimentos continuam usando a intensidade salva.
+
+Na terceira pessoa, a posse vem do atleta nativo em +A30. Sem a bola, a câmera
+gira parcialmente em direção à jogada, com viés limitado a 0,8 rad e os mesmos
+limites de velocidade e aceleração da revisão 12. Uma zona de histerese evita
+que a bola diretamente atrás alterne o lado da órbita. Com a bola, volta
+gradualmente ao acompanhamento corporal já existente.
+
+Matemática, limites de virada, segurança da cabeça, posse/recuperação, bola atrás
+e protocolo real da DLL passaram nos testes isolados. A compensação final 0,20,
+as viradas e o foco sem posse ainda precisam de validação visual após carregar
+a DLL nova. A invisibilidade geral de jogadores continua sem causa confirmada.

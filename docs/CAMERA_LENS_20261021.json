@@ -1,0 +1,55 @@
+{
+  "version": "0.2.11",
+  "output": "Server16Python.exe",
+  "bytes": 45761403,
+  "sha256": "aacaf1744f86d0bfc85984ea7cb84cb0f8993f35676aade8e349f5a91ec3b205",
+  "source_sha256": "1dcabfb8d8c587324b899d930f1d74916c904e9b63f1d0b45221cfe86c80e422",
+  "camera_resource": "bin\\server16_first_person_v13.dll",
+  "camera_sha256": "da35f1c37fba41d6a36103bd91df5be8b9716a243a5b6844bd772079c55e7bd9",
+  "preserved_archive_members": 3055,
+  "preserved_python_modules": 675,
+  "python_modules": {
+    "server16_py": "a99d120cd1c87c6cca46a235d98da3349629b7d6b92c24d070aec440f585ba41",
+    "server16_py.app": "d425fb34ac081753a3d4c56d4ab20c0e12b0d6a765878cbcb27759d7a4d58cda",
+    "server16_py.first_person_runtime": "86176ca473bf1cb9706f3743ec090552e5c8ea49bfe08c9ae20014c14fb042e2",
+    "server16_py.startup_diagnostics": "86cae39e3d136cd740657f224e82865b1d5271d5294c68c4957320262625f30f"
+  },
+  "native_math_test": "passed: first-person head clearance/turn lag, gentle lens, off-ball focus and rear-ball hysteresis",
+  "native_dll_protocol": "passed: isolated mapping; no FIFA hooks executed",
+  "python_camera_and_hub_tests": 9,
+  "python_cloth_tests": 10,
+  "visual_validation": {
+    "curve_disabled": "center sharpened, excessive rectilinear stretching reported by user",
+    "distortion_0_25_zoom_1": "user confirmed good center clarity and better proportions; residual extreme-corner motion",
+    "distortion_0_20_zoom_1": "applied in RAM; awaiting visual confirmation",
+    "head_clearance_and_off_ball_follow": "compiled and tested; awaiting game reload and visual test"
+  },
+  "first_person": {
+    "native_distortion_multiplier": 0.5,
+    "maximum_distortion": 0.2,
+    "inverse_zoom": 1,
+    "maximum_yaw_lag_degrees": 20,
+    "head_center_behind_camera_cm": 23,
+    "fov_preference_unchanged": true
+  },
+  "third_person": {
+    "off_ball_bias_gain": 0.45,
+    "off_ball_bias_limit_rad": 0.8,
+    "orbit_speed_rad_s": 0.75,
+    "orbit_acceleration_rad_s2": 1.8,
+    "native_lens_preserved": true
+  },
+  "mesh_visibility_hook": false,
+  "installation_status": "installed; visual validation pending",
+  "startup_baseline_sha256": "7c785025dbb82962c4f47c92d1c295d47cbae5cc5d624dc66bbea6a447996958",
+  "diagnostics": {
+    "reference_files": 729,
+    "tests": 7,
+    "automatic_zip": true,
+    "native_process_exit_test": "passed",
+    "actual_module_enumeration_and_full_file_audit": "passed: 729 files, 70 modules, 117496-byte report ZIP; no FIFA launched",
+    "general_regression_python_tests": 48
+  },
+  "installed_at": "2026-10-21T20:46:51",
+  "preferences_unchanged": true
+}

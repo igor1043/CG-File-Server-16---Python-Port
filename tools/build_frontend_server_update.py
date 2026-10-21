@@ -21,7 +21,7 @@ def module_source(name, kind):
     return path/'__init__.py' if kind==1 else path.with_suffix('.py')
 
 
-def build(server,output,modules=MODULES):
+def build(server,output,modules=MODULES,allow_new=False):
     modules=tuple(modules)
     if not modules or any((name!='server16_py' and not name.startswith('server16_py.')) or
                           not all(part.isidentifier() for part in name.split('.')) for name in modules):
@@ -48,6 +48,17 @@ def build(server,output,modules=MODULES):
             chunk=zlib.compress(marshal.dumps(code),6)
         pyz_toc.append((name,(kind,len(payload),len(chunk))))
         payload.extend(chunk)
+    for name in modules:
+        if name in sources:
+            continue
+        if not allow_new:
+            raise ValueError('Installed Server16 lacks requested modules')
+        source=module_source(name,0)
+        raw=source.read_bytes();sources[name]=hashlib.sha256(raw).hexdigest()
+        code=compile(raw,name.replace('.', '/')+'.py','exec')
+        chunk=zlib.compress(marshal.dumps(code),6)
+        pyz_toc.append((name,(0,len(payload),len(chunk))))
+        payload.extend(chunk)
     if set(sources)!=set(modules):raise ValueError('Installed Server16 lacks requested modules')
     toc_offset=len(payload)
     payload.extend(marshal.dumps(pyz_toc));payload[8:12]=struct.pack('!i',toc_offset)
@@ -67,7 +78,7 @@ def build(server,output,modules=MODULES):
     output.write_bytes(original[:archive._start_offset]+packed+toc_data+cookie_data)
     updated=CArchiveReader(str(output));updated_pyz=updated.open_embedded_archive('PYZ.pyz')
     assert updated.options==archive.options and updated.toc.keys()==archive.toc.keys()
-    assert updated_pyz.toc.keys()==pyz.toc.keys()
+    assert set(updated_pyz.toc)==set(pyz.toc)|set(modules)
     for name in archive.toc:
         if name!='PYZ.pyz':assert updated.extract(name)==archive.extract(name),name
     for name,(kind,offset,length) in pyz.toc.items():
@@ -79,10 +90,13 @@ def build(server,output,modules=MODULES):
             source=module_source(name,kind)
             expected=compile(source.read_bytes(),pyz.extract(name).co_filename,'exec')
             assert updated_pyz.extract(name)==expected,name
+    for name in set(modules)-set(pyz.toc):
+        expected=compile(module_source(name,0).read_bytes(),name.replace('.', '/')+'.py','exec')
+        assert updated_pyz.extract(name)==expected,name
     report={'server':str(server),'output':str(output),'modules':sources,
             'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),
             'preserved_archive_members':len(archive.toc)-1,
-            'preserved_python_modules':len(pyz.toc)-len(modules)}
+            'preserved_python_modules':len(set(pyz.toc)-set(modules))}
     output.with_suffix('.json').write_text(json.dumps(report,indent=2),encoding='utf8')
     print(json.dumps(report,indent=2))
     return report

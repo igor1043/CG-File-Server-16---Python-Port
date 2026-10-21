@@ -33,6 +33,13 @@ public:
             filtered=target;localEye=local;ready=true;
         }else{
             filtered.heading=wrap(filtered.heading+wrap(target.heading-filtered.heading)*response(dt,config.heading));
+            // Strong smoothing must not leave the gaze behind the animated
+            // skull during a sharp turn. Keep ordinary sway filtering, with a
+            // bounded yaw lag instead of a frame-delayed view through the head.
+            constexpr float maximumYawLag=.3490658504f; // 20 degrees.
+            const float yawLag=wrap(target.heading-filtered.heading);
+            if(std::fabs(yawLag)>maximumYawLag)
+                filtered.heading=wrap(target.heading-std::copysign(maximumYawLag,yawLag));
             filtered.pitch+=wrap(target.pitch-filtered.pitch)*response(dt,config.pitch);
             filtered.roll+=wrap(target.roll-filtered.roll)*response(dt,config.roll);
             // Filter the head's movement relative to the player, so running does

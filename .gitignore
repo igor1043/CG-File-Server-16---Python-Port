@@ -17,6 +17,7 @@ dist/
 # Logs and runtime-generated files
 runtime/server16.log
 runtime/*.log
+runtime/diagnostics/
 
 # OS / editor
 .DS_Store
@@ -93,6 +94,6 @@ runtime/dev_deps/
 bin/server16_first_person.dll
 bin/server16_first_person_v[2-4].dll
 
-# Rejected camera experiments; v12 is the current runtime.
+# Rejected camera experiments; v13 is the current runtime.
 bin/server16_first_person_v[8-9].dll
 bin/server16_first_person_v10.dll

@@ -82,12 +82,31 @@ int main(){
     auto controlled=precision.update(head,{0,0,0},ball,true,0,true);
     assert(controlled.pose.pitch>normal.pose.pitch);
     auto clear=head;fp::headClearance(clear,head);
-    assert(std::fabs(clear.eye.x-(head.eye.x+head.forward.x*7.f))<.001f);
-    assert(std::fabs(clear.eye.y-(head.eye.y+head.forward.y*7.f))<.001f);
+    assert(std::fabs(clear.eye.x-(head.eye.x+head.forward.x*9.f))<.001f);
+    assert(std::fabs(clear.eye.y-(head.eye.y+head.forward.y*9.f))<.001f);
     assert(clear.heading==head.heading&&clear.pitch==head.pitch);
     auto turn=head;turn.forward={0,0,1};turn.eye={0,175,14};
     fp::headClearance(clear,turn);
     assert(fp::dot(clear.eye-(turn.eye-turn.forward*14.f-turn.up*5.f),turn.forward)>=20.99f);
+    // Abrupt alternating turns must keep the entire skull behind the camera
+    // near plane even at maximum yaw smoothing and a very wide field of view.
+    for(int profile=0;profile<4;++profile){
+        fp::Stabilizer abrupt;
+        fp::Pose animated{};animated.eye={14,175,0};fp::axes(animated);
+        abrupt.update(animated,{0,0,0},0,profile);
+        for(int frame=0;frame<240;++frame){
+            animated.heading=frame%60<30?2.8f:-2.8f;
+            animated.pitch=.6f*std::sin(frame*.3f);fp::axes(animated);
+            const fp::Vec skull{0,170,0};
+            animated.eye=skull+animated.forward*14.f+animated.up*5.f;
+            auto gaze=animated;gaze.pitch=.1f;fp::axes(gaze);
+            auto safe=abrupt.update(gaze,{0,0,0},1.f/120,profile);
+            fp::headClearance(safe,animated);
+            assert(std::fabs(fp::wrap(animated.heading-safe.heading))<=.349067f);
+            assert(fp::dot(safe.eye-skull,safe.forward)>=22.99f);
+            assert(std::isfinite(safe.eye.x)&&std::isfinite(safe.eye.y)&&std::isfinite(safe.eye.z));
+        }
+    }
     fp::PossessionFraming custom;
     auto wide=custom.update(head,{0,0,0},ball,true,0,false,110);
     assert(wide.fov>normal.fov&&wide.fov<=120*.01745329252f);
@@ -194,6 +213,30 @@ int main(){
         assert(fp::dot(stable.pose.eye-baseline.pose.eye,stable.pose.eye-baseline.pose.eye)<.01f);
     }
     assert(peak<.001f); // Head gaze, root sway and close touches cannot orbit the camera.
+    fp::CareerCamera offBall,withBall;
+    head.heading=0;fp::axes(head);
+    const fp::Vec wideBall{2500,10,-2500};
+    auto following=offBall.update(head,{0,0,0},wideBall,0,85,0,false,true,0,false);
+    auto carrying=withBall.update(head,{0,0,0},wideBall,0,85,0,false,true,0,true);
+    assert(following.pose.heading>carrying.pose.heading+.2f);
+    const float offBallHeading=following.pose.heading;
+    for(int frame=0;frame<480;++frame)
+        following=offBall.update(head,{0,0,0},wideBall,1.f/120,85,0,false,true,0,true);
+    assert(following.pose.heading<offBallHeading-.2f); // Regaining possession returns to body framing.
+    fp::CareerCamera rearBall;
+    float rearPrior=0.f,rearSpeed=0.f;
+    for(int frame=0;frame<720;++frame){
+        const fp::Vec rear{-3000,10,frame%2?10.f:-10.f};
+        auto rearView=rearBall.update(head,{0,0,0},rear,frame?1.f/120:0.f,85,0,false,true,0,false);
+        if(frame){
+            const float speed=fp::wrap(rearView.pose.heading-rearPrior)*120.f;
+            assert(std::fabs(speed)<=.751f&&std::fabs(speed-rearSpeed)<=1.8f/120+.001f);
+            rearSpeed=speed;
+        }
+        rearPrior=rearView.pose.heading;
+        assert(rearPrior>0.f); // Tiny ball movement across directly behind cannot reverse the orbit.
+        assert(rearView.pose.roll==0.f&&rearView.fov==85*.01745329252f);
+    }
     fp::CameraSubject bound;
     assert(bound.resolve(0x1234,9,true)==9);
     for(int candidate:{0,10,45,-1,32})assert(bound.resolve(0x1234,candidate,true)==9);
@@ -208,8 +251,31 @@ int main(){
     for(int i:{3,7,8,9,10,11,15,18,19,20,21,22,23,24,25,26,27})assert(native[i]==100.f+i);
     unsigned char module[0x180]{};fp::clearNativeCameraEffects(module);
     for(int i=0;i<0x180;++i)assert(module[i]==((i==0x141||i==0x158||i==0x159||i==0x15a)?1:0));
+    // The first-person lens keeps edge compensation without the stock
+    // enlargement. Third person and explicitly disabled native lenses retain
+    // their parameters; no pose, clipping or projection bytes are changed.
+    for(const float input:{0.f,.2f,.4f}){
+        unsigned char lensModule[0x180];std::memset(lensModule,0xa5,sizeof lensModule);
+        const float nativeZoom=.78f;
+        std::memcpy(lensModule+0x164,&input,4);std::memcpy(lensModule+0x168,&nativeZoom,4);
+        fp::clearNativeCameraEffects(lensModule,false);
+        float distortion=0,zoom=0;
+        std::memcpy(&distortion,lensModule+0x164,4);std::memcpy(&zoom,lensModule+0x168,4);
+        assert(distortion==input&&zoom==nativeZoom);
+        unsigned char previousLens[0x180];std::memcpy(previousLens,lensModule,sizeof previousLens);
+        fp::clearNativeCameraEffects(lensModule,true);
+        std::memcpy(&distortion,lensModule+0x164,4);std::memcpy(&zoom,lensModule+0x168,4);
+        assert(std::fabs(distortion-input*.5f)<.000001f&&zoom==1.f);
+        for(int i=0;i<0x180;++i)if(i<0x164||i>=0x16c)assert(lensModule[i]==previousLens[i]);
+    }
+    const float disabled=-1.f;
+    std::memcpy(module+0x164,&disabled,4);std::memcpy(module+0x168,&disabled,4);
+    fp::clearNativeCameraEffects(module,true);
+    assert(std::memcmp(module+0x164,&disabled,4)==0&&std::memcmp(module+0x168,&disabled,4)==0);
     source[0]=std::numeric_limits<float>::quiet_NaN();assert(!fp::finiteCameraData(source));
     std::puts("PASS: body/trajectory orbit rejects head/root/dribble jitter; locked subject survives restart focus; final pose preserves clipping and disables native blur flags only");
     std::puts("PASS: ball/field balance, FOV/tilt personalization, hair clearance, immediate kickoff anchor and pose reacquisition");
     std::puts("PASS: career third person, whole-body framing, stable height/roll, root tracking and smooth orbit");
+    std::puts("PASS: first-person lens retains gentle compensation with neutral zoom; third-person/disabled lenses and projection bytes are preserved");
+    std::puts("PASS: sharp turns keep the skull behind the near plane; third person follows off-ball play without rear-ball orbit reversal");
 }

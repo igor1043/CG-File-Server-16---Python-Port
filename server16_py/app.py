@@ -65,6 +65,7 @@ from .settings_store import SettingsStore
 from .stadium_runtime import StadiumRuntime
 from .stadium_selector import StadiumSelector
 from .first_person_runtime import first_person_runtime
+from .startup_diagnostics import StartupDiagnostics
 from .update_checker import GithubReleaseChecker, UpdateCheckResult
 try:
     from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector
@@ -415,6 +416,11 @@ class Server16App(tk.Tk):
         self.refresh_modules()
         self.log("Bootstrap file writes are deferred until an explicit runtime action")
         self.log("Application started")
+        self._startup_diagnostics = None
+        try:
+            self._startup_diagnostics = StartupDiagnostics(self.base_dir, self.resource_dir, APP_VERSION, self.log)
+        except Exception as exc:
+            self.log('Startup diagnostics initialization unavailable', exc)
         self._poll_job = self.after(500, self.poll_process)
         self._stats_job = self.after(250, self.stats_loop)
         self._overlay_job = self.after(40, self.overlay_loop)
@@ -3539,7 +3545,11 @@ class Server16App(tk.Tk):
                 self._poll_job = self.after(500, self.poll_process)
                 return
             running = bool(self.MP) and any(Path((p.info.get("name") or "")).stem.lower() == self.MP.lower() for p in psutil.process_iter(["name"]))
-            if running and self.memory.attack(self.MP):
+            attached = running and self.memory.attack(self.MP)
+            diagnostics = getattr(self, '_startup_diagnostics', None)
+            if running and diagnostics and self.memory.process_id:
+                diagnostics.attach(self.memory.process_id, self.fifaEXE)
+            if attached:
                 self._attached_once = True
                 self._set_process_status(self.status_text("fifa_attached"), self.success)
                 self.update_page_name()
@@ -3597,6 +3607,13 @@ class Server16App(tk.Tk):
     def update_page_name(self) -> None:
         try:
             page_name = self.memory.get_string(self.offsets.ORIPGBASE, self.offsets.PG1, size=64)
+            diagnostics = getattr(self, '_startup_diagnostics', None)
+            if diagnostics:
+                diagnostics.page_seen(page=page_name)
+            pending = getattr(self, '_page_read_pending', 0)
+            if pending:
+                self.log(f'Page reader ready after {pending} pending reads')
+                self._page_read_pending = 0
             self._sync_page_banner(page_name)
             self._handle_page_transition(page_name)
             if self._page_can_have_match_context(page_name):
@@ -3604,7 +3621,14 @@ class Server16App(tk.Tk):
         except Exception as exc:
             self._sync_page_banner(f"Offset pending: {exc}")
             self._set_process_status(self.status_text("reading_page"), self.gold)
-            self.log("Failed to read page name", exc, exc_info=sys.exc_info())
+            diagnostics = getattr(self, '_startup_diagnostics', None)
+            if diagnostics:
+                diagnostics.page_seen(error=exc)
+            self._page_read_pending = getattr(self, '_page_read_pending', 0) + 1
+            now = time.monotonic()
+            if self._page_read_pending == 1 or now-getattr(self, '_page_read_log_at', 0) >= 10:
+                self._page_read_log_at = now
+                self.log(f'Page reader pending ({self._page_read_pending} attempts): {exc}')
 
     def _handle_page_transition(self, page_name: str) -> None:
         if page_name == self.lastpagename:
@@ -4155,7 +4179,7 @@ class Server16App(tk.Tk):
     def _restore_native_runtime_assets(self) -> None:
         try:
             restored = restore_native_assets(self)
-            self.log(f"Native runtime assets restored from FSW ({restored} files updated)")
+            self.log(f"Native runtime assets restored from FSW ({restored} source files processed; not a changed-file count)")
         except Exception as exc:
             self.log("Failed to restore native runtime assets", exc, exc_info=sys.exc_info())
 
@@ -4260,6 +4284,9 @@ class Server16App(tk.Tk):
         def step(label, action):
             return cleanup_step(label, action, self.log)
         step('start log', lambda:self.log("Shutdown: starting cleanup"))
+        diagnostics = getattr(self, '_startup_diagnostics', None)
+        if diagnostics is not None:
+            step('startup diagnostics', diagnostics.close)
         # Cancel all Tk timers, including optional panels, before releasing maps.
         def cancel_jobs():
             for job in self.tk.call('after', 'info'):

@@ -34,6 +34,12 @@ inline void headClearance(Pose& view,const Pose& raw){
     const Vec skull=raw.eye-raw.forward*14.f-raw.up*5.f;
     const float forward=dot(view.eye-skull,raw.forward);
     if(std::isfinite(forward)&&forward<21.f)view.eye=view.eye+raw.forward*(21.f-forward);
+    // A camera ahead of the *raw* face can still look back into it while yaw
+    // smoothing catches up. Keep the skull behind the rendered near plane as
+    // well, using the final gaze rather than hiding any player's mesh.
+    const float renderedForward=dot(view.eye-skull,view.forward);
+    if(std::isfinite(renderedForward)&&renderedForward<23.f)
+        view.eye=view.eye+view.forward*(23.f-renderedForward);
 }
 class PossessionFraming {
     bool ready=false,wasPossessing=false;

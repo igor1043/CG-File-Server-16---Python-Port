@@ -17,11 +17,12 @@ a = Analysis(
         ('bin\\cgfs16_overlay.dll', 'bin'),
         ('bin\\cgfs16_inject.exe',  'bin'),
         ('bin\\fifa16_narration.dll', 'bin'),
-        ('bin\\server16_first_person_v12.dll', 'bin'),
+        ('bin\\server16_first_person_v13.dll', 'bin'),
         ('bin\\FifaLibrary16.dll',  'bin'),
         ('bin\\career_jobs_runtime.dll', 'bin'),
     ],
     datas=[
+        ('server16_py\\assets\\startup_baseline.json', 'server16_py/assets'),
         ('server16_py\\assets\\flags', 'server16_py/assets/flags'),
         ('server16_py\\offsets.json', 'server16_py'),
         ('server16_py\\db_worker.py', 'server16_py'),

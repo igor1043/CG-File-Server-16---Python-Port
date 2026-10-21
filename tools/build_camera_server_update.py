@@ -19,7 +19,8 @@ def build(server, camera, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='server16_camera_build_') as folder:
         intermediate = Path(folder) / 'Server16Python.exe'
-        python_report = build_python(server, intermediate, ('server16_py', 'server16_py.first_person_runtime'))
+        python_report = build_python(server, intermediate, ('server16_py', 'server16_py.first_person_runtime',
+            'server16_py.app', 'server16_py.startup_diagnostics'), allow_new=True)
         original = CArchiveReader(str(server))
         archive = CArchiveReader(str(intermediate))
         raw = intermediate.read_bytes()
@@ -27,17 +28,22 @@ def build(server, camera, output):
         payload = io.BytesIO()
         toc = []
         renamed = []
+        baseline_name = 'server16_py/assets/startup_baseline.json'
+        baseline_path = Path(__file__).resolve().parents[1]/baseline_name
+        if any(name.replace('\\', '/') == baseline_name for name in archive.toc):
+            raise ValueError('Startup baseline already present; use an explicit upgrade path.')
         for name, (offset, length, size, compressed, kind) in archive.toc.items():
-            if name.replace('\\', '/') == 'bin/server16_first_person_v11.dll':
-                new_name = name.replace('server16_first_person_v11.dll', 'server16_first_person_v12.dll')
+            if name.replace('\\', '/') == 'bin/server16_first_person_v12.dll':
+                new_name = name.replace('server16_first_person_v12.dll', 'server16_first_person_v13.dll')
                 entry = writer._write_blob(payload, camera.read_bytes(), new_name, kind, bool(compressed))
                 renamed.append((name, new_name))
             else:
                 entry = (payload.tell(), length, size, compressed, kind, name)
                 payload.write(raw[archive._start_offset+offset:archive._start_offset+offset+length])
             toc.append(entry)
+        toc.append(writer._write_blob(payload, baseline_path.read_bytes(), baseline_name, 'x', True))
         if len(renamed) != 1:
-            raise ValueError('Expected exactly one v11 camera DLL in the current release.')
+            raise ValueError('Expected exactly one v12 camera DLL in the current release.')
         for option in archive.options:
             toc.append((0, 0, 0, 0, 'o', option))
         pos = payload.tell()
@@ -54,19 +60,21 @@ def build(server, camera, output):
         stream.write(struct.pack('<I', checksum))
     updated = CArchiveReader(str(output))
     old_name, new_name = renamed[0]
-    assert len(original.toc) == len(updated.toc)
+    assert len(original.toc)+1 == len(updated.toc)
     assert updated.options == original.options
     for name in original.toc:
         if name not in ('PYZ.pyz', old_name):
             assert original.extract(name) == updated.extract(name), name
     assert updated.extract(new_name) == camera.read_bytes()
-    report = {'version': '0.2.10', 'output': str(output), 'bytes': output.stat().st_size,
+    assert updated.extract(baseline_name) == baseline_path.read_bytes()
+    report = {'version': '0.2.11', 'output': str(output), 'bytes': output.stat().st_size,
               'sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
               'source_sha256': hashlib.sha256(server.read_bytes()).hexdigest(),
               'camera_resource': new_name, 'camera_sha256': hashlib.sha256(camera.read_bytes()).hexdigest(),
               'preserved_archive_members': len(original.toc)-2,
               'preserved_python_modules': python_report['preserved_python_modules'],
               'python_modules': python_report['modules']}
+    report['startup_baseline_sha256'] = hashlib.sha256(baseline_path.read_bytes()).hexdigest()
     output.with_suffix('.json').write_text(json.dumps(report, indent=2)+'\n', encoding='utf-8')
     return report
 
