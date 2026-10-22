@@ -11,25 +11,32 @@ inline void applyFinalPose(float* destination,const float* source){
     // The remaining CameraData words belong to the native clipping/lens ABI.
     for(int i:{0,1,2,4,5,6,12,13,14,16,17})destination[i]=source[i];
 }
+struct Lens {float distortion,inverseZoom;};
+inline Lens firstPersonLens(float nativeDistortion){
+    const float wanted=std::fmin(nativeDistortion*.5f,.2f);
+    // Native standalone and combiner pixel shaders both sample at:
+    // q = p * (distortion * length(p) + (1-distortion) * inverseZoom),
+    // p in [-1,1]^2. Keep the center derivative (1-wanted) unchanged while
+    // ensuring the corner factor stays below one: .7 * sqrt(2) < 1.
+    // Unlike changing zoom alone, this does not enlarge the center again.
+    const float safeDistortion=wanted*.7f;
+    return {safeDistortion,(1.f-wanted)/(1.f-safeDistortion)};
+}
 inline void clearNativeCameraEffects(unsigned char* module,bool firstPerson=false){
     module[0x141]=1; // dofForceOff
     module[0x158]=1; // motionBlurForceOffCamera
     module[0x159]=1; // motionBlurForceOffBall
     module[0x15a]=1; // motionBlurForceOffPlayers
     if(firstPerson){
-        // Keep a gentler version of the native wide-angle compensation.
-        // Removing it entirely exposes extreme rectilinear edge stretching.
-        // The stock curve reaches 0.4 / inverse zoom 0.78 at 120 degrees;
-        // retain half its correction, without its extra image enlargement.
-        // Fixup recomputes these outputs each frame; never alter the native
-        // curve or a third-person/menu camera's lens configuration.
+        // Fixup recomputes these outputs each frame. The center-preserving
+        // pair avoids out-of-range UVs instead of relying on sampler clamping.
+        // Never alter the native curve or a third-person/menu lens.
         float distortion=0.f;
         std::memcpy(&distortion,module+0x164,sizeof distortion);
         if(std::isfinite(distortion)&&distortion>=0.f){
-            distortion=std::fmin(distortion*.5f,.2f);
-            const float inverseZoom=1.f;
-            std::memcpy(module+0x164,&distortion,sizeof distortion);
-            std::memcpy(module+0x168,&inverseZoom,sizeof inverseZoom);
+            const auto lens=firstPersonLens(distortion);
+            std::memcpy(module+0x164,&lens.distortion,sizeof lens.distortion);
+            std::memcpy(module+0x168,&lens.inverseZoom,sizeof lens.inverseZoom);
         }
     }
 }

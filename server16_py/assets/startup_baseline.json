@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release": "Server16 0.2.11 / FIFA Friends V12 / 2026-10-21",
+  "release": "Server16 0.2.13 / FIFA Friends V12 / 2026-10-21",
   "note": "Observed difference is not proof of fault; native/index references may vary with other installed mods. User preferences are not compared.",
   "files": [
     {
@@ -4407,6 +4407,6 @@
     "sysdllzf.dll": "4493587a82b75e613360ef079feddb5b7c23cb64c105acab1dc5dc7279229a83",
     "winmm.dll": "a142a367d62f5bbe85a0d2349eb801c03e2e6710dab987d0abcbb615a3487c56",
     "winui.dll": "b4b1935ee76f434685f0515b0e5dfc18adfd2daeae50f32ef85ec6ffaaade63c",
-    "server16_first_person_v13.dll": "da35f1c37fba41d6a36103bd91df5be8b9716a243a5b6844bd772079c55e7bd9"
+    "server16_first_person_v14.dll": "4b15fcc7793213c50d3831d1e9cc7f1d3839f76605c1d80ab79c2f7ece96ccad"
   }
 }

@@ -9,7 +9,7 @@ set "OVERLAY_DLL=bin\cgfs16_overlay.dll"
 set "INJECTOR_EXE=bin\cgfs16_inject.exe"
 set "FIFA_LIBRARY=bin\FifaLibrary16.dll"
 set "NARRATION_DLL=bin\fifa16_narration.dll"
-set "CAMERA_DLL=bin\server16_first_person_v13.dll"
+set "CAMERA_DLL=bin\server16_first_person_v14.dll"
 
 echo ============================================================
 echo  CGFS16 - Full Build

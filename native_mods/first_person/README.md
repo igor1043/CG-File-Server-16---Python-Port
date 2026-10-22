@@ -1,6 +1,6 @@
 # Primeira pessoa no Server16
 
-Componente x64 `server16_first_person_v13.dll`, carregado pelo Server usando o helper
+Componente x64 `server16_first_person_v14.dll`, carregado pelo Server usando o helper
 existente `cgfs16_inject.exe`. O controle é o mapa `Local\FIFA16_FirstPersonCamera_v4`,
 80 bytes, versão 4, declarado em `camera_channel.h` e `first_person_runtime.CameraShared`.
 O Server publica owner/heartbeat e comando; a DLL publica ack/estado/erro. Não há
@@ -156,3 +156,37 @@ Matemática, limites de virada, segurança da cabeça, posse/recuperação, bola
 e protocolo real da DLL passaram nos testes isolados. A compensação final 0,20,
 as viradas e o foco sem posse ainda precisam de validação visual após carregar
 a DLL nova. A invisibilidade geral de jogadores continua sem causa confirmada.
+
+## Revisão v14 — 21/10/2026
+
+Corrige as faixas arrastadas nos cantos com um par de coeficientes que conserva
+a escala central da revisão 13. A conferência dos pixel shaders nativos
+`rectilineardistortion.fxo` e `combiner.fxo` confirmou a mesma equação:
+`q = p * (d * length(p) + (1-d) * z)`, com `p` entre -1 e 1 nos dois eixos.
+O par antigo `d=0,20 / z=1` passava do limite nos cantos. Reduzir só `z` para
+0,89 eliminava as faixas, mas ampliava novamente o centro; o usuário rejeitou
+esse teste por perda de nitidez.
+
+Para cada quadro, `wanted=min(nativeDistortion*0.5,0.2)`, `d=wanted*0.7` e
+`z=(1-wanted)/(1-d)`. Assim a escala central continua `1-wanted`; o fator máximo
+no canto é `1-wanted + d*sqrt(2)`, menor que 1. No FOV alto, resulta em
+`d=0,14 / z≈0,93023256`, com centro 0,8 e fator de canto ≈0,99799. O usuário
+confirmou em RAM bordas corrigidas e centro nítido com esse par. Não modifica
+o shader, os arquivos BIG, a resolução, o FOV salvo ou a lente da terceira pessoa.
+
+A primeira pessoa suaviza separadamente a contribuição vertical da busca da
+bola, com limite de 0,45 rad/s e entrada gradual da velocidade. Acrescenta uma
+olhada breve para os pés após pelo menos 0,75 s de posse com a bola próxima,
+ou em controle próximo, com envelope de 1,8 s, até 0,18 rad e intervalo mínimo
+de 5,5 s. A simples permanência da bola próxima não repete o movimento. O
+olhar passa pela mesma suavização e não altera a posição da câmera ou malhas.
+
+Sem a bola, a terceira pessoa usa resposta de viés de 0,35 s, órbita de até
+1,05 rad/s e aceleração de 2,6 rad/s². Com a posse, mantém os limites anteriores
+de 0,75 rad/s e 1,8 rad/s². Conserva a proteção contra inversão da órbita quando
+a bola está diretamente atrás.
+
+Testes cobrem a equação original do shader em toda a tela e FOVs de 75° a 150°,
+preservação da escala central, velocidade da busca da bola, olhada para os pés
+e limites das duas velocidades de órbita. O ajuste de lente foi confirmado em
+RAM; os movimentos novos aguardam validação visual após carregar a DLL v14.

@@ -52,7 +52,7 @@ public:
             }else if(std::fabs(angle)<1.5707963f)
                 wantedBias=clamp(angle,-.65f,.65f)*.12f*clamp((distance-250.f)/800.f,0.f,1.f);
         }
-        ballBias=continuous?ballBias+(wantedBias-ballBias)*response(dt,.65f):wantedBias;
+        ballBias=continuous?ballBias+(wantedBias-ballBias)*response(dt,possessing?.65f:.35f):wantedBias;
         const float wanted=reference+ballBias;
         const float wantedBoom=distancePreset==2?1150.f:distancePreset==1?750.f:480.f;
         const float wantedHeight=distancePreset==2?450.f:distancePreset==1?320.f:230.f;
@@ -73,8 +73,10 @@ public:
             height+=(heightTarget-height)*response(dt,.18f);
             const float rawError=wrap(wanted-heading);
             const float error=std::fabs(rawError)<=2.f*degrees?0.f:rawError-std::copysign(2.f*degrees,rawError);
-            const float desiredSpeed=clamp(error/.60f,-.75f,.75f);
-            yawSpeed+=clamp(desiredSpeed-yawSpeed,-1.8f*dt,1.8f*dt);
+            const float speedLimit=possessing?.75f:1.05f;
+            const float acceleration=possessing?1.8f:2.6f;
+            const float desiredSpeed=clamp(error/(possessing?.60f:.40f),-speedLimit,speedLimit);
+            yawSpeed+=clamp(desiredSpeed-yawSpeed,-acceleration*dt,acceleration*dt);
             heading=wrap(heading+yawSpeed*dt);
         }else{
             anchorTarget=anchor=root;boomTarget=boom=wantedBoom;heightTarget=height=wantedHeight;

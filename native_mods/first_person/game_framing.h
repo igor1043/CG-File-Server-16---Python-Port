@@ -27,6 +27,26 @@ inline Pose gameFraming(Pose head,Vec root,Vec ball){
     axes(head);return head;
 }
 struct FramedView {Pose pose;float fov;};
+class FootGlance {
+    float possessionAge=0.f,cooldown=0.f,age=-1.f;
+    bool wasEligible=false;
+public:
+    void reset(){possessionAge=cooldown=0.f;age=-1.f;wasEligible=false;}
+    float update(bool possessing,bool nearFeet,bool closeControl,float dt){
+        if(!std::isfinite(dt)||dt<=0.f||dt>.25f){reset();return 0.f;}
+        cooldown=std::max(0.f,cooldown-dt);
+        possessionAge=possessing?possessionAge+dt:0.f;
+        const bool eligible=possessing&&nearFeet&&possessionAge>=.75f;
+        if(eligible&&(!wasEligible||closeControl)&&cooldown<=0.f){age=0.f;cooldown=5.5f;}
+        wasEligible=eligible;
+        if(!possessing)age=-1.f;
+        if(age<0.f)return 0.f;
+        age+=dt;
+        if(age>=1.8f){age=-1.f;return 0.f;}
+        const float envelope=std::sin(age*3.14159265359f/1.8f);
+        return .18f*envelope*envelope;
+    }
+};
 inline void headClearance(Pose& view,const Pose& raw){
     // Recover the animated skull anchor from solve()'s 14 cm / 5 cm eye offset.
     // Enforce a small clearance in front of the current head even when the view
@@ -46,8 +66,10 @@ class PossessionFraming {
     Vec previousBall{};
     float lens=1.5707963f;
     float releaseLook=0.f;
+    float ballLook=0.f,ballLookSpeed=0.f;
+    FootGlance footGlance;
 public:
-    void reset(){ready=false;wasPossessing=false;lens=1.5707963f;releaseLook=0.f;}
+    void reset(){ready=false;wasPossessing=false;lens=1.5707963f;releaseLook=0.f;ballLook=ballLookSpeed=0.f;footGlance.reset();}
     FramedView update(Pose head,Vec root,Vec ball,bool possessing,float dt,bool closeControl=false,float baseFov=90.f){
         constexpr float degrees=0.01745329252f;
         const bool continuous=ready&&std::isfinite(dt)&&dt>0&&dt<=.25f;
@@ -89,6 +111,23 @@ public:
             }
             axes(target);
         }
+        if(!continuous)footGlance.reset();
+        const bool nearFeet=finite&&distance<175.f&&ball.y-root.y<100.f&&ball.y-root.y>-30.f;
+        const float glance=footGlance.update(possessing,nearFeet,closeControl,continuous?dt:0.f);
+        target.pitch=std::min(target.pitch+glance,.86f);
+        // Smooth only the ball-framing contribution. The head's deliberate
+        // heading and the independent head filter retain their own behavior.
+        const float wantedBallLook=target.pitch-head.pitch;
+        if(continuous){
+            const float difference=wantedBallLook-ballLook;
+            const float wantedSpeed=clamp(difference/.6f,-.45f,.45f);
+            ballLookSpeed+=(wantedSpeed-ballLookSpeed)*response(dt,.18f);
+            const float step=ballLookSpeed*dt;
+            if(step*difference>=0.f&&std::fabs(step)>std::fabs(difference)){
+                ballLook=wantedBallLook;ballLookSpeed=0.f;
+            }else ballLook+=step;
+        }else {ballLook=wantedBallLook;ballLookSpeed=0.f;}
+        target.pitch=head.pitch+ballLook;axes(target);
         lens=continuous?lens+(targetLens-lens)*response(dt,.24f):targetLens;
         ready=true;wasPossessing=possessing&&finite;previousBall=relative;
         return {target,lens};

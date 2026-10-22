@@ -72,7 +72,7 @@ int main(){
     const auto before=view.update(head,{0,0,0},ball,true,1.f/60.f);
     auto after=view.update(head,{0,0,0},ball,false,1.f/60.f);
     assert(after.fov==before.fov); // Possession and passes preserve the chosen lens.
-    assert(after.pose.pitch<.21f); // Look back up after releasing the ball.
+    assert(std::fabs(after.pose.pitch-before.pose.pitch)<.02f); // Release no longer snaps the ball framing upward.
     for(int i=0;i<120;++i)after=view.update(head,{0,0,0},ball,false,1.f/120.f);
     assert(std::fabs(after.fov-1.5707963f)<.004f);
     for(int phase=2;phase<=15;++phase)assert(fp::playerCameraPhase(phase));
@@ -230,7 +230,7 @@ int main(){
         auto rearView=rearBall.update(head,{0,0,0},rear,frame?1.f/120:0.f,85,0,false,true,0,false);
         if(frame){
             const float speed=fp::wrap(rearView.pose.heading-rearPrior)*120.f;
-            assert(std::fabs(speed)<=.751f&&std::fabs(speed-rearSpeed)<=1.8f/120+.001f);
+            assert(std::fabs(speed)<=1.051f&&std::fabs(speed-rearSpeed)<=2.6f/120+.001f);
             rearSpeed=speed;
         }
         rearPrior=rearView.pose.heading;
@@ -265,17 +265,71 @@ int main(){
         unsigned char previousLens[0x180];std::memcpy(previousLens,lensModule,sizeof previousLens);
         fp::clearNativeCameraEffects(lensModule,true);
         std::memcpy(&distortion,lensModule+0x164,4);std::memcpy(&zoom,lensModule+0x168,4);
-        assert(std::fabs(distortion-input*.5f)<.000001f&&zoom==1.f);
+        const float center=1.f-input*.5f;
+        assert(std::fabs(distortion-input*.35f)<.000001f);
+        assert(std::fabs((1.f-distortion)*zoom-center)<.000001f);
         for(int i=0;i<0x180;++i)if(i<0x164||i>=0x16c)assert(lensModule[i]==previousLens[i]);
     }
     const float disabled=-1.f;
     std::memcpy(module+0x164,&disabled,4);std::memcpy(module+0x168,&disabled,4);
     fp::clearNativeCameraEffects(module,true);
     assert(std::memcmp(module+0x164,&disabled,4)==0&&std::memcmp(module+0x168,&disabled,4)==0);
+    // Execute the actual native shader's UV equation over the whole screen.
+    // The former 0.2 / 1 pair sampled beyond corners; zoom-only 0.89 changed
+    // the central scale. This pair must satisfy both constraints at every FOV.
+    assert(.8f+.2f*std::sqrt(2.f)>1.f);
+    for(int angle=75;angle<=150;++angle){
+        const float nativeDistortion=.4f*fp::clamp((angle-80.f)/40.f,0.f,1.f);
+        const auto safeLens=fp::firstPersonLens(nativeDistortion);
+        const float center=1.f-std::min(nativeDistortion*.5f,.2f);
+        assert(std::fabs((1-safeLens.distortion)*safeLens.inverseZoom-center)<.000001f);
+        for(int y=-100;y<=100;++y)for(int x=-100;x<=100;++x){
+            const float px=x/100.f,py=y/100.f;
+            const float factor=safeLens.distortion*std::hypot(px,py)+(1-safeLens.distortion)*safeLens.inverseZoom;
+            assert(std::fabs(px*factor)<=1.000001f&&std::fabs(py*factor)<=1.000001f);
+        }
+    }
+    fp::PossessionFraming gentleBall;
+    head.heading=0;head.pitch=.1f;fp::axes(head);
+    auto previousBallView=gentleBall.update(head,{0,0,0},{2000,10,0},false,0,false,140);
+    float peakBallSpeed=0.f;
+    for(int frame=0;frame<600;++frame){
+        const fp::Vec movingBall=frame<300?fp::Vec{20,10,0}:fp::Vec{2000,10,0};
+        auto nextView=gentleBall.update(head,{0,0,0},movingBall,false,1.f/120,false,140);
+        const float speed=std::fabs(nextView.pose.pitch-previousBallView.pose.pitch)*120.f;
+        assert(speed<=.451f);peakBallSpeed=std::max(peakBallSpeed,speed);
+        if(frame==0)assert(std::fabs(nextView.pose.pitch-previousBallView.pose.pitch)<.001f);
+        previousBallView=nextView;
+    }
+    assert(peakBallSpeed>.1f); // The framing actually follows the ball, rather than freezing it.
+    fp::FootGlance footLook;
+    float glancePeak=0.f;
+    for(int frame=0;frame<720;++frame){
+        const float glance=footLook.update(true,true,false,1.f/120);
+        assert(glance>=0.f&&glance<=.180001f);
+        if(frame<85)assert(glance==0.f); // No first-frame glance at acquisition.
+        if(frame>330)assert(glance==0.f); // A close ball alone cannot cause constant head bob.
+        glancePeak=std::max(glancePeak,glance);
+    }
+    assert(glancePeak>.17f);
+    for(int frame=0;frame<120;++frame)assert(footLook.update(false,true,true,1.f/120)==0.f);
+    footLook.reset();
+    for(int frame=0;frame<240;++frame)assert(footLook.update(true,false,true,1.f/120)==0.f);
+    fp::CareerCamera fasterPlay;
+    fasterPlay.update(head,{0,0,0},{3000,10,0},0,85,0,false,true,0,false);
+    float fastPrior=0.f,fastPeak=0.f;
+    for(int frame=0;frame<120;++frame){
+        const auto chasing=fasterPlay.update(head,{0,0,0},{-3000,10,-300},1.f/120,85,0,false,true,0,false);
+        const float speed=std::fabs(fp::wrap(chasing.pose.heading-fastPrior))*120.f;
+        fastPeak=std::max(fastPeak,speed);assert(speed<=1.051f);
+        fastPrior=chasing.pose.heading;
+    }
+    assert(fastPeak>.75f); // Off-ball orbit can now respond faster than the prior cap.
     source[0]=std::numeric_limits<float>::quiet_NaN();assert(!fp::finiteCameraData(source));
     std::puts("PASS: body/trajectory orbit rejects head/root/dribble jitter; locked subject survives restart focus; final pose preserves clipping and disables native blur flags only");
     std::puts("PASS: ball/field balance, FOV/tilt personalization, hair clearance, immediate kickoff anchor and pose reacquisition");
     std::puts("PASS: career third person, whole-body framing, stable height/roll, root tracking and smooth orbit");
-    std::puts("PASS: first-person lens retains gentle compensation with neutral zoom; third-person/disabled lenses and projection bytes are preserved");
+    std::puts("PASS: native shader UVs stay within all screen edges at FOV 75..150; central scale, third-person/disabled lenses and projection bytes are preserved");
     std::puts("PASS: sharp turns keep the skull behind the near plane; third person follows off-ball play without rear-ball orbit reversal");
+    std::puts("PASS: ball framing eases in under a rate limit, off-ball orbit is faster, and event-based foot glances return without continuous bobbing");
 }

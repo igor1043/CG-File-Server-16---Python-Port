@@ -1,0 +1,55 @@
+{
+  "version": "0.2.13",
+  "output": "Server16Python.exe",
+  "bytes": 45767534,
+  "sha256": "455969be053698bd3625f22fa02f9b713573dd470d543b26e527d1da431d293c",
+  "source_sha256": "234ecb19dd582c19e3974cc6bff4e81b76dcbba1e434b190428c28321c023350",
+  "camera_resource": "bin\\server16_first_person_v14.dll",
+  "camera_sha256": "4b15fcc7793213c50d3831d1e9cc7f1d3839f76605c1d80ab79c2f7ece96ccad",
+  "preserved_archive_members": 3055,
+  "preserved_python_modules": 675,
+  "python_modules": {
+    "server16_py": "da6076ce6b82c0d9407f34771c506679447f9c28b6385225b823083436bafc62",
+    "server16_py.app": "7e5feee90ec52523ca3c8644866c3bbaaf89799f83d4ec5a1d0f42440511ffeb",
+    "server16_py.first_person_runtime": "441fc43b53599bf7d3ff42131d7988da97d68492405d3f930f66245304fe573a",
+    "server16_py.startup_diagnostics": "5c2851b7706622dcf0d808fe77f08e1f04c349a7a9b1d78d58bdeb4fe7165950"
+  },
+  "startup_baseline_sha256": "269b3121de66546fa0317dea89d1c2d429f5be3f67ee3c90f0b3e20f4d4404fa",
+  "python_regression_tests": 51,
+  "native_math": "passed: full shader UV grid/FOV 75..150, center scale, ball pitch slew, foot-glance gating, faster off-ball orbit",
+  "native_protocol": "passed in separate test mapping; no FIFA hooks executed",
+  "visual_validation": {
+    "lens": "user confirmed in RAM: borders corrected and center sharp at FOV 140",
+    "new_movements": "awaiting reload of production v14 DLL"
+  },
+  "lens": {
+    "equation": "q=p*(d*length(p)+(1-d)*z)",
+    "wanted": "min(native_distortion*0.5, 0.2)",
+    "distortion": "wanted*0.7",
+    "inverse_zoom": "(1-wanted)/(1-distortion)",
+    "maximum_values": {
+      "distortion": 0.14,
+      "inverse_zoom": 0.930232558139535,
+      "center_scale": 0.8,
+      "corner_factor": 0.9979898987322333
+    }
+  },
+  "first_person": {
+    "ball_look_max_rate_rad_s": 0.45,
+    "foot_glance_duration_s": 1.8,
+    "foot_glance_max_pitch_rad": 0.18,
+    "foot_glance_min_possession_s": 0.75,
+    "foot_glance_cooldown_s": 5.5
+  },
+  "third_person": {
+    "off_ball_orbit_rad_s": 1.05,
+    "off_ball_acceleration_rad_s2": 2.6,
+    "with_ball_orbit_rad_s": 0.75,
+    "with_ball_acceleration_rad_s2": 1.8
+  },
+  "installation": "installed; movements awaiting visual validation",
+  "fov_preferences_unchanged": true,
+  "mesh_visibility_hook": false,
+  "installed_at": "2026-10-21T21:20:58",
+  "preferences_unchanged": true
+}
