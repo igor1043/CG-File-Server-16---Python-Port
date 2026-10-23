@@ -53,7 +53,11 @@ def wrapper(asm,parts,method,saved,body):
     # Save the original method on its prototype, then install a one-argument wrapper.
     asm.path(*parts);asm.string(saved);asm.path(*parts);asm.member(method);asm.op(79)
     asm.path(*parts);asm.string(method)
-    asm.op(142);asm.align();asm.data.extend(bytes(8));asm.data.extend(struct.pack('<IHH',1,5,41))
+    asm.op(142);asm.align();name_at=len(asm.data);asm.data.extend(bytes(8))
+    # FIFA dereferences even an anonymous function's name during construction.
+    # A null pointer is accepted by the metadata reader but crashes native APT.
+    asm.fixups.append(('string',name_at,''))
+    asm.data.extend(struct.pack('<IHH',1,9,41))
     param_at=len(asm.data);asm.data.extend(bytes(8));size_at=len(asm.data);asm.data.extend(bytes(4));asm.align()
     asm.data.extend(struct.pack('<I',0x98765432));asm.align();asm.data.extend(struct.pack('<Q',0x12345678))
     start=len(asm.data);body(asm);struct.pack_into('<I',asm.data,size_at,len(asm.data)-start);asm.op(79)
@@ -134,6 +138,8 @@ def build(source,out,kind):
     out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(output)
     check=Actions(AptFile(BigFile(out))).read_all()
     if check.errors:raise ValueError(check.errors)
+    from validate_frontend_ui import validate_native_headers
+    validate_native_headers(check)
     print(json.dumps({'file':str(out),'kind':kind,'functions':len(check.functions),'root_pointer':refs[0],'bytes':len(output)}))
 
 

@@ -2,13 +2,38 @@
 import sys
 from pathlib import Path
 sys.path[:0]=[str(Path(__file__).resolve().parent/'apt_vendor')]
-from formats import AptFile,BigFile
+from formats import AptFile,BigFile,Reader
 from apt_actions import Actions
 from apt_vm import VM,Function,Object,Native
+
+def validate_native_headers(actions):
+    """Check requirements enforced by FIFA's constructor, before invoking APT."""
+    if actions.errors:raise ValueError(actions.errors)
+    data=actions.apt.data
+    def walk(instructions):
+        for instruction in instructions:
+            if instruction.op==142:
+                reader=Reader(data,instruction.offset+1,actions.apt.width)
+                name=reader.ptr()
+                if not 0<name<len(data):raise ValueError('Native Function2 name pointer is null or invalid')
+                reader.string(name)
+                reader.pos=(reader.pos+3)//4*4
+                count=reader.i();registers=reader.read('h');reader.read('H');parameters=reader.ptr()
+                if count and not (0<parameters and parameters+count*16<=len(data)):
+                    raise ValueError('Native Function2 parameter table is invalid')
+                if any(i.op==0 for i in instruction.body):
+                    raise ValueError('Embedded End truncates native function relocation')
+                used=[i.value for i in instruction.body if i.op in (135,185)]
+                used.extend(register for register,_ in instruction.value['params'])
+                if used and max(used)>registers:
+                    raise ValueError('Native Function2 register allocation is too small')
+            if instruction.body:walk(instruction.body)
+    for block in actions.cache.values():walk(block)
 
 def main(root):
     for file,kind in [('backgroundfifa.big','background'),('stadiumpan.big','panorama')]:
         ac=Actions(AptFile(BigFile(root/file))).read_all();calls=[]
+        validate_native_headers(ac)
         def callback(name,owner,args):
             calls.append((name,args))
             if name=='original':return 'original-result'
@@ -43,6 +68,6 @@ def main(root):
                 if year>10000000:
                     assert text.get('mYearName').get('text').encode('latin1').decode('utf8')=='PÚBLICO'
                     assert text.get('mYearValue').get('text')==format(year-10000001,',')
-        print(file+': custom and native fallback behavior passed')
+        print(file+': native headers, custom and native fallback behavior passed')
 
 if __name__=='__main__':main(Path(sys.argv[1]))
