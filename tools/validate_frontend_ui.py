@@ -47,21 +47,17 @@ def main(root):
         path='game.background.BackgroundFIFA.prototype' if kind=='background' else 'game.screens.misc.StadiumPan.prototype'
         prototype=vm.path(path);method='LoadImage' if kind=='background' else 'Update'
         fn=prototype.get(method)
-        assert isinstance(fn,Function) and isinstance(prototype.get('Server16Original'+method),Function)
+        assert isinstance(fn,Function) and prototype.get('Server16Original'+method) is None
         if kind=='background':
-            image=Object();owner=Object({'mcImage':image,'Server16OriginalLoadImage':Native('original'),'LoadImageComplete':Native('complete')})
-            assert vm.invoke(fn,owner,['server16_frontend_clear']) is True
-            assert image.get('_visible') is False and owner.get('m_isLoaded') is True
-            assert [n for n,a in calls]==['complete'];calls.clear()
-            assert vm.invoke(fn,owner,['BOOTFLOW'])=='original-result'
-            assert image.get('_visible') is True and calls==[('original',['BOOTFLOW'])]
+            template=Path(__file__).resolve().parents[1]/'native_mods/frontend_stadium/ui_templates/backgroundfifa.big'
+            assert (root/file).read_bytes()==template.read_bytes(), 'Background must use the original native ImageLoader'
         else:
             fields=('mCapacityName','mCapacityValue','mYearName','mYearValue','mcDivderBottomVertical')
             vm.global_.set('ION_Localization',Object({'native_localization':True,'LocalizeInteger':Native('LocalizeInteger')}))
-            text=Object({name:Object({'textWidth':70}) for name in fields});owner=Object({'mcTextGroup':text,'Server16OriginalUpdate':Native('original')})
+            text=Object({name:Object({'textWidth':70}) for name in fields});owner=Object({'mcTextGroup':text})
             for capacity,year,cap_visible,year_visible in [(-1,0,False,False),(25000,1960,True,True),(0,1960,False,True),(0,10000000,False,False),(50000,10000000,True,False),(50000,10040001,True,True),(0,10000001,False,True)]:
                 calls.clear();vm.invoke(fn,owner,[Object({'capacity':capacity,'year':year})])
-                assert calls[0][0]=='original'
+                assert {'GetStadiumCapacity','GetStadiumYearBuilt'}<={name for name,args in calls}
                 assert all(text.get(name).get('_visible') is cap_visible for name in fields[:2])
                 assert all(text.get(name).get('_visible') is year_visible for name in fields[2:4])
                 assert text.get(fields[4]).get('_visible') is (cap_visible and year_visible)

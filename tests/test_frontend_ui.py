@@ -30,7 +30,7 @@ class FrontendNativeHeaders(unittest.TestCase):
     def test_null_function_name_rejected(self):
         actions=self.actions('backgroundfifa')
         wrapper=next(i for block in actions.cache.values() for i in block
-                     if i.op==142 and i.value['params']==[(2,'server16Argument')])
+                     if i.op==142 and i.value['params']==[(3,'strImageId')])
         reader=Reader(actions.apt.data,wrapper.offset+1,8);reader.align()
         struct.pack_into('<Q',actions.apt.data,reader.pos,0)
         with self.assertRaisesRegex(ValueError,'name pointer'):validate_native_headers(actions)
@@ -38,10 +38,18 @@ class FrontendNativeHeaders(unittest.TestCase):
     def test_register_underallocation_rejected(self):
         actions=self.actions('stadiumpan')
         wrapper=next(i for block in actions.cache.values() for i in block
-                     if i.op==142 and i.value['params']==[(2,'server16Argument')])
+                     if i.op==142 and i.value['params']==[(5,'stadAssign')])
         reader=Reader(actions.apt.data,wrapper.offset+1,8);reader.ptr()
         reader.pos=(reader.pos+3)//4*4;reader.i()
         struct.pack_into('<h',actions.apt.data,reader.pos,5)
         with self.assertRaisesRegex(ValueError,'register allocation'):validate_native_headers(actions)
+
+    def test_original_native_entry_points_preserved(self):
+        for name in ('backgroundfifa','stadiumpan'):
+            generated=self.actions(name)
+            original=Actions(AptFile(BigFile(ROOT/'native_mods/frontend_stadium/ui_templates'/f'{name}.big'))).read_all()
+            self.assertEqual(len(generated.functions),len(original.functions))
+            self.assertEqual(sorted((m['flags'],m['registers'],m['params']) for m,b in generated.functions),
+                             sorted((m['flags'],m['registers'],m['params']) for m,b in original.functions))
 
 if __name__=='__main__':unittest.main()

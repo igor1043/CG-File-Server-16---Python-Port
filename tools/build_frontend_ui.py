@@ -1,4 +1,4 @@
-"""Append narrowly scoped APT wrappers, preserving original UI methods."""
+"""Keep FIFA's native background loader and extend the existing panorama body."""
 import argparse
 import json
 import struct
@@ -49,36 +49,11 @@ class Assembler:
                 struct.pack_into('<Q',self.data,at,strings[value])
 
 
-def wrapper(asm,parts,method,saved,body):
-    # Save the original method on its prototype, then install a one-argument wrapper.
-    asm.path(*parts);asm.string(saved);asm.path(*parts);asm.member(method);asm.op(79)
-    asm.path(*parts);asm.string(method)
-    asm.op(142);asm.align();name_at=len(asm.data);asm.data.extend(bytes(8))
-    # FIFA dereferences even an anonymous function's name during construction.
-    # A null pointer is accepted by the metadata reader but crashes native APT.
-    asm.fixups.append(('string',name_at,''))
-    asm.data.extend(struct.pack('<IHH',1,9,41))
-    param_at=len(asm.data);asm.data.extend(bytes(8));size_at=len(asm.data);asm.data.extend(bytes(4));asm.align()
-    asm.data.extend(struct.pack('<I',0x98765432));asm.align();asm.data.extend(struct.pack('<Q',0x12345678))
-    start=len(asm.data);body(asm);struct.pack_into('<I',asm.data,size_at,len(asm.data)-start);asm.op(79)
-    return param_at
-
-
-def background_body(a):
-    a.reg(2);a.string('server16_frontend_clear');a.op(73);a.branch('show',True)
-    # Ordinary images keep the original loading and completion behavior.
-    a.prop(['mcImage'],'_visible',True)
-    a.reg(2);a.number(1);a.reg(1);a.method('Server16OriginalLoadImage');a.op(62)
-    a.label('show');a.prop(['mcImage'],'_visible',False)
-    a.prop([],'m_strImageId',2);a.prop([],'m_isLoaded',True)
-    a.op(89);a.reg(1);a.method('LoadImageComplete');a.op(23)
-    a.op(115);a.op(62)
-
-
-def panorama_body(a):
-    a.reg(2);a.number(1);a.reg(1);a.method('Server16OriginalUpdate');a.op(23)
-    a.op(89);a.reg(2);a.method('GetStadiumCapacity');a.number(0);a.op(103);a.save(3)
-    a.op(89);a.reg(2);a.method('GetStadiumYearBuilt');a.save(4)
+def panorama_tail(a):
+    # Original Update preloads this/global in r1/r2 and takes its provider in r5.
+    # Reuse its existing fourteen-register frame, after its own layout finishes.
+    a.op(89);a.reg(5);a.method('GetStadiumCapacity');a.number(0);a.op(103);a.save(3)
+    a.op(89);a.reg(5);a.method('GetStadiumYearBuilt');a.save(4)
     a.reg(4);a.number(0);a.op(103);a.save(6)
     a.reg(4);a.number(9999999);a.op(103);a.branch('custom',True)
     a.branch('visibility')
@@ -86,7 +61,7 @@ def panorama_body(a):
     a.reg(4);a.number(10000001);a.op(11);a.save(5)
     a.reg(5);a.number(0);a.op(72);a.op(18);a.save(6)
     a.prop(['mcTextGroup','mYearName'],'text','PÚBLICO')
-    a.target('mYearValue','text');a.reg(5);a.number(1);a.path('ION_Localization');a.method('LocalizeInteger');a.op(79)
+    a.target('mYearValue','text');a.reg(5);a.number(1);a.reg(2);a.member('ION_Localization');a.method('LocalizeInteger');a.op(79)
     # Recompute widths after replacing FIFA's construction year with attendance.
     for name in ('mYearName','mYearValue'):
         a.target(name,'_x');a.number(0);a.field(name,'textWidth');a.op(11);a.number(10);a.op(11);a.op(79)
@@ -112,14 +87,33 @@ def panorama_body(a):
 def build(source,out,kind):
     big=BigFile(source);apt=AptFile(big);actions=Actions(apt).read_all()
     if actions.errors:raise ValueError(actions.errors)
+    if kind=='background':
+        # st_server16_frontend_clear.dds uses the ordinary ImageLoader request
+        # and its completion callback; no extra method or artificial ready event.
+        out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(source.read_bytes())
+        print(json.dumps({'file':str(out),'kind':kind,'native_loader':'unchanged','bytes':out.stat().st_size}));return
     start,block=next((s,b) for s,b in actions.cache.items() if b[0].op==136)
     if block[-1].op!=0:raise ValueError('Missing root End')
-    data=apt.entry.data;original=bytes(data[start:block[-1].offset]);a=Assembler(data);a.align();new_start=len(data);data.extend(original)
-    parts=('game','background','BackgroundFIFA','prototype') if kind=='background' else ('game','screens','misc','StadiumPan','prototype')
-    method='LoadImage' if kind=='background' else 'Update'
-    param_at=wrapper(a,parts,method,'Server16Original'+method,background_body if kind=='background' else panorama_body)
-    a.op(0);a.align();param=len(data);data.extend(struct.pack('<I',2));a.align();name_at=len(data);data.extend(bytes(8))
-    a.fixups.append(('string',name_at,'server16Argument'));struct.pack_into('<Q',data,param_at,param)
+    fn=next(block[i+1] for i,ins in enumerate(block[:-1]) if ins.value=='Update' and block[i+1].op==142)
+    assert fn.value['flags']==297 and fn.value['params'][0][0]==5 and fn.value['registers']==14
+    original=apt.entry.original;data=apt.entry.data;a=Assembler(data);a.align();new_start=len(data)
+    data.extend(original[start:fn.end]);panorama_tail(a)
+    # Native relocation must never see End padding inside a Function2. The
+    # added bytes are a multiple of eight, preserving all later operand alignment.
+    while (len(data)-(new_start+fn.end-start))%8:a.op(118)
+    added=len(data)-(new_start+fn.end-start)
+    data.extend(original[fn.end:block[-1].offset]);a.op(0)
+    from formats import Reader
+    reader=Reader(original,fn.offset+1,8);reader.ptr();reader.pos=(reader.pos+3)//4*4
+    reader.i();reader.read('h');reader.read('H');reader.ptr();size_at=reader.pos;size=reader.i()
+    struct.pack_into('<I',data,new_start+size_at-start,size+added)
+    for instruction in block:
+        if instruction.op not in (153,157,184):continue
+        operand=(instruction.offset+8)//8*8
+        mapped=new_start+operand-start+(added if operand>=fn.end else 0)
+        end=instruction.end+(added if instruction.end>=fn.end else 0)
+        target=instruction.value+(added if instruction.value>=fn.end else 0)
+        struct.pack_into('<i',data,mapped,target-end)
     # Only the root control's action pointer is redirected. All original strings,
     # constants, characters, textures and method bodies remain byte-identical.
     signature=struct.pack('<Q',start);refs=[]
@@ -138,6 +132,7 @@ def build(source,out,kind):
     out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(output)
     check=Actions(AptFile(BigFile(out))).read_all()
     if check.errors:raise ValueError(check.errors)
+    assert len(check.functions)==len(actions.functions), 'No additional native Function2 entry points'
     from validate_frontend_ui import validate_native_headers
     validate_native_headers(check)
     print(json.dumps({'file':str(out),'kind':kind,'functions':len(check.functions),'root_pointer':refs[0],'bytes':len(output)}))

@@ -143,8 +143,8 @@
     },
     {
       "path": "data/ui/game/background/backgroundfifa.big",
-      "bytes": 6480,
-      "sha256": "24672e02879c2121f0647b0b70daf6db9cd69bbd50285a83b1ef51e5b10b69da",
+      "bytes": 4848,
+      "sha256": "292adf85cbd75e0daf075ccc5c71bbdddb979cdcf7312f2c84b29e261da14bd8",
       "role": "release"
     },
     {
@@ -4313,8 +4313,8 @@
     },
     {
       "path": "data/ui/game/screens/misc/stadiumpan.big",
-      "bytes": 149606,
-      "sha256": "2535c240e10ea6d96fbb3b9c2927d3472252f1abf0feda2d7f6f9db6c03e8787",
+      "bytes": 149144,
+      "sha256": "ae89532b257917139af219b8b316e7176ec5d60347cde2404702ab512f1e9c9c",
       "role": "release"
     },
     {
@@ -4403,8 +4403,8 @@
     },
     {
       "path": "ModCarrerMode/source/club_environment/bank/watch_r57.py",
-      "bytes": 1516,
-      "sha256": "940c5aba38e7d64aa1fd75a92c02057713f3fab6e16a8416a4086942ac27abde",
+      "bytes": 1627,
+      "sha256": "e49e2f10d787f204fc4768fcf962690f9e1e5636703bbf39af97d0fe7384183d",
       "role": "release"
     },
     {
