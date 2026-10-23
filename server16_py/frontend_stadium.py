@@ -96,7 +96,9 @@ def publish_metadata(game, result):
     # Win32's INI reader accepts UTF-16, including stadium names with accents.
     lines=['[frontend_stadium]',f"mode={result.get('mode',1)}",f"team={result['team']}",
            f"slot={result['slot']}",f"name={result.get('display_name','')}",
-           f"crowd={result.get('crowd','')}"]
+           f"crowd={result.get('crowd','')}",
+           f"capacity={result.get('capacity') if result.get('capacity') is not None else ''}",
+           f"attendance={result.get('attendance') if result.get('attendance') is not None else ''}"]
     atomic_write(game/'ModCarrerMode/runtime/frontend_stadium_route.ini', ('\r\n'.join(lines)+'\r\n').encode('utf-16'))
     if result.get('mode',1)!=1:
         for slot in SLOTS:
@@ -180,6 +182,8 @@ def prepare(game: Path, team: int, slot: int, *, publish=True, library=None, car
               'night':(relative/('texture_night.rx3' if (cache/'texture_night.rx3').is_file() else 'texture_day.rx3')).as_posix()}
     result['crowd']=(relative/'crowd_day.dat').as_posix() if (cache/'crowd_day.dat').is_file() else ''
     result['chairs']=(relative/'NoSeats.rx3').as_posix() if (cache/'NoSeats.rx3').is_file() else ('' if result['crowd'] else 'data/sceneassets/crowdchair/crowdchair_empty.rx3')
+    from .stadium_metadata import read_custom_metadata
+    result.update(read_custom_metadata(game,name,cache))
     if publish:
         # The native BackgroundDP hook selects this NEW transparent resource
         # only while the custom FE scene is active. Original photos stay intact.

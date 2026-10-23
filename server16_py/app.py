@@ -3035,6 +3035,13 @@ class Server16App(tk.Tk):
         if self._is_target_process_running():
             self.log(f"FIFA process already running: {self.fifaEXE}")
             return
+        try:
+            from .loose_ui import activate
+            self.log('Career/panorama loose UI activation', activate(self.exedir))
+        except Exception as exc:
+            self.log('Career/panorama UI activation unavailable', exc)
+            messagebox.showerror(self.tr('message.fifa16'), str(exc))
+            return
         self.competition_icons.prepare(self.exedir, force=True)
         diagnostics = getattr(self, '_startup_diagnostics', None)
         if diagnostics:

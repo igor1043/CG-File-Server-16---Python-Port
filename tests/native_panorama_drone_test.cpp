@@ -66,8 +66,9 @@ int main(){
  cfg.mask=1u<<12;d.reset();for(unsigned i=0;i<500;++i)assert(!d.tick(.1,true,cfg).active);
  cfg.heightLimit=11000;cfg.mask=1u<<12;
  // Even very low/irregular frame rates cannot skip the fully black cut.
- for(double step:{.016,.1,.5}){Director low;bool wasActive=false;float alpha=0;
-  for(unsigned i=0;i<16000;++i){const auto r=low.tick(step,true,cfg);if(r.active!=wasActive)assert(r.opacity==1&&alpha==1);alpha=r.opacity;wasActive=r.active;}
+ for(double step:{.016,.1,.5,.7,2.,30.}){Director low;bool wasActive=false;float alpha=0;unsigned entries=0,exits=0;
+  for(unsigned i=0;i<16000;++i){const auto r=low.tick(step,true,cfg);if(r.active!=wasActive){assert(r.opacity==1&&alpha==1);if(r.active)++entries;else ++exits;}alpha=r.opacity;wasActive=r.active;}
+  assert(entries>0&&exits>0);
  }
  cfg.enabled=false;assert(!d.tick(.01,true,cfg).active);
  cfg.enabled=true;cfg.mask=0;assert(!d.tick(.01,true,cfg).active);

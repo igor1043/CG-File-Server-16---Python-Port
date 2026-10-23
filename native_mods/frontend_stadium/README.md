@@ -1,4 +1,17 @@
-# Estádio de fundo do perfil e da carreira — v5
+# Estádio de fundo do perfil e da carreira — Server16 0.2.14
+
+Atualização 22/10/2026: preparação/extração fora da thread de desenho e fora
+da trava compartilhada com ela. Resultados de uma seleção vencida não são
+publicados. A DLL mantém o nome `frontend_stadium_native_v11.dll` por
+compatibilidade com o retorno do ambiente do clube.
+
+Capacidade e público vêm exclusivamente do pacote escolhido: `metadata.ini`
+ou `stadium.ini` com `[stadium] capacity=... attendance=...`, seções
+`[stadiumcapacity]`/`[stadiumattendance]` do FSW (nome do pacote como chave),
+ou `ModCarrerMode/config/stadium_metadata.ini` (seção com o nome do pacote,
+prioridade maior). Ausentes ficam vazios. Valores são pessoas, não porcentagens.
+Estádios nativos preservam seus próprios dados. APT preserva Initialize,
+ShowPriorityString, nome, escudo, input e saída nativos.
 
 A DLL não envia teclas, mouse ou controle.
 Os diagnósticos externos usam OpenProcess 0x410, somente leitura.

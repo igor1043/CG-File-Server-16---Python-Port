@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release": "Server16 0.2.13 / FIFA Friends V12 / 2026-10-21",
+  "release": "Server16 0.2.14 / FIFA Friends V12 / 2026-10-22",
   "note": "Observed difference is not proof of fault; native/index references may vary with other installed mods. User preferences are not compared.",
   "files": [
     {
@@ -47,8 +47,8 @@
     },
     {
       "path": "ModCarrerMode/mods/enabled.txt",
-      "bytes": 822,
-      "sha256": "5210158a7c8343a33ca32b6d437bed0ffcd153f98c603453a500fd0f7c02596c",
+      "bytes": 925,
+      "sha256": "48f4783a7d515c46b1e6e9408996144e7f3794361f962ed36292f524af118c11",
       "role": "release"
     },
     {
@@ -59,8 +59,8 @@
     },
     {
       "path": "ModCarrerMode/mods/frontend_stadium/frontend_stadium_native_v11.dll",
-      "bytes": 202752,
-      "sha256": "b4301386ef30095434de24085b84fb0b8dc8a2b6c809f7a2daa01110195bd97a",
+      "bytes": 203264,
+      "sha256": "b68990f93c933f988acbd0067e9d5f7c4bc84618673bda87a058db3e9df47512",
       "role": "release"
     },
     {
@@ -96,7 +96,7 @@
     {
       "path": "ModCarrerMode/mods/panorama_drone/panorama_drone_v5.dll",
       "bytes": 189952,
-      "sha256": "9d9b1320779e72073965cc9275bdb63450df90f8b6728c76c19d760ff72844e3",
+      "sha256": "7aa2fbe5a7190bfe50c197e7b118dbe4724eeb5fcb337165f7d452f3e1e3d34e",
       "role": "release"
     },
     {
@@ -4313,8 +4313,8 @@
     },
     {
       "path": "data/ui/game/screens/misc/stadiumpan.big",
-      "bytes": 148549,
-      "sha256": "5f5bb58ef3332ee9a79604495e052df615980b1e8544fa513a2c5f5d939af5a5",
+      "bytes": 149626,
+      "sha256": "bdb05dbac136fdcf7198b4359af9b0580784ab90816970c93d2f3c92d2228558",
       "role": "release"
     },
     {
@@ -4376,6 +4376,42 @@
       "bytes": 267584,
       "sha256": "b4b1935ee76f434685f0515b0e5dfc18adfd2daeae50f32ef85ec6ffaaade63c",
       "role": "native_reference"
+    },
+    {
+      "path": "ModCarrerMode/mods/club_environment/native_dressing_room.dll",
+      "bytes": 461312,
+      "sha256": "a6aeca740cfaa89cf2e51863446e9409740016084a4ae6f8ab9380111a7f8c43",
+      "role": "release"
+    },
+    {
+      "path": "ModCarrerMode/source/club_environment/assets-manifest.json",
+      "bytes": 7102,
+      "sha256": "68f5df2f15e1e9e3faf93e8a449ef13e3c3b521463d8dc8d38da62c33843b2d4",
+      "role": "release"
+    },
+    {
+      "path": "ModCarrerMode/source/club_environment/portable_paths.py",
+      "bytes": 3279,
+      "sha256": "4b8c81e84bcf7a6aa819761f173ea05f9ca6efdef67b77771d9ab2c63aaad58b",
+      "role": "release"
+    },
+    {
+      "path": "ModCarrerMode/source/club_environment/room/prepare_native_room_components_r46_20261022.py",
+      "bytes": 20658,
+      "sha256": "430466f3085ac7af3a17581d959568fc6da362fd899135480f34bd993be2d727",
+      "role": "release"
+    },
+    {
+      "path": "ModCarrerMode/source/club_environment/bank/watch_r57.py",
+      "bytes": 1516,
+      "sha256": "940c5aba38e7d64aa1fd75a92c02057713f3fab6e16a8416a4086942ac27abde",
+      "role": "release"
+    },
+    {
+      "path": "ModCarrerMode/source/club_environment/preview/prepare.py",
+      "bytes": 5109,
+      "sha256": "9c872ce4b24a097eb57959b33a6db3ab00978428e3a2f13e9e1df71197926163",
+      "role": "release"
     }
   ],
   "loaded_dlls": {

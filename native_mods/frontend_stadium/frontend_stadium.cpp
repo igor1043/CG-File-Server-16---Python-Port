@@ -12,6 +12,7 @@
 #include "scene_context.h"
 #include "menu_page.h"
 #include "profile_reload.h"
+#include "stadium_metadata.h"
 
 // Verified call sites on the installed 577DE45C FIFA build. Scene requests
 // pass through FIFA's existing FE event queue and preparation/loading pair.
@@ -30,6 +31,7 @@ static LONG originalPan=0,ourPan=0,originalDraw=0,ourDraw=0;
 static LONG64 originalFrame=0,ourFrame=0;
 static wchar_t liveIni[MAX_PATH]{},activeName[256]{},stageSelection[512]{};
 static char activeCrowd[MAX_PATH]{};
+static int activeCapacity=0,activeAttendance=-1;
 static volatile LONG stageRequest=0,stageComplete=0;
 static int stageTeam=0,stageCareer=0,stageSlot=0,stageMode=0;
 static DWORD stageError=0;
@@ -142,8 +144,9 @@ static void __fastcall panHook(void* self,int stadium,void* output){
     wcsncpy_s(name,activeName,_TRUNCATE);
     if(!name[0]||!WideCharToMultiByte(CP_UTF8,0,name,-1,utf8,sizeof utf8,nullptr,nullptr))return;
     std::memset(output,0,256);std::memcpy(output,utf8,std::strlen(utf8));
-    // Custom packages do not supply trustworthy capacity/construction data.
-    const int values[]={0,0,static_cast<int>(FrontendStadiumStatus.team),-1,-1};
+    // The existing year slot carries a tagged attendance for our APT wrapper.
+    // Ordinary stadiums retain FIFA's original provider and construction year.
+    const int values[]={activeCapacity,10000000+(activeAttendance+1),static_cast<int>(FrontendStadiumStatus.team),-1,-1};
     std::memcpy(static_cast<unsigned char*>(output)+0x100,values,sizeof values);
     log("PAN_CUSTOM_INFO",static_cast<int>(FrontendStadiumStatus.team),stadium);
 }
@@ -182,10 +185,10 @@ static void refreshPhotograph(){
     reinterpret_cast<void(__fastcall*)(void*,int,void*)>(image+0x4c15b20)(reinterpret_cast<void*>(self),0x9c40,nullptr);
     log(sceneReady?"PHOTO_REFRESH_STADIUM":"PHOTO_REFRESH_FALLBACK",static_cast<int>(FrontendStadiumStatus.team));
 }
-static DWORD prepare(int team,int slot,int career){
+static DWORD prepare(int team,int slot,int career,int session){
     wchar_t command[2048]{};
     _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%ls\" --game-root \"%ls\" --team %d --slot %d %ls --session %d",
-        helper,game,team,slot,career?L"--career":L"",careerSession);
+        helper,game,team,slot,career?L"--career":L"",session);
     STARTUPINFOW startup{};startup.cb=sizeof startup;startup.dwFlags=STARTF_USESHOWWINDOW;startup.wShowWindow=SW_HIDE;
     PROCESS_INFORMATION process{};
     HANDLE job=CreateJobObjectW(nullptr,nullptr);
@@ -399,14 +402,21 @@ static void __fastcall hook(void* self,const void* context){
     wchar_t chosen[512]{};selection(team,chosen,_countof(chosen));
     const int revision=setting(L"reload_revision",0);
     const bool staged=stageRequest&&stageComplete==stageRequest&&stageTeam==team&&stageCareer==static_cast<int>(career)&&stageRevision==revision&&!std::wcscmp(chosen,stageSelection);
-    const DWORD result=staged?stageError:prepare(team,slot,career?1:0);
+    // Never run an extractor or wait on its process on FIFA's render thread.
+    // Keep the original scene until pollReload has prepared an async route.
+    if(!staged){
+        activeMode=0;sceneReady=false;photoDirty=true;observedTeam=0;
+        ReleaseSRWLockExclusive(&gate);
+        log("PREPARE_DEFERRED_NATIVE_SCENE",team,slot);original(self,context);return;
+    }
+    const DWORD result=stageError;
     observedTeam=team;observedCareer=career?1:0;wcsncpy_s(observedSelection,chosen,_TRUNCATE);
     observedRevision=revision;
     observedEnabled=1;
     FrontendStadiumStatus.error=result;
     activeMode=0;
     const int mode=staged?stageMode:(!result?static_cast<int>(GetPrivateProfileIntW(L"frontend_stadium",L"mode",0,routeIni)):0);
-    activeCrowd[0]=0;activeName[0]=0;
+    activeCrowd[0]=0;activeName[0]=0;activeCapacity=0;activeAttendance=-1;
     if(!result&&mode){
         // Only the FE stadium fields change in this private context copy.
         // Home/away match teams, fixture stadium and save data retain their values.
@@ -414,6 +424,13 @@ static void __fastcall hook(void* self,const void* context){
         frontend_stadium::routeContext(copy,selected);
         FrontendStadiumStatus.slot=static_cast<uint32_t>(selected);activeMode=mode;
         GetPrivateProfileStringW(L"frontend_stadium",L"name",L"",activeName,_countof(activeName),routeIni);
+        wchar_t capacity[32]{},attendance[32]{};
+        GetPrivateProfileStringW(L"frontend_stadium",L"capacity",L"",capacity,_countof(capacity),routeIni);
+        GetPrivateProfileStringW(L"frontend_stadium",L"attendance",L"",attendance,_countof(attendance),routeIni);
+        activeCapacity=frontend_stadium::metadataCount(capacity,0);
+        activeAttendance=frontend_stadium::metadataCount(attendance,-1);
+        if(activeCapacity<0||activeCapacity>2000000)activeCapacity=0;
+        if(activeAttendance<0||activeAttendance>2000000||(activeCapacity>0&&activeAttendance>activeCapacity))activeAttendance=-1;
         wchar_t crowd[MAX_PATH]{};GetPrivateProfileStringW(L"frontend_stadium",L"crowd",L"",crowd,_countof(crowd),routeIni);
         WideCharToMultiByte(CP_UTF8,0,crowd,-1,activeCrowd,sizeof activeCrowd,nullptr,nullptr);
         FrontendStadiumStatus.applied++;log("ROUTE",team,slot);
@@ -556,11 +573,16 @@ static DWORD WINAPI worker(void*){
         if(TryAcquireSRWLockExclusive(&gate)){
             const LONG request=stageRequest;
             if(request&&stageComplete!=request){
-                log("PREPARE_ASYNC",stageTeam,stageSlot);
-                stageError=prepare(stageTeam,stageSlot,stageCareer);
-                stageMode=stageError?0:static_cast<int>(GetPrivateProfileIntW(L"frontend_stadium",L"mode",0,routeIni));
-                InterlockedExchange(&stageComplete,request);
-                log("PREPARE_ASYNC_COMPLETE",stageTeam,static_cast<int>(stageError));
+                const int team=stageTeam,slot=stageSlot,career=stageCareer,session=careerSession;
+                ReleaseSRWLockExclusive(&gate);
+                log("PREPARE_ASYNC",team,slot);
+                const DWORD error=prepare(team,slot,career,session);
+                const int mode=error?0:static_cast<int>(GetPrivateProfileIntW(L"frontend_stadium",L"mode",0,routeIni));
+                AcquireSRWLockExclusive(&gate);
+                if(stageRequest==request&&stageTeam==team&&stageSlot==slot&&stageCareer==career&&careerSession==session){
+                    stageError=error;stageMode=mode;InterlockedExchange(&stageComplete,request);
+                    log("PREPARE_ASYNC_COMPLETE",team,static_cast<int>(error));
+                }else log("PREPARE_STALE_DISCARDED",team,static_cast<int>(error));
             }
             ReleaseSRWLockExclusive(&gate);
         }

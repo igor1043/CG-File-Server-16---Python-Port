@@ -16,7 +16,9 @@ public:
  void reset(){*this=Director{};}
  Decision tick(double dt,bool eligible,const Settings& cfg){
   if(!eligible||!cfg.enabled||!cfg.mask){reset();return {};}
-  if(!std::isfinite(dt)||dt<0||dt>.5)dt=0;
+  // A slow frame still advances the director. Discarding every frame over
+  // 500ms can otherwise leave a low-end PC permanently on a black cut.
+  dt=std::isfinite(dt)&&dt>0?std::min(dt,.5):0;
   if(!ready_){ready_=true;elapsed_=-std::clamp(cfg.initial,0.f,120.f);}
   elapsed_+=dt;
   const float shotDuration=duration(selected_,cfg.duration);

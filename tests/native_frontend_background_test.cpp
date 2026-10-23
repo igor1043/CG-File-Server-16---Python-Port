@@ -6,6 +6,7 @@
 #include "../native_mods/frontend_stadium/scene_context.h"
 #include "../native_mods/frontend_stadium/menu_page.h"
 #include "../native_mods/frontend_stadium/profile_reload.h"
+#include "../native_mods/frontend_stadium/stadium_metadata.h"
 
 struct BackgroundProvider {
     std::map<std::string,std::string> fields{{"Id","FIFA"},{"Param","BOOTFLOW"}};
@@ -16,6 +17,11 @@ static void __fastcall setString(void* raw,const char* field,const char* value){
     provider.fields[field]=value;provider.writes++;
 }
 int main(){
+    assert(frontend_stadium::metadataCount(L"",-1)==-1);
+    assert(frontend_stadium::metadataCount(L"0",-1)==0);
+    assert(frontend_stadium::metadataCount(L"50000",0)==50000);
+    assert(frontend_stadium::metadataCount(L"-1",-1)==-1);
+    assert(frontend_stadium::metadataCount(L"9999999999999",-1)==-1);
     using Photo=frontend_stadium::Photograph;
     assert(frontend_stadium::photographPolicy(false,false,false,false,false)==Photo::Friends);
     assert(frontend_stadium::photographPolicy(false,true,true,false,false)==Photo::Friends);
