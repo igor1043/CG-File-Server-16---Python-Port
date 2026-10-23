@@ -86,11 +86,12 @@ Restauração: tools/disable_frontend_stadium.py restaura stadium.lua e crowd.lu
 desativa somente as versões deste mod e restaura a UI registrada. O EXE anterior
 do Server16 fica no backup para restauração manual.
 
-O complemento `FIFA-Friends-Panoramica-20261023.zip` reúne as duas interfaces,
-DDS, Lua (com rotas iniciais vazias), catálogo, auxiliar, DLLs e lançador. O
-instalador mescla a navegação existente e executa `--activate-panorama-ui` para
-ativar somente suas quatro entradas nos BHs locais, incluindo mainfeflow.nav.
-Configurações de estádio existentes são preservadas. Requer a base V12 e os
-pacotes StadiumGBD do destinatário; não contém estádios nem BHs de outro PC.
+As duas interfaces, DDS, Lua, catálogo, auxiliar, DLLs e lançador são publicados
+no repositório dos mods, branch `fifa-friends-v12`. Não há ZIP separado para a
+panorâmica. O Server16 ativa as entradas nos BHs locais ao iniciar o FIFA,
+incluindo mainfeflow.nav. Requer a base V12 e os pacotes StadiumGBD do destinatário.
+O complemento `FIFA-Friends-Assets-Complementares-20261023.zip` contém somente os
+assets grandes fora do Git: deve ser extraído diretamente na raiz do jogo, sem
+executar instalador. Não contém código, configurações, estádios nem BHs.
 Capacidade e público vêm dos INIs próprios do estádio e ficam vazios quando
 ausentes; os campos nativos de estádios originais continuam originais.
