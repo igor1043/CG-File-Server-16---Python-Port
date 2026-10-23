@@ -14,7 +14,9 @@ def main(root):
             if name=='original':return 'original-result'
             if name=='GetStadiumCapacity':return owner.get('capacity')
             if name=='GetStadiumYearBuilt':return owner.get('year')
-            if name=='LocalizeInteger':return format(int(args[0]),',')
+            if name=='LocalizeInteger':
+                assert isinstance(owner,Object) and owner.get('native_localization') is True
+                return format(int(args[0]),',')
         vm=VM(callback)
         for block in ac.cache.values():vm.run(block)
         path='game.background.BackgroundFIFA.prototype' if kind=='background' else 'game.screens.misc.StadiumPan.prototype'
@@ -30,7 +32,7 @@ def main(root):
             assert image.get('_visible') is True and calls==[('original',['BOOTFLOW'])]
         else:
             fields=('mCapacityName','mCapacityValue','mYearName','mYearValue','mcDivderBottomVertical')
-            vm.path('cafe') if vm.path('cafe') else vm.global_.set('cafe',Object({'ION_Localization':Object()}))
+            vm.global_.set('ION_Localization',Object({'native_localization':True,'LocalizeInteger':Native('LocalizeInteger')}))
             text=Object({name:Object({'textWidth':70}) for name in fields});owner=Object({'mcTextGroup':text,'Server16OriginalUpdate':Native('original')})
             for capacity,year,cap_visible,year_visible in [(-1,0,False,False),(25000,1960,True,True),(0,1960,False,True),(0,10000000,False,False),(50000,10000000,True,False),(50000,10040001,True,True),(0,10000001,False,True)]:
                 calls.clear();vm.invoke(fn,owner,[Object({'capacity':capacity,'year':year})])

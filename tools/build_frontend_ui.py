@@ -82,7 +82,7 @@ def panorama_body(a):
     a.reg(4);a.number(10000001);a.op(11);a.save(5)
     a.reg(5);a.number(0);a.op(72);a.op(18);a.save(6)
     a.prop(['mcTextGroup','mYearName'],'text','PÚBLICO')
-    a.target('mYearValue','text');a.reg(5);a.number(1);a.path('cafe','ION_Localization');a.method('LocalizeInteger');a.op(79)
+    a.target('mYearValue','text');a.reg(5);a.number(1);a.path('ION_Localization');a.method('LocalizeInteger');a.op(79)
     # Recompute widths after replacing FIFA's construction year with attendance.
     for name in ('mYearName','mYearValue'):
         a.target(name,'_x');a.number(0);a.field(name,'textWidth');a.op(11);a.number(10);a.op(11);a.op(79)
