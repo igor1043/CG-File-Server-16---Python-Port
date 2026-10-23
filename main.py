@@ -27,13 +27,13 @@ def _start_splash():
 
 if __name__ == "__main__":
     import sys
-    if '--activate-career-ui' in sys.argv:
+    if '--activate-career-ui' in sys.argv or '--activate-panorama-ui' in sys.argv:
         import argparse,json
         from pathlib import Path
-        from server16_py.loose_ui import activate
-        parser=argparse.ArgumentParser();parser.add_argument('--activate-career-ui',action='store_true');parser.add_argument('--game-root',type=Path,required=True);parser.add_argument('--verify-only',action='store_true')
-        args=parser.parse_args();result=activate(args.game_root,args.verify_only)
-        target=args.game_root/'ModCarrerMode/runtime/club_environment/ui_activation.json';target.parent.mkdir(parents=True,exist_ok=True);target.write_text(json.dumps(result),encoding='utf8')
+        from server16_py.loose_ui import activate,PANORAMA_TARGETS
+        parser=argparse.ArgumentParser();mode=parser.add_mutually_exclusive_group(required=True);mode.add_argument('--activate-career-ui',action='store_true');mode.add_argument('--activate-panorama-ui',action='store_true');parser.add_argument('--game-root',type=Path,required=True);parser.add_argument('--verify-only',action='store_true')
+        args=parser.parse_args();result=activate(args.game_root,args.verify_only,PANORAMA_TARGETS if args.activate_panorama_ui else None)
+        target=args.game_root/('ModCarrerMode/runtime/panorama_ui_activation.json' if args.activate_panorama_ui else 'ModCarrerMode/runtime/club_environment/ui_activation.json');target.parent.mkdir(parents=True,exist_ok=True);target.write_text(json.dumps(result),encoding='utf8')
         raise SystemExit(0 if result['status']=='ready' else 2)
     if any(arg in sys.argv for arg in ('--club-environment','--club-environment-worker','--club-environment-check','--club-environment-install')):
         from server16_py.club_environment import main as run_club_environment

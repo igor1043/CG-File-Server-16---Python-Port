@@ -6,15 +6,16 @@ The hash release uses the same ViV4 contract as the birthyear UI installer.
 from pathlib import Path
 import hashlib,json,os,struct,time
 
-TARGETS={
+PANORAMA_TARGETS={
  'data/ui/game/background/backgroundfifa.big',
  'data/ui/game/screens/misc/stadiumpan.big',
- 'data/ui/layout/careermanagerhubcfg.xml',
+ 'data/ui/nav/mainfeflow.nav',
  'data/ui/nav/careermode/mainmenuhubflow.nav',
 }
+TARGETS=PANORAMA_TARGETS|{'data/ui/layout/careermanagerhubcfg.xml'}
 
-def plans(game):
-    game=Path(game);result=[]
+def plans(game,targets=None):
+    game=Path(game);result=[];targets=TARGETS if targets is None else frozenset(targets)
     for stem in ('data_patch','data_front_end_extra','data_front_end','data_startup'):
         archive=game/(stem+'.big')
         if not archive.exists():continue
@@ -29,7 +30,7 @@ def plans(game):
             offset,size=struct.unpack_from('>II',table,at);z=table.index(0,at+8)
             name=table[at+8:z].decode('ascii').replace('\\','/').casefold();at=z+1
             records.append((offset,size))
-            if name in TARGETS and (game/name).is_file():matches.append((i,name))
+            if name in targets and (game/name).is_file():matches.append((i,name))
         if not matches:continue
         index=archive.with_suffix('.bh');before=index.read_bytes();expected=16+20*count
         if len(before)!=expected or before[:4]!=b'ViV4' or struct.unpack_from('<I',before,4)[0]!=expected or struct.unpack_from('>II',before,8)!=(count,expected):raise ValueError('Incompatible BH: '+str(index))
@@ -40,9 +41,9 @@ def plans(game):
         result.append((index,before,bytes(after),matches))
     return result
 
-def activate(game,verify_only=False):
+def activate(game,verify_only=False,targets=None):
     import psutil
-    game=Path(game).resolve();plan=plans(game);pending=[p for p in plan if p[1]!=p[2]]
+    game=Path(game).resolve();plan=plans(game,targets);pending=[p for p in plan if p[1]!=p[2]]
     if pending and not verify_only:
         for task in psutil.process_iter(['name','exe']):
             try:

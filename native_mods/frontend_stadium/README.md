@@ -60,7 +60,10 @@ Os estados mainMenuWithStadium (início) e MainMenuHub (carreira) usam o
 componente FIFA com BOOTFLOW como imagem de fallback. O componente BOOTFLOW
 fixo do FIFA Friends não recebe a decisão do BackgroundDP. O componente FIFA
 recebe o parâmetro transparente da DLL para uma rota 3D válida. Sem rota,
-mantém a imagem BOOTFLOW. Os wrappers APT anteriores foram preservados.
+mantém a imagem BOOTFLOW. O background conserva o APT nativo byte por byte e
+usa uma DDS transparente válida. A panorâmica estende somente o método Update
+existente, sem acrescentar entry points Function2. Assim permanecem nativos o
+texto para continuar, a navegação, o nome e o escudo.
 
 Validação: regressões Python e C++; scripts completos stadium.lua/crowd.lua
 em Lua 5.1; wrappers APT em VM limitada; helper congelado executado contra
@@ -75,10 +78,19 @@ Instalação: tools/install_frontend_stadium.py, com FIFA e Server16 fechados.
 Backup inclui Lua, EXE, configuração, enabled.txt e UI. O manifesto contém hashes.
 O lançador abre o FIFA com cwd igual à pasta do executável, independentemente
 da pasta de onde o Server16 foi iniciado.
-DLL ativa: frontend_stadium/frontend_stadium_native_v5.dll. Eventos do log:
+DLL ativa: frontend_stadium/frontend_stadium_native_v11.dll. Eventos do log:
 PREPARE_ASYNC, NATIVE_PROFILE_RELOAD_QUEUED, LOAD_SAME_ROUTE, CROWD_ROUTE,
 MODELS_DISPATCHED, SCENE_MONITOR_ACTIVE, RELOAD_COMPLETE e erros explícitos.
 
 Restauração: tools/disable_frontend_stadium.py restaura stadium.lua e crowd.lua,
 desativa somente as versões deste mod e restaura a UI registrada. O EXE anterior
 do Server16 fica no backup para restauração manual.
+
+O complemento `FIFA-Friends-Panoramica-20261023.zip` reúne as duas interfaces,
+DDS, Lua (com rotas iniciais vazias), catálogo, auxiliar, DLLs e lançador. O
+instalador mescla a navegação existente e executa `--activate-panorama-ui` para
+ativar somente suas quatro entradas nos BHs locais, incluindo mainfeflow.nav.
+Configurações de estádio existentes são preservadas. Requer a base V12 e os
+pacotes StadiumGBD do destinatário; não contém estádios nem BHs de outro PC.
+Capacidade e público vêm dos INIs próprios do estádio e ficam vazios quando
+ausentes; os campos nativos de estádios originais continuam originais.

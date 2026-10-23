@@ -1,9 +1,14 @@
 import struct,tempfile,unittest
 from unittest.mock import patch
 from pathlib import Path
-from server16_py.loose_ui import activate
+from server16_py.loose_ui import activate,PANORAMA_TARGETS,TARGETS
 
 class LooseUITest(unittest.TestCase):
+    def test_panorama_scope_includes_both_navigation_routes(self):
+        self.assertIn('data/ui/nav/mainfeflow.nav',PANORAMA_TARGETS)
+        self.assertIn('data/ui/nav/careermode/mainmenuhubflow.nav',PANORAMA_TARGETS)
+        self.assertNotIn('data/ui/layout/careermanagerhubcfg.xml',PANORAMA_TARGETS)
+        self.assertIn('data/ui/layout/careermanagerhubcfg.xml',TARGETS)
     def fixture(self,game):
         name='data/ui/game/screens/misc/stadiumpan.big';payload=game/name;payload.parent.mkdir(parents=True);payload.write_bytes(b'APT')
         names=['unrelated',name,'also/unrelated'];directory=b'';records=b''
@@ -22,6 +27,7 @@ class LooseUITest(unittest.TestCase):
             self.assertEqual(index.read_bytes(),before[:48]+bytes(8)+before[56:])
             self.assertEqual(next((game/'ModCarrerMode/backups').glob('*/data_front_end.bh')).read_bytes(),before)
             self.assertEqual(activate(game)['changed'],0)
+            self.assertEqual(activate(game,True,targets={'unrelated/missing'})['entries'],0)
     def test_mismatched_order_has_no_writes(self):
         with tempfile.TemporaryDirectory() as temp:
             game=Path(temp);index,before=self.fixture(game);bad=bytearray(before);struct.pack_into('>I',bad,16,999);index.write_bytes(bad)

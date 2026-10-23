@@ -113,8 +113,8 @@
     },
     {
       "path": "ModCarrerMode/mods/subson/subson_bridge.dll",
-      "bytes": 179200,
-      "sha256": "d37af9429d59f1128108dfee1381df0489836744e11ca9ed67fb92113e7f9f20",
+      "bytes": 181760,
+      "sha256": "13f31fc4d0e0069fabea3dcd54aaf27f970e1c337613d6b0224269c485c3adb8",
       "role": "release"
     },
     {
