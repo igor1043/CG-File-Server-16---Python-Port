@@ -32,7 +32,7 @@ class PrematchPanel:
 
     def cards(self):
         items = [(0, ('Controle de','público')), (1, ('Escolha seu','estádio')),
-                 (2, ('Configurações','da partida'))]
+                 (2, ('Configurações','da partida')), (6, ('Configurar','controles'))]
         if features.NARRATION_PICKER_AVAILABLE:items.append((3, ('Escolha os','narradores')))
         if features.EXTRA_SCENES_AVAILABLE:items.append((4, ('Cenas extras','Técnico e mascote')))
         cards = []
@@ -90,6 +90,8 @@ class PrematchPanel:
             elif focus == 4:
                 selector.prematch_panel = ExtraScenesPanel(self, prematch=True)
                 selector.render()
+            elif focus == 6:
+                selector.open_gamepads()
             else:
                 selector.close()
         elif focus == 1:
@@ -193,13 +195,19 @@ class PrematchPanel:
                     draw.rounded_rectangle((cx-11,120+top,cx+11,156+top),11,outline=blue,width=3)
                     draw.arc((cx-22,139+top,cx+22,171+top),0,180,fill=blue,width=3)
                     draw.line((cx,172+top,cx,183+top),fill=blue,width=3)
+                elif i==6:
+                    draw.rounded_rectangle((cx-34,130+top,cx+34,172+top),14,outline=blue,width=3)
+                    draw.line((cx-23,151+top,cx-5,151+top),fill=blue,width=3)
+                    draw.line((cx-14,142+top,cx-14,160+top),fill=blue,width=3)
+                    for dx,dy in ((14,146),(24,156)):
+                        draw.ellipse((cx+dx-3,top+dy-3,cx+dx+3,top+dy+3),fill=blue)
                 else:
                     draw.rounded_rectangle((cx-30,127+top,cx+15,163+top),6,outline=blue,width=3)
                     draw.line(((cx+15,138+top),(cx+32,129+top),(cx+32,161+top),(cx+15,152+top),(cx+15,138+top)),fill=blue,width=3)
                 font=self.selector.font(16,True)
                 for row,label in enumerate(labels):
                     draw.text((rect[0]+108,rect[1]+29+row*22),label,font=font,fill=ink)
-                if not controller_connected(self.selector):
+                if not controller_connected(self.selector) and shortcut<=5:
                     text(rect[0]+108,rect[1]+80,panel_function_key(shortcut),13,muted)
             button(self.BACK,'Fechar',5,'Esc','B')
         else:

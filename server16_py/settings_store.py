@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import math
 from pathlib import Path
 
@@ -32,6 +33,11 @@ class SettingsStore:
         "RANDOM_STADIUM_SELECTION": True,
         "CROWD_MASTER_VOLUME": 1.0,
         "GOAL_MASTER_VOLUME": 1.0,
+        "gamepad_bridge": {"slots": [
+            {"enabled": False, "device_guid": "", "profile": "auto", "hide_from_fifa": False}
+            for _ in range(4)
+        ]},
+        "gamepad_mappings": {},
         "LANGUAGE": "en",
         # Discord Rich Presence defaults.  Users can override any key in their
         # runtime/settings.json; missing keys fall back to these values so the
@@ -50,7 +56,7 @@ class SettingsStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.data = dict(self.DEFAULTS)
+        self.data = copy.deepcopy(self.DEFAULTS)
         self.load()
 
     def load(self) -> None:
@@ -64,9 +70,9 @@ class SettingsStore:
             # Deep-merge so nested dicts (e.g. discord_rpc) get their missing
             # keys filled in from DEFAULTS rather than the whole block being
             # replaced by whatever partial dict the user file contains.
-            self.data = _deep_merge(self.DEFAULTS, loaded)
+            self.data = _deep_merge(copy.deepcopy(self.DEFAULTS), loaded)
         except Exception:
-            self.data = dict(self.DEFAULTS)
+            self.data = copy.deepcopy(self.DEFAULTS)
 
     def save(self) -> None:
         temporary = self.path.with_name(self.path.name + '.tmp')

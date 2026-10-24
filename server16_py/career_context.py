@@ -65,6 +65,22 @@ def _career_service_active(memory, modules, details=False):
     if not 0 <= service_index <= 4096:
         return None
     for base,size in modules:
+        published = _export(memory,base,size,b'Fifa16CareerContextRead')
+        if published is not None:
+            record = memory.read_process_memory(published,48)
+            schema,length,sequence,pid,service,expected,registry,epoch,_ = struct.unpack('<IIIIQQQII',record)
+            if schema != 1 or length != 48 or sequence & 1 or pid != memory.process_id:
+                return None
+            if not service or not expected or not registry:
+                return None
+            wrapper = memory.read_int64(registry+service_index*32+24)
+            if memory.read_int64(wrapper) != service or memory.read_int64(service) != expected:
+                return None
+            result = _selected_career_context(memory,service,registry,base,size,details)
+            if isinstance(result,dict):result['context_epoch']=epoch
+            if memory.read_process_memory(published,48) != record:
+                return None
+            return result
         entry = _export(memory,base,size,b'Fifa16CareerGetState')
         if entry is None:
             continue
@@ -91,23 +107,25 @@ def _career_service_active(memory, modules, details=False):
         registry = memory.read_int64(owner+8)
         wrapper = memory.read_int64(registry+service_index*32+24)
         service = memory.read_int64(wrapper)
-        selected = struct.unpack('<i',memory.read_process_memory(service+0x14,4))[0]
-        if selected == -1:
-            return False
-        if not 0 <= selected < 8:
-            return None
-        contexts = memory.read_int64(service+0x18)
-        club = memory.read_uint32(contexts+selected*0x318+0x1a4)
-        if not 0 < club <= 2_000_000:
-            return False
-        if details:
-            protocol=_export(memory,base,size,b'Fifa16CareerJobOfferProtocol')
-            return {'userid': selected, 'club_id': club,
-                    'career_role':memory.read_uint32(contexts+selected*0x318+0x18c),
-                    'job_offer_protocol':memory.read_uint32(protocol) if protocol else 0,
-                    'registry_address':registry,'context_address':contexts+selected*0x318}
-        return True
+        return _selected_career_context(memory,service,registry,base,size,details)
     return None
+
+
+def _selected_career_context(memory,service,registry,base,size,details):
+    selected = struct.unpack('<i',memory.read_process_memory(service+0x14,4))[0]
+    if selected == -1:return False
+    if not 0 <= selected < 8:return None
+    contexts = memory.read_int64(service+0x18)
+    if not contexts:return None
+    club = memory.read_uint32(contexts+selected*0x318+0x1a4)
+    if not 0 < club <= 2_000_000:return False
+    if details:
+        protocol=_export(memory,base,size,b'Fifa16CareerJobOfferProtocol')
+        return {'userid':selected,'club_id':club,
+                'career_role':memory.read_uint32(contexts+selected*0x318+0x18c),
+                'job_offer_protocol':memory.read_uint32(protocol) if protocol else 0,
+                'registry_address':registry,'context_address':contexts+selected*0x318}
+    return True
 
 
 def competition_session(memory, details=False):

@@ -320,6 +320,7 @@ class Server16App(tk.Tk):
         self.assets_runtime = AssetRuntime(self)
         self.stadium_runtime = StadiumRuntime(self)
         self.chants_runtime = ChantsRuntime(self)
+        self.gamepad_bridge = None
         self.entrance_runtime = TeamEntranceRuntime(self)
         self.entrance_props_runtime = EntrancePropsRuntime(self)
         self.assignment_runtime = AssignmentRuntime(self)
@@ -428,6 +429,9 @@ class Server16App(tk.Tk):
         self.after(3000, lambda: self.check_updates(silent=True))
         if self.module_enabled("Chants"):
             self._start_chants_runtime()
+        if any(slot.get('enabled') or slot.get('hide_from_fifa') for slot in self.settings.data.get('gamepad_bridge',{}).get('slots',[])):
+            from .gamepad_panel import bridge_for
+            self.after(800,lambda:bridge_for(self))
         # Log DiscordRPC initialization status
         if self._discord_rpc_enabled:
             self.log("DiscordRPC initialized (enabled in settings)")
@@ -988,10 +992,14 @@ class Server16App(tk.Tk):
         self.logs_tab = tk.Frame(self.tabview, bg=self.bg)
         self.audio_tab = tk.Frame(self.tabview, bg=self.bg)
         self.camera_tab = tk.Frame(self.tabview, bg=self.bg)
+        self.gamepad_tab = tk.Frame(self.tabview, bg=self.bg)
         self.tabview.add(self.dashboard_tab, text=self.tr("tab.dashboard"))
         self.tabview.add(self.audio_tab, text=self.tr("tab.chants"))
         self.tabview.add(self.camera_tab, text=self.tr("tab.camera"))
+        self.tabview.add(self.gamepad_tab, text="Controles")
         self.tabview.add(self.logs_tab, text=self.tr("tab.logs"))
+        from .gamepad_panel import build_desktop_tab
+        build_desktop_tab(self,self.gamepad_tab)
 
         dashboard_host = tk.Frame(self.dashboard_tab, bg=self.bg)
         dashboard_host.pack(fill="both", expand=True, padx=10, pady=10)
@@ -4306,6 +4314,10 @@ class Server16App(tk.Tk):
         closing_splash = step('closing splash creation', self._show_closing_splash)
         step('volume popup', self._hide_crowd_volume_popup)
         step('audio stop signal', self._chants_stop.set)
+        bridge=getattr(self,'gamepad_bridge',None)
+        if bridge is not None:
+            step('physical controller visibility',bridge.release_hidhide_cloaks_on_shutdown)
+            step('gamepad bridge',bridge.stop)
         step('database reader processes', close_owned_readers)
         selector, self._stadium_selector = self._stadium_selector, None
         if selector is not None:

@@ -4,7 +4,17 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.13 · **Atualizado em:** 21/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.15 · **Atualizado em:** 24/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+
+## Atualização — 24/10/2026
+
+- Compatibilidade com ReShade 6.5.1/API 17 pelo callback oficial, mantendo o caminho COM quando o ReShade não está carregado.
+- Aba Controles e acesso pelo F12: mapeamento de controles genéricos, perfis SDL, calibração e ponte Xbox opcional. Drivers só são instalados por ação explícita do usuário.
+- Hinos de gol fazem fade ao retomar o relógio, inclusive quando o replay é pulado.
+- Contexto da carreira atualizado após troca de clube e preservação das seleções do estádio.
+- Entrada congelada para auxiliares do vestiário, empréstimos, próxima partida, mercado e titulares, com NumPy, Pillow e SQLite embarcados.
+
+O executável pronto está em [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12). Atualize essa branch e extraia `FIFA-Friends-Assets-Complementares-20261024.zip` na raiz do jogo. O complemento contém modelos/poses/texturas e a animação SubsOn; não repete código ou executáveis do GitHub e não contém instalador. [Detalhes da versão e dependências](SERVER16_0.2.15.md).
 
 ## Atualização — 21/10/2026
 

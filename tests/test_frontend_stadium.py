@@ -48,6 +48,20 @@ class FrontendStadiumTest(unittest.TestCase):
         with self.assertRaises(LookupError):prepare(self.game,999,176)
         self.assertFalse((self.game/'data').exists())
 
+    def test_catalog_package_hint_cannot_replace_the_clubs_predefined_native_ground(self):
+        folder=self.game/'ModCarrerMode/data/catalogs';folder.mkdir(parents=True)
+        (folder/'club_stadium_fallback.tsv').write_text('1629|229|54662|Arena|ABC|16|14\n')
+        before=(self.game/'FSW/settings.ini').read_bytes()
+        with self.assertRaises(LookupError):prepare(self.game,1629,176,career=True,session=77)
+        result=native_fallback(self.game,1629,176)
+        self.assertEqual(result['mode'],2);self.assertEqual(result['slot'],229)
+        self.assertEqual(result['display_name'],'Arena')
+        # An explicit installed match assignment still has precedence.
+        (self.game/'FSW/settings.ini').write_bytes(before+b'1629=ABC,0,0,0\n')
+        self.assertEqual(prepare(self.game,1629,176,career=True,session=77)['name'],'ABC')
+        (self.game/'FSW/settings.ini').write_bytes(before)
+        self.assertEqual((self.game/'FSW/settings.ini').read_bytes(),before)
+
     def test_zip_nested_package_and_day_fallback(self):
         (self.game/'FSW/settings.ini').write_text('[stadium]\n42=Nested,0,0,0\n')
         with zipfile.ZipFile(self.game/'StadiumGBD/Nested.zip','w') as archive:
@@ -124,7 +138,8 @@ class FrontendStadiumTest(unittest.TestCase):
         folder=self.game/'ModCarrerMode/data/catalogs';folder.mkdir(parents=True)
         (folder/'club_stadium_fallback.tsv').write_text('1|156|60000|Emirates||1|1\n2|175|10000|Custom|Missing pack|1|1\n')
         self.assertEqual(native_fallback(self.game,1,176)['mode'],2)
-        self.assertEqual(native_fallback(self.game,2,176)['mode'],0)
+        self.assertEqual(native_fallback(self.game,2,176)['mode'],2)
+        self.assertEqual(native_fallback(self.game,2,176)['slot'],175)
         self.assertEqual(native_fallback(self.game,999,176)['mode'],0)
 
     def test_manual_choice_belongs_to_one_club_and_crowd_route_tracks_model(self):
@@ -175,17 +190,17 @@ class FrontendSelectorTest(unittest.TestCase):
                     selector.open(frontend=True)
                     panel=selector.frontend_panel
                     self.assertFalse(enabled(root))
-                    self.assertEqual([i for i,r in panel.targets()],[0,2])
+                    self.assertEqual([i for i,r in panel.targets()],[0,4,2])
                     selector.handle(6,0)
                     self.assertTrue(enabled(root))
-                    self.assertEqual([i for i,r in panel.targets()],[0,1,2])
+                    self.assertEqual([i for i,r in panel.targets()],[0,1,4,2])
                     # Hit the scaled top of the row: inputs must use the same
                     # 90% coordinates as the published panel texture.
                     selector.handle(8,(95<<16)|450)
                     self.assertFalse(enabled(root))
-                    self.assertEqual([i for i,r in panel.targets()],[0,2])
-                    with Image.open(selector.shared.image_path) as image:self.assertEqual(image.size,(1080,792))
-                    self.assertEqual((selector.shared.width,selector.shared.height),(540,396))
+                    self.assertEqual([i for i,r in panel.targets()],[0,4,2])
+                    with Image.open(selector.shared.image_path) as image:self.assertEqual(image.size,(1080,972))
+                    self.assertEqual((selector.shared.width,selector.shared.height),(540,486))
                     selector.handle(7,0)
                     self.assertFalse(selector.opened)
                     selector.open(frontend=True)

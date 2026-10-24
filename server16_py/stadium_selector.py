@@ -66,6 +66,7 @@ class StadiumSelector:
         self._frontend_signature=None
         self._frontend_session=0
         self.frontend_panel=None
+        self.gamepad_panel=None
         self.applying = False
         self.audio_panel = None
         self.career_panel = None
@@ -215,6 +216,8 @@ class StadiumSelector:
             self.audio_panel.tick()
         if self.opened and self.career_panel:
             self.career_panel.tick()
+        if self.opened and getattr(self,'gamepad_panel',None):
+            self.gamepad_panel.tick()
         if self.opened and not self.audio_panel and not self.prematch_panel and (self._preview_loading or self.loading) and time.monotonic()>=self._next_loader:
             self.render()
         if self.applying and not app._stadium_task_running:
@@ -282,6 +285,7 @@ class StadiumSelector:
         self._catalog_thread.start()
 
     def open(self, audio=False, hub=False, career=False, frontend=False, frontend_picker=False):
+        self.gamepad_panel=None
         self.frontend_mode=frontend
         if frontend:
             state=frontend_live_state(self.app.exedir)
@@ -333,6 +337,14 @@ class StadiumSelector:
         self.career_panel=None
         self.prematch_panel=PrematchPanel(self)
         self.return_to_menu=True
+        self.render()
+
+    def open_gamepads(self):
+        from .gamepad_panel import GamepadPanel
+        def back():
+            self.gamepad_panel=None
+            self.render()
+        self.gamepad_panel=GamepadPanel(self,on_back=back)
         self.render()
 
     def back(self):
@@ -400,6 +412,7 @@ class StadiumSelector:
                 self._request_preview(entries[0])
 
     def close(self):
+        self.gamepad_panel=None
         self.frontend_panel=None
         self.frontend_mode=False
         self._opening_selection_names=()
@@ -558,6 +571,9 @@ class StadiumSelector:
                 if self.opened:
                     self.render()
             return
+        if getattr(self,'gamepad_panel',None):
+            self.gamepad_panel.handle(kind,value)
+            return
         if self.audio_panel:
             self.audio_panel.handle(kind,value)
             return
@@ -713,6 +729,10 @@ class StadiumSelector:
         self._preview_transition=False
 
     def render(self):
+        if getattr(self,'gamepad_panel',None):
+            panel=self.gamepad_panel
+            self._publish(panel.render(),panel.WIDTH,panel.HEIGHT)
+            return
         if self.frontend_panel:
             self._publish(self.frontend_panel.render(),self.frontend_panel.WIDTH,self.frontend_panel.HEIGHT)
             return

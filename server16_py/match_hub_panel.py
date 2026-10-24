@@ -16,6 +16,7 @@ class MatchHubPanel:
 
     def __init__(self, selector):
         self.selector = selector
+        if features.EXTRA_SCENES_AVAILABLE:self.HEIGHT=548
         self.page = 'home'
         self.child = None
         self.focus = 0
@@ -41,7 +42,8 @@ class MatchHubPanel:
         if self.page == 'home':
             items = [('Música', 'Cânticos, torcida e hinos de gol'),
                     ('Gráficos', 'Física de roupas'),
-                    ('Câmera', 'Primeira pessoa e terceira pessoa · carreira')]
+                    ('Câmera', 'Primeira pessoa e terceira pessoa · carreira'),
+                    ('Controles', 'Mapear botões, analógicos e testar comandos')]
             if features.EXTRA_SCENES_AVAILABLE:
                 items.append(('Cenas extras', 'Técnico e mascote · rosto ou corpo inteiro'))
             return items + [('Fechar', 'Voltar à partida')]
@@ -58,7 +60,7 @@ class MatchHubPanel:
         return items + [('Voltar', 'Ajustes da partida')]
 
     def targets(self):
-        pitch, height = (58,48) if self.page in ('home','camera') and len(self.items())==5 else (72,60)
+        pitch, height = (58,48) if self.page in ('home','camera') and len(self.items())>=5 else (72,60)
         return [(i, (24, 98+i*pitch, 576, 98+i*pitch+height)) for i in range(len(self.items()))]
 
     def tick(self):
@@ -95,7 +97,9 @@ class MatchHubPanel:
                 self.child.HEIGHT = self.HEIGHT
             elif index in (1, 2):
                 self.page = 'graphics' if index == 1 else 'camera'
-            elif index == 3 and features.EXTRA_SCENES_AVAILABLE:
+            elif index == 3:
+                self.selector.open_gamepads();return
+            elif index == 4 and features.EXTRA_SCENES_AVAILABLE:
                 self.child = ExtraScenesPanel(self)
             else:
                 self.selector.close();return
@@ -154,7 +158,7 @@ class MatchHubPanel:
         if self.child:return self.child.render()
         image=Image.new('RGBA',(self.WIDTH*2,self.HEIGHT*2))
         draw=OverlayDraw(image)
-        draw.rounded_rectangle((0,0,599,489),18,fill='white',outline='#e0e6ee')
+        draw.rounded_rectangle((0,0,599,self.HEIGHT-1),18,fill='white',outline='#e0e6ee')
         ink,muted,blue='#344651','#728397','#0968f8'
         title={'home':'Ajustes da partida','graphics':'Gráficos','camera':'Câmera'}[self.page]
         draw.text((24,22),title,font=self.selector.font(24,True),fill=ink)
@@ -176,6 +180,6 @@ class MatchHubPanel:
         if message:
             # Fit status on one line without clipping the controller hints.
             while len(message)>1 and draw.textlength(message,font=self.selector.font(12))>550:message=message[:-2]+'…'
-            draw.text((24,425),message,font=self.selector.font(12),fill=muted)
+            draw.text((24,self.HEIGHT-65),message,font=self.selector.font(12),fill=muted)
         navigation_hint(draw,self.selector,footer_y(self.HEIGHT),'Abrir' if self.page=='home' else 'Alterar','Fechar' if self.page=='home' else 'Voltar')
         return image

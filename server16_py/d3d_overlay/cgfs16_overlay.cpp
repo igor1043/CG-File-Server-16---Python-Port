@@ -19,6 +19,8 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <dxgi1_2.h>
+#include <psapi.h>
+#include "third_party/reshade/reshade_events.hpp"
 #include <d3dcompiler.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -36,6 +38,7 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "psapi.lib")
 
 // ---------------------------------------------------------------------------
 // Shared memory (same layout as Python _OverlayShared)
@@ -100,13 +103,9 @@ static void SelectorLog(const char *message) { Log("[Selector] %s",message); }
 
 // ---------------------------------------------------------------------------
 // Hook state
-// Strategy:
-//   Phase 1 (inline): We patch the first 14 bytes of the proxy dxgi.dll's Present
-//                     body so the VERY FIRST call reaches our hook.
-//   Phase 2 (vtable): On that first call we restore the original bytes, save the
-//                     real function pointer, and patch FIFA's actual IDXGISwapChain
-//                     vtable slot 8. All subsequent calls go through the vtable
-//                     hook with NO trampoline — we call the restored original fn.
+// ReShade owns presentation when present: use its supported API callback instead
+// of patching its proxy or creating another ReShade device just to find a vtable.
+// Without ReShade, retain the original COM-vtable path (no instruction patches).
 // ---------------------------------------------------------------------------
 typedef HRESULT (WINAPI *PFN_Present)(IDXGISwapChain*, UINT, UINT);
 
@@ -114,6 +113,10 @@ static PFN_Present g_OrigPresent         = nullptr;
 
 static void      **g_fifaVtbl            = nullptr;  // FIFA's swapchain vtable
 static bool        g_hookSwitched        = false;    // phase 1 -> phase 2 done
+static HMODULE g_ownModule=nullptr, g_reshadeModule=nullptr;
+static HWND g_renderWindow=nullptr;
+static thread_local bool g_insideOverlay=false;
+static volatile LONG g_shutdown=0;
 
 static CRITICAL_SECTION g_drawCs;
 static LONG g_frameCount = 0;
@@ -205,6 +208,31 @@ static int g_previousWidth,g_previousHeight;
 static bool g_selectorTexture=false;
 static LONG g_loadedSelectorRevision=0;
 static DWORD g_imageRetryAt=0;
+static ID3D11Device *g_resourceDevice=nullptr;
+
+template<typename T> static void ReleaseOverlayObject(T *&object) {
+    if (object) { object->Release(); object=nullptr; }
+}
+
+// Only called on a render callback under g_drawCs, never during process detach.
+static void ReleaseOverlayResources() {
+    for (auto *text : {&g_ttTitle,&g_ttName,&g_ttDetail,&g_ttScoreboardName,
+                      &g_ttScoreboardDetail,&g_ttMovieName,&g_ttMovieDetail,
+                      &g_ttNarrationName,&g_ttNarrationDetail}) {
+        ReleaseOverlayObject(text->srv); ReleaseOverlayObject(text->tex);
+        *text=TextTex{};
+    }
+    ReleaseOverlayObject(g_vs); ReleaseOverlayObject(g_ps); ReleaseOverlayObject(g_il);
+    ReleaseOverlayObject(g_vb); ReleaseOverlayObject(g_bs); ReleaseOverlayObject(g_rs);
+    ReleaseOverlayObject(g_dss); ReleaseOverlayObject(g_vsT); ReleaseOverlayObject(g_psT);
+    ReleaseOverlayObject(g_ilT); ReleaseOverlayObject(g_vbT); ReleaseOverlayObject(g_samp);
+    ReleaseOverlayObject(g_previewSRV); ReleaseOverlayObject(g_previewTex);
+    ReleaseOverlayObject(g_narrationPortraitSRV); ReleaseOverlayObject(g_narrationPortraitTex);
+    ReleaseOverlayObject(g_previousPhoto); ReleaseOverlayObject(g_resourceDevice);
+    g_previewLoadedPath[0]=g_narrationPortraitPath[0]=0;
+    g_previewNatW=g_previewNatH=g_narrationPortraitW=g_narrationPortraitH=0;
+    g_selectorTexture=false; g_loadedSelectorRevision=0; g_imageRetryAt=0;
+}
 
 static float photo_fade(DWORD elapsed) {
     float t=(std::min)(1.f,(float)elapsed/220.f);
@@ -586,9 +614,13 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
     bb->Release();
     if (!rtv) return;
 
-    // ── Init D3D resources once ────────────────────────────────────────────
-    static bool s_init=false;
-    if (!s_init) s_init=InitD3D11Overlay(dev);
+    // A second device (or device recreation) cannot reuse shaders/textures from
+    // the first one. ReShade/other renderers may introduce additional devices.
+    if (g_resourceDevice!=dev || !g_vs || !g_ps || !g_vb) {
+        ReleaseOverlayResources();
+        if (!InitD3D11Overlay(dev)) { rtv->Release(); return; }
+        g_resourceDevice=dev; dev->AddRef();
+    }
     if (!g_vs||!g_ps||!g_il||!g_vb) { rtv->Release(); return; }
 
     // ── Init COM once (for WIC) on this thread ─────────────────────────────
@@ -897,13 +929,29 @@ static void DrawOverlay11(IDXGISwapChain *sc, ID3D11Device *dev, ID3D11DeviceCon
 // ---------------------------------------------------------------------------
 // Hooked IDXGISwapChain::Present
 // ---------------------------------------------------------------------------
-static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT flags) {
+static bool IsGameRenderWindow(HWND window) {
+    DWORD pid=0;
+    if (!window || !IsWindow(window)) return false;
+    GetWindowThreadProcessId(window,&pid);
+    RECT rect={};
+    if (pid!=GetCurrentProcessId() || !GetClientRect(window,&rect) ||
+        rect.right<64 || rect.bottom<64) return false;
+    if (g_renderWindow && !IsWindow(g_renderWindow)) g_renderWindow=nullptr;
+    if (g_renderWindow) return window==g_renderWindow;
+    if (!IsWindowVisible(GetAncestor(window,GA_ROOT))) return false;
+    g_renderWindow=window;
+    return true;
+}
 
+static void RenderSwapchain(IDXGISwapChain *sc) {
+    if (!sc || g_insideOverlay || InterlockedCompareExchange(&g_shutdown,0,0)) return;
+    DXGI_SWAP_CHAIN_DESC selectorDesc={};
+    if (FAILED(sc->GetDesc(&selectorDesc)) || !IsGameRenderWindow(selectorDesc.OutputWindow)) return;
+    g_insideOverlay=true;
     LONG n = InterlockedIncrement(&g_frameCount);
     if (n==1 || (n%600)==0)
         Log("[Present] frame=%ld visible=%d", n, g_data?(int)g_data->visible:-1);
 
-    DXGI_SWAP_CHAIN_DESC selectorDesc={}; sc->GetDesc(&selectorDesc);
     selector_tick(selectorDesc.OutputWindow,(float)selectorDesc.BufferDesc.Width,(float)selectorDesc.BufferDesc.Height);
     if ((g_data && (InterlockedCompareExchange(&g_data->visible,0,0) != 0
         || InterlockedCompareExchange(&g_data->scoreboard_visible,0,0) != 0
@@ -913,15 +961,58 @@ static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT 
         if (SUCCEEDED(sc->GetDevice(__uuidof(ID3D11Device),(void**)&dev))) {
             ID3D11DeviceContext *ctx=nullptr;
             dev->GetImmediateContext(&ctx);
-            EnterCriticalSection(&g_drawCs);
-            __try { DrawOverlay11(sc,dev,ctx); }
-            __except(EXCEPTION_EXECUTE_HANDLER){ Log("[Present] EXCEPTION DrawOverlay11"); }
-            LeaveCriticalSection(&g_drawCs);
-            ctx->Release(); dev->Release();
+            if (ctx) {
+                EnterCriticalSection(&g_drawCs);
+                __try {
+                    if (SUCCEEDED(dev->GetDeviceRemovedReason())) DrawOverlay11(sc,dev,ctx);
+                    else ReleaseOverlayResources();
+                }
+                __except(EXCEPTION_EXECUTE_HANDLER){ Log("[Present] EXCEPTION DrawOverlay11"); }
+                LeaveCriticalSection(&g_drawCs);
+                ctx->Release();
+            }
+            dev->Release();
         }
     }
-    // Call the RESTORED original proxy Present (no trampoline, no RIP-relative issues)
+    g_insideOverlay=false;
+}
+
+static HRESULT WINAPI HookedPresent(IDXGISwapChain *sc, UINT syncInterval, UINT flags) {
+    if (!(flags&DXGI_PRESENT_TEST)) RenderSwapchain(sc);
     return g_OrigPresent(sc, syncInterval, flags);
+}
+
+static void ReShadePresent(reshade::api::effect_runtime *runtime) {
+    // API 17: effect_runtime::get_native() is its underlying native swapchain.
+    if (!runtime || runtime->get_device()->get_api()!=reshade::api::device_api::d3d11) return;
+    RenderSwapchain(reinterpret_cast<IDXGISwapChain *>(runtime->get_native()));
+}
+
+static void ReShadeDestroy(reshade::api::effect_runtime *runtime) {
+    if (!runtime || runtime->get_hwnd()!=g_renderWindow || InterlockedCompareExchange(&g_shutdown,0,0)) return;
+    EnterCriticalSection(&g_drawCs);
+    ReleaseOverlayResources(); g_renderWindow=nullptr;
+    LeaveCriticalSection(&g_drawCs);
+}
+
+static HMODULE FindReShade() {
+    HMODULE modules[1024]={}; DWORD bytes=0;
+    if (!EnumProcessModules(GetCurrentProcess(),modules,sizeof(modules),&bytes)) return nullptr;
+    for (DWORD i=0;i<(std::min)(bytes/(DWORD)sizeof(HMODULE),(DWORD)1024);++i)
+        if (GetProcAddress(modules[i],"ReShadeRegisterAddon") &&
+            GetProcAddress(modules[i],"ReShadeRegisterEventForAddon")) return modules[i];
+    return nullptr;
+}
+
+static bool RegisterReShade(HMODULE module) {
+    auto registerAddon=reinterpret_cast<bool(*)(HMODULE,uint32_t)>(GetProcAddress(module,"ReShadeRegisterAddon"));
+    auto registerEvent=reinterpret_cast<void(*)(HMODULE,reshade::addon_event,void *)>(GetProcAddress(module,"ReShadeRegisterEventForAddon"));
+    if (!registerAddon || !registerEvent || !registerAddon(g_ownModule,17)) return false;
+    registerEvent(g_ownModule,reshade::addon_event::reshade_present,reinterpret_cast<void *>(ReShadePresent));
+    registerEvent(g_ownModule,reshade::addon_event::destroy_effect_runtime,reinterpret_cast<void *>(ReShadeDestroy));
+    g_reshadeModule=module;
+    Log("[HookThread] ReShade API 17 callbacks active; no Present hook or probe device installed");
+    return true;
 }
 
 // Install a shared COM-vtable hook without copying machine instructions.
@@ -929,6 +1020,11 @@ static DWORD WINAPI HookThread(LPVOID) {
     selector_initialize(SelectorLog);
     Log("[HookThread] started pid=%lu", GetCurrentProcessId());
     Sleep(500);
+    if (HMODULE reshade=FindReShade()) {
+        if (!RegisterReShade(reshade))
+            Log("[HookThread] ReShade API unavailable; graphics hooks left untouched");
+        return 0;
+    }
 
     WNDCLASSEXW wc={}; wc.cbSize=sizeof(wc);
     wc.lpfnWndProc=DefWindowProcW;
@@ -994,8 +1090,9 @@ static DWORD WINAPI HookThread(LPVOID) {
 // ---------------------------------------------------------------------------
 // DllMain
 // ---------------------------------------------------------------------------
-BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID) {
+BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
+        g_ownModule=hInst;
         DisableThreadLibraryCalls(hInst);
         InitializeCriticalSection(&g_drawCs);
         InitLog();
@@ -1013,6 +1110,14 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID) {
         if (ht) CloseHandle(ht);
 
     } else if (reason==DLL_PROCESS_DETACH) {
+        InterlockedExchange(&g_shutdown,1);
+        // At process exit render threads may already be gone. Never wait on a
+        // render lock or call another graphics DLL while holding the loader lock.
+        if (reserved) return TRUE;
+        if (g_reshadeModule) {
+            auto unregisterAddon=reinterpret_cast<void(*)(HMODULE)>(GetProcAddress(g_reshadeModule,"ReShadeUnregisterAddon"));
+            if (unregisterAddon) unregisterAddon(hInst);
+        }
         Log("[DllMain] DETACH");
         if (g_hookSwitched) {
             // Restore vtable hook

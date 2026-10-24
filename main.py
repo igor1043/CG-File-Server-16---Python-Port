@@ -1,5 +1,10 @@
 import ctypes
 import os
+import sys
+from pathlib import Path
+
+_vendor=Path(__file__).resolve().parent/'vendor'
+if _vendor.is_dir():sys.path.insert(0,str(_vendor))
 
 
 def _set_windows_app_id():
@@ -27,6 +32,9 @@ def _start_splash():
 
 if __name__ == "__main__":
     import sys
+    if '--server16-selftest' in sys.argv:
+        from server16_py.build_check import run
+        raise SystemExit(run(sys.argv[sys.argv.index('--server16-selftest')+1]))
     if '--activate-career-ui' in sys.argv or '--activate-panorama-ui' in sys.argv:
         import argparse,json
         from pathlib import Path

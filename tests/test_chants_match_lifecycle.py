@@ -71,7 +71,7 @@ class Player:
 
 
 class ChantsLifecycleTests(unittest.TestCase):
-    def make_runtime(self, root):
+    def make_runtime(self, root, *, running_clock=False):
         clock = Clock()
         player = Player(clock)
         config = 'team,0.1,0.1,0.1,0.1,0.1,0.2'
@@ -91,7 +91,7 @@ class ChantsLifecycleTests(unittest.TestCase):
         memory.attack.return_value = memory.is_open.return_value = True
         memory.get_int.side_effect = lambda base, offset: (
             1 if offset == app.offsets.GAMESTARTEDBINARY else
-            100 + int(max(0, clock.now - 8)) if offset == app.offsets.GAMERANTIME else 0
+            100 + (int(max(0, clock.now - 8)) if running_clock else 0) if offset == app.offsets.GAMERANTIME else 0
         )
         app._is_game_running_with = lambda mem: Server16App._is_game_running_with(app, mem)
         runtime = ChantsRuntime(app)
@@ -106,7 +106,7 @@ class ChantsLifecycleTests(unittest.TestCase):
             stack.enter_context(patch('server16_py.chants_runtime.Memory', return_value=memory))
             return run()
 
-    def test_both_team_anthems_play_to_end_despite_kickoff_and_release_cooldown(self):
+    def test_both_team_goal_anthems_fade_after_replay_skip_and_release_cooldown(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             song = root/'FSW/Chants/team/ClubSong.mp3'
@@ -114,16 +114,16 @@ class ChantsLifecycleTests(unittest.TestCase):
             song.touch()
             for team in ('1', '2'):
                 with self.subTest(team=team):
-                    runtime, clock, player, memory = self.make_runtime(root)
+                    runtime, clock, player, memory = self.make_runtime(root, running_clock=True)
                     self.assertTrue(self.simulate(runtime, clock, player, memory,
                         lambda: runtime._play_club_song(team, memory)))
-                    self.assertGreaterEqual(player.closed_at, 120)
-                    self.assertLess(player.closed_at, 122)
-                    self.assertEqual(player.position, player.duration)
+                    self.assertGreaterEqual(player.closed_at, 9)
+                    self.assertLess(player.closed_at, 13)
+                    self.assertLess(player.position, player.duration)
                     self.assertEqual(player.levels[-1], 0)
                     self.assertIn(0.1, player.levels)
                     messages = [call.args[0] for call in runtime.app.log.call_args_list]
-                    self.assertFalse(any('kick-off detected' in m for m in messages))
+                    self.assertTrue(any('kick-off detected' in m for m in messages))
                     self.assertTrue(any(f'Club anthem {team}' == call.args[1]
                         for call in runtime.app._set_display_async.call_args_list if call.args[0]=='audio_source'))
                     self.assertLess(runtime.app._chants_resume_after, clock.now + 2)
@@ -181,7 +181,7 @@ class ChantsLifecycleTests(unittest.TestCase):
         self.assertLess(player.closed_at,205)
 
     def test_away_crowd_reaction_still_cuts_on_kickoff(self):
-        runtime, clock, player, memory = self.make_runtime(Path('.'))
+        runtime, clock, player, memory = self.make_runtime(Path('.'), running_clock=True)
         self.simulate(runtime, clock, player, memory, lambda: runtime._play_goal_track(
             Path('Support.mp3'),.2,'crowd','reaction','Away crowd','next',chants_memory=memory,crowd_volume=True))
         self.assertLess(player.closed_at,15)

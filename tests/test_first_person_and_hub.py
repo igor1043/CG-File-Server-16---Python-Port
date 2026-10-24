@@ -210,7 +210,7 @@ class HubTests(unittest.TestCase):
                 selector.open(audio=True)
                 hub=selector.audio_panel
                 self.assertIsInstance(hub,MatchHubPanel)
-                self.assertEqual([i[0] for i in hub.items()],['Música','Gráficos','Câmera','Fechar'])
+                self.assertEqual([i[0] for i in hub.items()],['Música','Gráficos','Câmera','Controles','Fechar'])
                 selector.handle(6,0)
                 self.assertFalse(hub.child.include_cloth)
                 selector.handle(2,0)

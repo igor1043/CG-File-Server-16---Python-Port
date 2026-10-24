@@ -15,13 +15,14 @@ class FrontendStadiumPanel:
         self.enabled=enabled(selector.app.exedir)
         self.message=''
         self.career=selector._frontend_career
-        self._layout_height=520 if self.career else 440
+        self._layout_height=620 if self.career else 540
         self.HEIGHT=round(self._layout_height*self.SCALE)
 
     def targets(self):
         rows=[(0,(24,100,576,185))]
         if self.enabled:rows.append((1,(24,205,576,283)))
         if self.career:rows.append((3,(24,300,576,360)))
+        rows.append((4,(24,380 if self.career else 300,576,440 if self.career else 360)))
         return rows+[(2,(24,self._layout_height-115,576,self._layout_height-65))]
 
     def activate(self,focus):
@@ -37,6 +38,7 @@ class FrontendStadiumPanel:
         elif focus==1 and self.enabled:selector.open(frontend=True,career=self.career,frontend_picker=True)
         elif focus==2:selector.close()
         elif focus==3 and self.career:selector.open(career=True)
+        elif focus==4:selector.open_gamepads()
 
     def handle(self,kind,value):
         if kind in (7,11) or kind==16 and value==3:self.selector.close();return
@@ -79,6 +81,7 @@ class FrontendStadiumPanel:
                 text(42,217,'Escolher estádio',20,bold=True)
                 text(42,250,'A escolha só muda quando você clicar em Aplicar.',14,'#8797ab')
             elif i==3:text(42,316,'Ferramentas da carreira',18)
+            elif i==4:text(42,396 if self.career else 316,'Configurar controles',18)
             else:text(42,height-104,'Voltar ao FIFA',18)
         if self.message:text(24,height-145,self.message,14,'#0968f8')
         navigation_hint(draw,selector,height-38)

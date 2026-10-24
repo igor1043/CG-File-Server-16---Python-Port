@@ -460,7 +460,7 @@ class ChantsRuntime:
             last_safety_position = 0
             player_paused = False
             app._chants_paused = False
-            progress = GoalClockProgress()
+            progress = GoalClockProgress(required_hits=2, sample_seconds=.5) if goal_song else GoalClockProgress()
             non_running_reads = resume_reads = 0
             active_seconds = 0.0
             last_tick = time.monotonic()
@@ -517,9 +517,11 @@ class ChantsRuntime:
                             app.log(f"Goal audio resumed: {source}")
                             app._set_display_async("audio_crowd_mode", mode)
                             app._set_display_async("audio_next", next_text)
-                        # Only a short crowd reaction ends at kickoff. ClubSong
-                        # keeps its position through pauses and plays to the end.
-                        if not goal_song and active_seconds >= 6.0:
+                        # Both the goal anthem and the crowd reaction fade when
+                        # live play resumes. Skipping a replay must not leave the
+                        # anthem playing over the next attack. A pause still
+                        # preserves playback position and never counts as kickoff.
+                        if active_seconds >= (1.0 if goal_song else 6.0):
                             try:
                                 game_time = chants_memory.get_int(app.offsets.GAMESTATSBASE, app.offsets.GAMERANTIME)
                             except Exception:

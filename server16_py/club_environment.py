@@ -106,7 +106,11 @@ def main(argv=None):
             generate()
             from .loose_ui import activate
             activate(game)
-        result={'ready':True,'workers':list(ENTRIES),'game':str(game),'numpy':__import__('numpy').__version__}
+        import sqlite3,save_sidecar,bank_art
+        db=sqlite3.connect(':memory:')
+        try:assert db.execute('SELECT 1').fetchone()==(1,)
+        finally:db.close()
+        result={'ready':True,'workers':list(ENTRIES),'game':str(game),'numpy':__import__('numpy').__version__,'sqlite':sqlite3.sqlite_version,'bank_icons':bank_art.validate_assets()}
         (runtime/'check.json').write_text(json.dumps(result),encoding='utf8')
         print(json.dumps(result));return 0
     if args.pid<=0:parser.error('--pid is required')

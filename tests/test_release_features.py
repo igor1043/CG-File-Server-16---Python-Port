@@ -37,9 +37,12 @@ class ReleaseFeaturesTests(unittest.TestCase):
                 selector.open(hub=True)
                 panel=selector.prematch_panel
                 self.assertIsInstance(panel,PrematchPanel)
-                self.assertEqual([action for action,_,_ in panel.cards()],[0,1,2])
+                self.assertEqual([action for action,_,_ in panel.cards()],[0,1,2,6])
                 self.assertEqual(panel.cards()[-1][1][2],576)
-                for key in (4,5):panel.handle(16,key)
+                with patch.object(selector,'open_gamepads') as controls:
+                    panel.handle(16,4)
+                    controls.assert_called_once()
+                panel.handle(16,5)
                 for action in (3,4):panel.activate(action)
                 self.assertIs(selector.prematch_panel,panel)
                 for connected in (False,True):
@@ -54,8 +57,11 @@ class ReleaseFeaturesTests(unittest.TestCase):
                 selector.open(audio=True)
                 panel=selector.audio_panel
                 self.assertIsInstance(panel,MatchHubPanel)
-                self.assertEqual([label for label,_ in panel.items()],['Música','Gráficos','Câmera','Fechar'])
-                panel.handle(16,4)
+                self.assertEqual([label for label,_ in panel.items()],['Música','Gráficos','Câmera','Controles','Fechar'])
+                with patch.object(selector,'open_gamepads') as controls:
+                    panel.handle(16,4)
+                    controls.assert_called_once()
+                panel.handle(16,5)
                 self.assertFalse(selector.opened)
                 self.assertIsNone(panel.child)
             finally:selector.shutdown()
@@ -67,7 +73,7 @@ class ReleaseFeaturesTests(unittest.TestCase):
             selector=fixtures.MatchAudioTests().make_selector(Path(folder))
             try:
                 panel=PrematchPanel(selector)
-                self.assertEqual([action for action,_,_ in panel.cards()],[0,1,2,3,4])
+                self.assertEqual([action for action,_,_ in panel.cards()],[0,1,2,6,3,4])
                 self.assertIn('Cenas extras',[label for label,_ in MatchHubPanel(selector).items()])
                 with patch.object(selector,'render'),patch('server16_py.prematch_panel.NarrationPanel') as narration:
                     panel.activate(3)

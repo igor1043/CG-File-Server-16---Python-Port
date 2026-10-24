@@ -111,7 +111,10 @@ def native_fallback(game,team,slot):
     if catalog.is_file():
         for line in catalog.read_text(encoding='utf-8-sig').splitlines():
             row=line.split('|')
-            if len(row)>=5 and row[0]==str(team) and not row[4].strip() and row[1].isdigit() and int(row[1])>0:
+            # The custom-name column is a historical catalogue hint, not an
+            # installed assignment. Keep the club's native ground unless FSW
+            # or the current user's selection explicitly chooses a package.
+            if len(row)>=5 and row[0]==str(team) and row[1].isdigit() and int(row[1])>0:
                 return {'mode':2,'team':team,'slot':int(row[1]),'display_name':row[3],'source':'native_catalog'}
     return {'mode':0,'team':team,'slot':slot,'display_name':'','source':'unassigned'}
 

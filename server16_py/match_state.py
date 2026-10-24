@@ -35,7 +35,9 @@ def pause_page(page: str) -> bool:
 class GoalClockProgress:
     """Require sustained forward clock movement, allowing integer timer ticks."""
 
-    def __init__(self) -> None:
+    def __init__(self, required_hits: int = 3, sample_seconds: float = 1.0) -> None:
+        self.required_hits = max(2, required_hits)
+        self.sample_seconds = max(0.2, sample_seconds)
         self.reset()
 
     def reset(self) -> None:
@@ -51,9 +53,9 @@ class GoalClockProgress:
             self.clock, self.sample_at, self.hits = clock, now, 0
             return False
         elapsed = now - self.sample_at
-        if elapsed < 1.0:
+        if elapsed < self.sample_seconds:
             return False
         delta = clock - self.clock
         self.hits = self.hits + 1 if delta >= 1 and delta / elapsed >= 0.5 else 0
         self.clock, self.sample_at = clock, now
-        return self.hits >= 3
+        return self.hits >= self.required_hits

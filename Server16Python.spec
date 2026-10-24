@@ -1,9 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import sys
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 
 project_root = Path(SPECPATH)
+sys.path.insert(0,str(project_root/'vendor'))
+gamepad_datas=collect_data_files('vgamepad')
+gamepad_binaries=collect_dynamic_libs('vgamepad')
+if (project_root/'bin/HidHide').is_dir():
+    gamepad_datas.append((str(project_root/'bin/HidHide'),'bin/HidHide'))
 bridge_datas = []
 python32_dir = project_root / 'bin' / 'python32'
 if python32_dir.is_dir():
@@ -11,7 +18,7 @@ if python32_dir.is_dir():
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=[str(project_root/'vendor')],
     binaries=[
         ('bin\\D3DCOMPILER_47.dll', '.'),
         ('bin\\cgfs16_overlay.dll', 'bin'),
@@ -20,7 +27,7 @@ a = Analysis(
         ('bin\\server16_first_person_v14.dll', 'bin'),
         ('bin\\FifaLibrary16.dll',  'bin'),
         ('bin\\career_jobs_runtime.dll', 'bin'),
-    ],
+    ] + gamepad_binaries,
     datas=[
         ('server16_py\\assets\\startup_baseline.json', 'server16_py/assets'),
         ('server16_py\\assets\\flags', 'server16_py/assets/flags'),
@@ -32,8 +39,8 @@ a = Analysis(
         ('server16_py\\locales\\pt.json', 'server16_py/locales'),
         ('server16_py\\locales\\es.json', 'server16_py/locales'),
         ('server16.ico', '.'),
-    ] + bridge_datas,
-    hiddenimports=[
+    ] + bridge_datas + gamepad_datas,
+    hiddenimports=['sqlite3','pygame','pygame._sdl2.controller','vgamepad',
         'clr',
         'rarfile',
         'numpy',
