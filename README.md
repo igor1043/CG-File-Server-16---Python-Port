@@ -6,6 +6,14 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 **Versão:** 0.2.15 · **Atualizado em:** 24/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
+### Correção de primeira inicialização — 24/10/2026
+
+Auxiliares iniciados diretamente por plugins agora preparam o runtime antes de executar sua entrada. Isso corrige `FileNotFoundError` em `ModCarrerMode/runtime/club_environment/preview/prepare.py` quando o supervisor ainda não iniciou ou a cópia gerada foi removida. A sincronização preserva contratos e dados da carreira.
+
+Atualize o Server16Python.exe e a pasta ModCarrerMode/source pela branch FIFA Friends V12, com jogo e Server fechados. O ZIP complementar de assets continua o mesmo. Se também faltar `ModCarrerMode/source/club_environment/preview/prepare.py`, a atualização do código está incompleta: o ZIP de modelos não substitui os fontes do GitHub.
+
+Teste da revisão: o executável congelado criou os runtimes ausentes e executou as entradas de vestiário, banco e próxima partida em três pastas novas com nomes Unicode, sem iniciar FIFA nem instalar drivers. Testes de recuperação verificam também a preservação do livro financeiro. Os demais módulos e recursos embutidos foram preservados.
+
 ## Atualização — 24/10/2026
 
 - Compatibilidade com ReShade 6.5.1/API 17 pelo callback oficial, mantendo o caminho COM quando o ReShade não está carregado.

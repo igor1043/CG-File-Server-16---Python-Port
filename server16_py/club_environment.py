@@ -38,7 +38,9 @@ def prepare_runtime(game):
 
 def worker(game,kind,pid):
     os.environ['SERVER16_GAME_ROOT']=str(game)
-    source=game/'ModCarrerMode/source/club_environment';runtime=game/'ModCarrerMode/runtime/club_environment'
+    # A native plugin can start a worker before the supervisor, including on a
+    # clean installation. Never assume its generated runtime already exists.
+    source,runtime=prepare_runtime(game)
     sys.path[:0]=[str(source),str(source/'vendor'),str(runtime/'room'),str(runtime/'preview'),str(runtime/'bank')]
     sys.argv=[str(runtime/kind/ENTRIES[kind]),'--watch','--pid',str(pid)]
     runpy.run_path(sys.argv[0],run_name='__main__')

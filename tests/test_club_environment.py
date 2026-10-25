@@ -1,7 +1,7 @@
-import tempfile,unittest
+import tempfile,unittest,sys,os
 from pathlib import Path
 from unittest.mock import patch
-from server16_py.club_environment import prepare_runtime
+from server16_py.club_environment import prepare_runtime,worker,ENTRIES
 
 class PortableRuntimeTest(unittest.TestCase):
     def test_paths_with_spaces_and_loan_upgrade_preserves_private_ledger(self):
@@ -17,3 +17,29 @@ class PortableRuntimeTest(unittest.TestCase):
             (r/'bank/runtime'/('a'*20)/'pending.json').write_text('newer ledger');prepare_runtime(game)
             self.assertEqual((r/'bank/runtime'/('a'*20)/'pending.json').read_text(),'newer ledger')
             self.assertFalse((source/'bank/pending.json').exists())
+
+    def fixture(self,game):
+        for group,entry in ENTRIES.items():
+            path=game/'ModCarrerMode/source/club_environment'/group/entry
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text("from pathlib import Path\nimport sys\nPath(__file__).with_suffix('.called').write_text('|'.join(sys.argv[1:]),encoding='utf8')\n",encoding='utf8')
+
+    def test_direct_worker_prepares_missing_runtime_before_entry(self):
+        for kind,entry in ENTRIES.items():
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory(prefix='FIFA inicialização ') as temp:
+                game=Path(temp);self.fixture(game)
+                self.assertFalse((game/'ModCarrerMode/runtime/club_environment').exists())
+                with patch.dict(os.environ,{},clear=False),patch.object(sys,'path',list(sys.path)),patch.object(sys,'argv',list(sys.argv)):
+                    worker(game,kind,123)
+                called=game/'ModCarrerMode/runtime/club_environment'/kind/Path(entry).with_suffix('.called')
+                self.assertEqual(called.read_text(encoding='utf8'),'--watch|--pid|123')
+
+    def test_direct_worker_recovers_deleted_entry_and_preserves_ledger(self):
+        with tempfile.TemporaryDirectory(prefix='FIFA recover ') as temp:
+            game=Path(temp);self.fixture(game);_,runtime=prepare_runtime(game)
+            ledger=runtime/'bank/runtime/ledger.sqlite';ledger.write_bytes(b'private-contract')
+            (runtime/'preview/prepare.py').unlink()
+            with patch.dict(os.environ,{},clear=False),patch.object(sys,'path',list(sys.path)),patch.object(sys,'argv',list(sys.argv)):
+                worker(game,'preview',123)
+            self.assertTrue((runtime/'preview/prepare.called').exists())
+            self.assertEqual(ledger.read_bytes(),b'private-contract')
