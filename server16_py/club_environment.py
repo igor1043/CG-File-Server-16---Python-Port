@@ -4,7 +4,7 @@ Worker mode is dispatched before splash/UI initialization. Only the bank
 worker processes budget changes, after its existing scoped UI validations.
 """
 from pathlib import Path
-import argparse,ctypes,hashlib,json,os,runpy,shutil,subprocess,sys,time
+import argparse,contextlib,ctypes,hashlib,json,os,runpy,shutil,subprocess,sys,time,traceback
 
 ENTRIES={'room':'prepare_native_room_components_r46_20261022.py','bank':'watch_r57.py','preview':'prepare.py'}
 
@@ -43,7 +43,17 @@ def worker(game,kind,pid):
     source,runtime=prepare_runtime(game)
     sys.path[:0]=[str(source),str(source/'vendor'),str(runtime/'room'),str(runtime/'preview'),str(runtime/'bank')]
     sys.argv=[str(runtime/kind/ENTRIES[kind]),'--watch','--pid',str(pid)]
-    runpy.run_path(sys.argv[0],run_name='__main__')
+    # A windowed frozen process can expose an invalid inherited stdout handle.
+    # Diagnostic prints must never abort a financial or asset operation.
+    log=runtime/kind/'runtime/service.log'
+    if os.environ.get('SERVER16_CLUB_BROWSER_WORKER')=='1':log=game/'ModCarrerMode/runtime/club_browser'/str(pid)/'service.log'
+    elif os.environ.get('SERVER16_TRANSFER_MARKET_WORKER')=='1':log=runtime/'market/service.log'
+    log.parent.mkdir(parents=True,exist_ok=True)
+    with log.open('a',encoding='utf8',buffering=1) as stream,contextlib.redirect_stdout(stream),contextlib.redirect_stderr(stream):
+        print('WORKER_START',json.dumps(dict(kind=kind,game=str(game),game_pid=pid,helper_pid=os.getpid()),ensure_ascii=True))
+        try:runpy.run_path(sys.argv[0],run_name='__main__')
+        except BaseException:
+            traceback.print_exc();raise
 
 def supervise(game,pid):
     import psutil

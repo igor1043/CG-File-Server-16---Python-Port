@@ -4,9 +4,15 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.15 · **Atualizado em:** 24/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.15 · **Atualizado em:** 25/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
+
+### Auxiliares sem console — 25/10/2026
+
+Cada auxiliar da carreira abre seu próprio `service.log` antes de executar o leitor/preparador. Isso impede que `OSError: [Errno 22] Invalid argument` em um stdout herdado interrompa a operação. Logs de titulares ficam em `ModCarrerMode/runtime/club_browser/<PID>/service.log`; os demais ficam no runtime de seu módulo. Passaram quatro regressões de bootstrap, incluindo stdout inválido, runtime ausente e preservação do livro financeiro.
+
+O executável corrigido é distribuído na branch FIFA Friends V12, junto da câmera do vestiário que aceita estados 1/13 e do iniciador independente dos titulares. O ZIP de assets permanece igual. A validação visual do PC do destinatário continua necessária.
 
 ### Correção de primeira inicialização — 24/10/2026
 

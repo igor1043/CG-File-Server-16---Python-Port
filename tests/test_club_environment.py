@@ -4,6 +4,19 @@ from unittest.mock import patch
 from server16_py.club_environment import prepare_runtime,worker,ENTRIES
 
 class PortableRuntimeTest(unittest.TestCase):
+    def test_invalid_inherited_stdout_cannot_abort_the_worker(self):
+        class BrokenStream:
+            def write(self,*args):raise OSError(22,'Invalid argument')
+            def flush(self):pass
+        with tempfile.TemporaryDirectory(prefix='FIFA stdout ') as temp:
+            game=Path(temp);self.fixture(game)
+            entry=game/'ModCarrerMode/source/club_environment/preview/prepare.py'
+            entry.write_text("print('REQUEST must reach the log',flush=True)\n"+entry.read_text(),encoding='utf8')
+            with patch.dict(os.environ,{},clear=False),patch.object(sys,'path',list(sys.path)),patch.object(sys,'argv',list(sys.argv)),patch.object(sys,'stdout',BrokenStream()),patch.object(sys,'stderr',BrokenStream()):
+                worker(game,'preview',123)
+            runtime=game/'ModCarrerMode/runtime/club_environment/preview'
+            self.assertTrue((runtime/'prepare.called').is_file())
+            self.assertIn('REQUEST must reach the log',(runtime/'runtime/service.log').read_text(encoding='utf8'))
     def test_paths_with_spaces_and_loan_upgrade_preserves_private_ledger(self):
         with tempfile.TemporaryDirectory(prefix='FIFA portable ') as temp:
             game=Path(temp);source=game/'ModCarrerMode/source/club_environment'
