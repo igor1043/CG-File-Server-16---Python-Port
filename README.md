@@ -6,6 +6,8 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 **Versão:** 0.2.15 · **Atualizado em:** 24/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
+A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
+
 ### Correção de primeira inicialização — 24/10/2026
 
 Auxiliares iniciados diretamente por plugins agora preparam o runtime antes de executar sua entrada. Isso corrige `FileNotFoundError` em `ModCarrerMode/runtime/club_environment/preview/prepare.py` quando o supervisor ainda não iniciou ou a cópia gerada foi removida. A sincronização preserva contratos e dados da carreira.
