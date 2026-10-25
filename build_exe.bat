@@ -43,6 +43,10 @@ call "scripts\setup_python32.bat"
 if errorlevel 1 exit /b 1
 
 echo [4/4] Running PyInstaller ...
+if not defined SERVER16_BOOTLOADER_DIR if not exist "build\archive-bootloader\pyinstaller-6.20.0\PyInstaller\bootloader\Windows-64bit-intel\runw.exe" (
+  python -X utf8 "scripts\build_archive_bootloader.py"
+  if errorlevel 1 exit /b 1
+)
 pyinstaller ^
   --noconfirm ^
   --clean ^

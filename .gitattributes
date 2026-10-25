@@ -1,0 +1,2 @@
+# Preserve the upstream license verbatim, including its intentional blank lines.
+tools/pyinstaller-COPYING.txt -text whitespace=-blank-at-eol

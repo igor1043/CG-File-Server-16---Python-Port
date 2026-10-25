@@ -7,6 +7,17 @@ from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 project_root = Path(SPECPATH)
 sys.path.insert(0,str(project_root/'vendor'))
+sys.path.insert(0,str(project_root/'scripts'))
+from frozen_payload import bridge_files
+import os
+
+class ServerEXE(EXE):
+    def _bootloader_file(self,exe,extension=None):
+        filename=Path(super()._bootloader_file(exe,extension)).name
+        directory=Path(os.environ.get('SERVER16_BOOTLOADER_DIR',project_root/'build/archive-bootloader/pyinstaller-6.20.0/PyInstaller/bootloader/Windows-64bit-intel'))
+        target=directory/filename
+        if not target.is_file():raise SystemExit('Build the fixed loader first: python scripts/build_archive_bootloader.py')
+        return str(target)
 gamepad_datas=collect_data_files('vgamepad')
 gamepad_binaries=collect_dynamic_libs('vgamepad')
 if (project_root/'bin/HidHide').is_dir():
@@ -14,7 +25,7 @@ if (project_root/'bin/HidHide').is_dir():
 bridge_datas = []
 python32_dir = project_root / 'bin' / 'python32'
 if python32_dir.is_dir():
-    bridge_datas.append((str(python32_dir), 'bin/python32'))
+    bridge_datas.extend(bridge_files(python32_dir))
 
 a = Analysis(
     ['main.py'],
@@ -64,7 +75,7 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-exe = EXE(
+exe = ServerEXE(
     pyz,
     a.scripts,
     a.binaries,

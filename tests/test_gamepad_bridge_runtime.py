@@ -392,6 +392,7 @@ class IdenticalPadsWatchTests(unittest.TestCase):
 
     def _runtime(self, slots: list[gbr.SlotState]) -> gbr.GamepadBridgeRuntime:
         runtime = gbr.GamepadBridgeRuntime.__new__(gbr.GamepadBridgeRuntime)
+        runtime.app = SimpleNamespace(log=mock.Mock())
         runtime._lock = threading.Lock()
         runtime._slots = slots
         runtime._raw_states = {}

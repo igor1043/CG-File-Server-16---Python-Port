@@ -83,20 +83,21 @@ class StartupDiagnosticsTests(unittest.TestCase):
                         child.terminate(); child.wait(timeout=3)
 
     def test_windows_file_version_is_read_without_loading_game_dll(self):
-        info=version_info(sys.executable)
+        binary=Path(os.environ['WINDIR'])/'System32/kernel32.dll'
+        info=version_info(binary)
         self.assertIn('version',info)
-        self.assertIn('sha256',file_evidence(sys.executable))
+        self.assertIn('sha256',file_evidence(binary))
 
     def test_module_event_keeps_module_name_and_file_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             session=StartupSession(root/'report',os.getpid(),root/'fifa16.exe',{'files':[]},'test')
-            module={'name':'python.exe','path':sys.executable,'base':'0x1000','image_bytes':1024}
+            module={'name':'kernel32.dll','path':str(Path(os.environ['WINDIR'])/'System32/kernel32.dll'),'base':'0x1000','image_bytes':1024}
             with patch('server16_py.startup_diagnostics.module_snapshot',return_value=[module]):
                 session.capture_modules({})
             event=json.loads((root/'report/timeline.jsonl').read_text().splitlines()[0])
             self.assertEqual(event['event'],'module_loaded')
-            self.assertEqual(event['name'],'python.exe')
+            self.assertEqual(event['name'],'kernel32.dll')
             self.assertIn('version',event)
 
     def test_app_pending_reader_is_counted_and_recovery_preserves_transition(self):

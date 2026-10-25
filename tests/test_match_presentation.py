@@ -76,7 +76,7 @@ class PresentationTests(unittest.TestCase):
                 selector.handle(16, 1)
                 self.assertEqual(panel.store.load(), PresentationOptions(True, True, True, False))
                 self.assertFalse(selector.prematch_panel.crowd)
-                selector.handle(16, 5)  # Back follows the narration card in the current hub.
+                selector.handle(7, 0)  # Original Esc/B back action in the public hub.
                 self.assertFalse(selector.opened)
             finally:
                 selector.shutdown()

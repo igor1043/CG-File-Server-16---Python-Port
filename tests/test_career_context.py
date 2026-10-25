@@ -64,6 +64,8 @@ class CareerContextTests(unittest.TestCase):
                 selector.shared.events[0].kind=1;selector.shared.write_index=1
                 selector.tick()
                 self.assertEqual(selector.shared.enabled,3)
+                self.assertIsNotNone(selector.frontend_panel)
+                selector.frontend_panel.activate(3)
                 self.assertIsNotNone(selector.career_panel)
                 selector.close()
                 # The same FluxHub while a fixture is active belongs to the

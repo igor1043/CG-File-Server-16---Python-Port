@@ -8,6 +8,16 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
 
+### Revisão do carregador — 25/10/2026
+
+O erro `Failed to extract ...: failed to open archive file!` indica falha ao reabrir o EXE de origem durante a extração. O carregador PyInstaller 6.20.0 agora repete essa leitura por até cinco segundos, sem espera quando a abertura funciona. A causa externa do bloqueio transitório não foi determinada. Não há tentativa infinita nem instalação de dependências na máquina do jogador.
+
+`scripts/frozen_payload.py` retira pip, ferramentas de construção e bytecode avulso da ponte x86. Python.NET, CFFI e suas dependências de execução são preservados. A ponte filtrada leu 1.731 clubes da base real. O executável passou em três aberturas isoladas, incluindo duas simultâneas, e no auxiliar real dos onze titulares. Os módulos Python e recursos retidos no pacote permaneceram byte a byte iguais.
+
+Para reproduzir, execute `python scripts/build_archive_bootloader.py` numa sessão MSVC x64 e depois `build_exe.bat`. O script obtém a versão oficial fixada por SHA-256, aplica `tools/server16_archive_retry.h` e compila sob `build/`; a licença original fica em `tools/pyinstaller-COPYING.txt`. `Server16Python.spec` exige o carregador corrigido. `scripts/repack_bootloader.py` atualiza somente carregador e arquivos de desenvolvimento de um EXE existente, conferindo a igualdade de todo o restante. Os testes ficam em `tests/native_archive_retry_test.cpp` e `tests/test_frozen_payload.py`.
+
+O V12 inclui o módulo nativo de placares de jogos paralelos, confirmado visualmente em 25/10/2026. Ele pertence ao mod e preserva a narração selecionada no Server. A entrega conjunta usa a branch `fifa-friends-v12` do V12 e seu complemento de 36 assets; o executável atualizado é publicado nessa branch. A suíte pública isolada e os limites de cobertura estão documentados em `ModCarrerMode/docs/RELEASE_20261025.md` no repositório do V12.
+
 ### Auxiliares sem console — 25/10/2026
 
 Cada auxiliar da carreira abre seu próprio `service.log` antes de executar o leitor/preparador. Isso impede que `OSError: [Errno 22] Invalid argument` em um stdout herdado interrompa a operação. Logs de titulares ficam em `ModCarrerMode/runtime/club_browser/<PID>/service.log`; os demais ficam no runtime de seu módulo. Passaram quatro regressões de bootstrap, incluindo stdout inválido, runtime ausente e preservação do livro financeiro.
