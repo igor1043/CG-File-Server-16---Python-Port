@@ -1,6 +1,7 @@
 import tempfile
 import threading
 import unittest
+import subprocess
 from pathlib import Path
 from unittest.mock import Mock, patch
 from server16_py.d3d_injector import D3DOverlayInjector
@@ -43,8 +44,18 @@ class OverlayReattachTests(unittest.TestCase):
                 self.assertFalse(instance.inject(123))
                 instance._do_inject.assert_not_called()
             with patch('server16_py.d3d_injector._loaded_overlay_path',return_value=None):
-                self.assertTrue(instance.inject(123))
-                instance._do_inject.assert_called_once_with(123)
+                self.assertFalse(instance.inject(123))
+                instance._do_inject.assert_not_called()
+
+    def test_missing_plugin_never_starts_a_process_even_if_old_helper_exists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);source=root/'cgfs16_overlay.dll';source.write_bytes(b'plugin')
+            (root/'cgfs16_inject.exe').write_bytes(b'retired helper')
+            instance=self.injector(source)
+            with patch('server16_py.d3d_injector._loaded_overlay_path',return_value=None),patch.object(subprocess,'run') as run:
+                self.assertTrue(instance.is_ready())
+                for _ in range(4):self.assertFalse(instance.inject(123))
+                run.assert_not_called();instance._do_inject.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

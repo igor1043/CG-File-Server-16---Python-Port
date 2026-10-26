@@ -1,12 +1,12 @@
 """
 d3d_injector.py
 ───────────────
-Manages the D3D overlay DLL injection into FIFA 16 and the shared-memory
+Connects to the D3D overlay plugin already loaded by FIFA and the shared-memory
 channel used to control what the overlay displays.
 
 Usage (from app.py):
     injector = D3DOverlayInjector(dll_path="runtime/cgfs16_overlay.dll")
-    injector.inject(fifa_pid)       # call once when FIFA is detected
+    injector.inject(fifa_pid)       # compatibility name; attach only, never inject
     injector.show("Bernabéu", "Copying files...", 0.0)
     injector.update(42.0, "Copying files...")
     injector.hide()
@@ -107,34 +107,8 @@ def _configure_kernel32() -> ctypes.WinDLL:
     LPVOID  = ctypes.c_void_p
     SIZE_T  = ctypes.c_size_t
 
-    k.OpenProcess.argtypes  = [DWORD, BOOL, DWORD]
-    k.OpenProcess.restype   = HANDLE
-
-    k.VirtualAllocEx.argtypes = [HANDLE, LPVOID, SIZE_T, DWORD, DWORD]
-    k.VirtualAllocEx.restype  = LPVOID
-
-    k.WriteProcessMemory.argtypes = [
-        HANDLE, LPVOID, LPVOID, SIZE_T, ctypes.POINTER(SIZE_T)]
-    k.WriteProcessMemory.restype  = BOOL
-
-    k.VirtualFreeEx.argtypes  = [HANDLE, LPVOID, SIZE_T, DWORD]
-    k.VirtualFreeEx.restype   = BOOL
-
-    k.CreateRemoteThread.argtypes = [
-        HANDLE, LPVOID, SIZE_T, LPVOID, LPVOID, DWORD, ctypes.POINTER(DWORD)]
-    k.CreateRemoteThread.restype  = HANDLE
-
-    k.WaitForSingleObject.argtypes = [HANDLE, DWORD]
-    k.WaitForSingleObject.restype  = DWORD
-
-    k.CloseHandle.argtypes  = [HANDLE]
-    k.CloseHandle.restype   = BOOL
-
-    k.GetModuleHandleW.argtypes = [LPCWSTR]
-    k.GetModuleHandleW.restype  = wintypes.HMODULE
-
-    k.GetProcAddress.argtypes = [wintypes.HMODULE, ctypes.c_char_p]
-    k.GetProcAddress.restype  = LPVOID
+    k.CloseHandle.argtypes = [HANDLE]
+    k.CloseHandle.restype = BOOL
 
     k.CreateFileMappingW.argtypes = [
         HANDLE, LPVOID, DWORD, DWORD, DWORD, LPCWSTR]
@@ -156,7 +130,11 @@ _k32 = _configure_kernel32()
 # D3DOverlayInjector
 # ─────────────────────────────────────────────────────────────────────────────
 class D3DOverlayInjector:
-    """Injects cgfs16_overlay.dll into FIFA 16 and drives it via shared memory."""
+    """Controls the installed overlay plugin through shared memory.
+
+    The game-owned mod host loads the DLL at startup. Server16 only verifies
+    its module inventory; it never starts a loader in another process.
+    """
 
     def __init__(self, dll_path: str | Path) -> None:
         self._dll_path     = str(Path(dll_path).resolve())
@@ -172,10 +150,8 @@ class D3DOverlayInjector:
     # ── Public ────────────────────────────────────────────────────────────────
 
     def is_ready(self) -> bool:
-        """True if shared memory is mapped, the DLL exists, and the injector exe exists."""
-        return (self._ready
-                and os.path.isfile(self._dll_path)
-                and self._find_inject_exe() is not None)
+        """True if the shared channel and the expected plugin build are available."""
+        return self._ready and os.path.isfile(self._dll_path)
 
     def is_injected(self, pid: int = 0) -> bool:
         if pid:
@@ -183,7 +159,7 @@ class D3DOverlayInjector:
         return self._injected_pid != 0
 
     def inject(self, pid: int) -> bool:
-        """Inject the DLL into *pid*.  Safe to call multiple times for the same pid."""
+        """Attach to an existing plugin. Never load code into an external PID."""
         if not self._ready:
             log.error("D3DOverlay: shared memory not ready")
             return False
@@ -206,10 +182,8 @@ class D3DOverlayInjector:
             except (OSError, RuntimeError) as exc:
                 log.error('D3DOverlay: existing-module check failed: %s', exc)
                 return False
-            ok = self._do_inject(pid)
-            if ok:
-                self._injected_pid = pid
-            return ok
+            log.info('D3DOverlay: plugin not loaded in pid=%d; install the native mod and restart FIFA', pid)
+            return False
 
     def show(self, stadium_name: str, detail: str = "", progress: float = 0.0,
              image_path: str = "") -> None:
@@ -327,68 +301,3 @@ class D3DOverlayInjector:
         self._ready = True
         log.debug("D3DOverlay: shared memory opened at 0x%X, size=%d",
                   ptr, ctypes.sizeof(_OverlayShared))
-
-    def _find_inject_exe(self) -> str | None:
-        """Locate the x64 injector helper exe (next to DLL or in runtime/)."""
-        dll_p = Path(self._dll_path)
-        candidates = [
-            dll_p.parent / "cgfs16_inject.exe",           # e.g. bin/
-            dll_p.parent.parent / "runtime" / "cgfs16_inject.exe",
-        ]
-        for c in candidates:
-            if c.exists():
-                return str(c)
-        return None
-
-    def _do_inject(self, pid: int) -> bool:
-        """Inject via the x64 cgfs16_inject.exe helper into the x64 game.
-
-        This is independent of the 32-bit Python/database bridge. The helper
-        checks target architecture before writing to the game process.
-        """
-        import subprocess
-
-        injector = self._find_inject_exe()
-        if not injector:
-            log.error("D3DOverlay: cgfs16_inject.exe not found "
-                      "(run build.bat to compile it)")
-            return False
-
-        log.debug("D3DOverlay: running injector: %s %s %s",
-                  injector, pid, self._dll_path)
-        try:
-            result = subprocess.run(
-                [injector, str(pid), self._dll_path],
-                capture_output=True,
-                timeout=12,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except subprocess.TimeoutExpired:
-            log.error("D3DOverlay: cgfs16_inject.exe timed out")
-            return False
-        except Exception as exc:
-            log.error("D3DOverlay: failed to run injector: %s", exc)
-            return False
-
-        # The C exe writes narrow (ANSI) text to stderr/stdout even though
-        # it uses fwprintf — on Windows pipes the CRT converts wide chars
-        # to the ANSI codepage, so decode with 'mbcs' (system ANSI codepage).
-        def _decode(b: bytes) -> str:
-            for enc in ('mbcs', 'latin-1', 'utf-8'):
-                try:
-                    return b.decode(enc, errors='replace').strip()
-                except Exception:
-                    continue
-            return repr(b)
-
-        stdout = _decode(result.stdout)
-        stderr = _decode(result.stderr)
-        log.debug("D3DOverlay: inject helper stdout=%r stderr=%r rc=%d",
-                  stdout, stderr, result.returncode)
-        if result.returncode != 0:
-            log.error("D3DOverlay: inject helper failed (rc=%d): %s",
-                      result.returncode, stderr or stdout)
-            return False
-
-        log.info("D3DOverlay: DLL injected into pid %d (%s)", pid, stdout)
-        return True

@@ -4,9 +4,17 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.15 · **Atualizado em:** 25/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.19 · **Atualizado em:** 26/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
+
+## Entrega — 26/10/2026 (0.2.19)
+
+O host nativo do FIFA carrega overlay, câmera e propostas. O Server se conecta aos canais existentes; `cgfs16_inject.exe` deixou de ser chamado e de acompanhar o executável congelado. Atualize também as DLLs e `mods/enabled.txt` pela branch do FIFA Friends V12. Nenhuma exclusão do Defender foi criada; não há garantia de ausência de alertas na máquina do destinatário.
+
+O V12 recebe comandos diretos do vestiário, prontidão sem recargas repetidas, melhorias de quadro/iluminação e da prévia da partida, além da pose autoral dos onze. Os fontes do Server e seus módulos embutidos no EXE foram conferidos. Código desta branch e executável pronto na branch `fifa-friends-v12` do [V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
+
+Use o complemento **FIFA-Friends-Assets-Complementares-20261026.zip** do V12 (651 assets). Se já tem o complemento completo de 25/10, basta o delta de 26/10 para a pose, junto do código novo. Não copie runtimes, SQL financeiro ou saves do desenvolvedor. A bancada de cenas/IA é um ZIP opcional separado, executado fora do FIFA. [Notas detalhadas](docs/LOCAL_HOTFIX_20261026.md).
 
 ### Revisão do carregador — 25/10/2026
 
@@ -16,7 +24,7 @@ O erro `Failed to extract ...: failed to open archive file!` indica falha ao rea
 
 Para reproduzir, execute `python scripts/build_archive_bootloader.py` numa sessão MSVC x64 e depois `build_exe.bat`. O script obtém a versão oficial fixada por SHA-256, aplica `tools/server16_archive_retry.h` e compila sob `build/`; a licença original fica em `tools/pyinstaller-COPYING.txt`. `Server16Python.spec` exige o carregador corrigido. `scripts/repack_bootloader.py` atualiza somente carregador e arquivos de desenvolvimento de um EXE existente, conferindo a igualdade de todo o restante. Os testes ficam em `tests/native_archive_retry_test.cpp` e `tests/test_frozen_payload.py`.
 
-O V12 inclui o módulo nativo de placares de jogos paralelos, confirmado visualmente em 25/10/2026. Ele pertence ao mod e preserva a narração selecionada no Server. A entrega conjunta usa a branch `fifa-friends-v12` do V12 e seu complemento de 36 assets; o executável atualizado é publicado nessa branch. A suíte pública isolada e os limites de cobertura estão documentados em `ModCarrerMode/docs/RELEASE_20261025.md` no repositório do V12.
+O V12 inclui o módulo nativo de placares de jogos paralelos, confirmado visualmente em 25/10/2026. Ele pertence ao mod e preserva a narração selecionada no Server. A entrega conjunta usa a branch `fifa-friends-v12` do V12 e seu complemento de assets; o executável atualizado é publicado nessa branch. A suíte pública isolada e os limites de cobertura estão documentados em `ModCarrerMode/docs/RELEASE_20261025.md` no repositório do V12.
 
 ### Auxiliares sem console — 25/10/2026
 

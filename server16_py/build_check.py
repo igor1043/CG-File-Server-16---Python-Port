@@ -17,9 +17,11 @@ def run(output):
     for name in modules:
         try:importlib.import_module(name);result['modules'][name]='ok'
         except Exception as e:result['modules'][name]=str(e);result['ok']=False
-    for name in ('cgfs16_overlay.dll','cgfs16_inject.exe','fifa16_narration.dll','server16_first_person_v14.dll','FifaLibrary16.dll','career_jobs_runtime.dll'):
+    for name in ('cgfs16_overlay.dll','fifa16_narration.dll','server16_first_person_v14.dll','FifaLibrary16.dll','career_jobs_runtime.dll'):
         p=root/'bin'/name;result['binaries'][name]=p.exists()
         if not p.exists():result['ok']=False
+    result['external_overlay_injector_absent']=not (root/'bin/cgfs16_inject.exe').exists()
+    result['ok']=result['ok'] and result['external_overlay_injector_absent']
     result['gamepad_package_present']=importlib.util.find_spec('vgamepad') is not None
     result['vigem_client_present']=(root/'vgamepad/win/vigem/client/x64/ViGEmClient.dll').exists()
     result['vigem_installer_present']=(root/'vgamepad/win/vigem/install/x64/ViGEmBusSetup_x64.msi').exists()

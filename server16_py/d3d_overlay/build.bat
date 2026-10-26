@@ -64,22 +64,5 @@ if %ERRORLEVEL% neq 0 (
 echo BUILD OK: %OUT%
 echo.
 
-REM ── Compile injector EXE (x86) ──────────────────────────────────────────────
-set "SRC2=%SRCDIR%cgfs16_inject.cpp"
-set "OUT2=%OUTDIR%\cgfs16_inject.exe"
-set "PDB2=%OUTDIR%\cgfs16_inject.pdb"
-echo Building %OUT2% ...
-cl /nologo /O2 /W3 /EHsc /std:c++17 ^
-    "%SRC2%" ^
-    /Fe:"%OUT2%" ^
-    /Fd:"%PDB2%" ^
-    /link kernel32.lib
-
-if %ERRORLEVEL% neq 0 (
-    echo.
-    echo BUILD FAILED on injector EXE (exit code %ERRORLEVEL%)
-    exit /b %ERRORLEVEL%
-)
-echo BUILD OK: %OUT2%
-echo.
+REM The overlay is loaded by the FIFA plugin host. No external injector is built.
 exit /b 0

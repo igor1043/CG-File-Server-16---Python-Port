@@ -99,17 +99,13 @@ class NarrationRuntime:
         if pid and game_ready and pid!=self.pid and not self._injecting and time.monotonic()>=self.next_inject:
             resources=Path(getattr(self.app,'resource_dir',self.app.base_dir))
             dll=resources/'bin/fifa16_narration.dll'
-            helper=resources/'bin/cgfs16_inject.exe'
             self._injecting=True
             self.next_inject=time.monotonic()+5
             def connect(target_pid=pid):
                 success=False;detail=''
                 try:
                     if narration_dll_loaded(target_pid):success=True
-                    elif dll.exists() and helper.exists():
-                        run=subprocess.run([str(helper),str(target_pid),str(dll)],capture_output=True,timeout=8,creationflags=0x08000000)
-                        success=run.returncode==0
-                        detail=run.stderr.decode(errors='replace')
+                    else:detail='Plugin de narração não carregado; seletor experimental indisponível nesta instalação.'
                 except (OSError,subprocess.TimeoutExpired) as exc:detail=str(exc)
                 finally:self._inject_results.put((target_pid,success,detail))
             threading.Thread(target=connect,name='narration-connect',daemon=True).start()

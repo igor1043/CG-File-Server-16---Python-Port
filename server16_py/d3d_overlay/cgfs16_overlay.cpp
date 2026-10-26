@@ -1020,6 +1020,7 @@ static DWORD WINAPI HookThread(LPVOID) {
     selector_initialize(SelectorLog);
     Log("[HookThread] started pid=%lu", GetCurrentProcessId());
     Sleep(500);
+    if (InterlockedCompareExchange(&g_shutdown,0,0)) return 0;
     if (HMODULE reshade=FindReShade()) {
         if (!RegisterReShade(reshade))
             Log("[HookThread] ReShade API unavailable; graphics hooks left untouched");
@@ -1090,13 +1091,21 @@ static DWORD WINAPI HookThread(LPVOID) {
 // ---------------------------------------------------------------------------
 // DllMain
 // ---------------------------------------------------------------------------
-BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
-    if (reason == DLL_PROCESS_ATTACH) {
-        g_ownModule=hInst;
-        DisableThreadLibraryCalls(hInst);
+static volatile LONG g_pluginStartRequested=0,g_pluginStarted=0;
+extern "C" __declspec(dllexport) unsigned WINAPI Fifa16ModGetApiVersion(){return 1;}
+extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStart(const char*){
+    if (InterlockedCompareExchange(&g_pluginStartRequested,1,0)) return g_pluginStarted!=0;
+    auto image=reinterpret_cast<const unsigned char*>(GetModuleHandleW(nullptr));
+    const auto dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+    if (dos->e_magic!=IMAGE_DOS_SIGNATURE) return FALSE;
+    const auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+dos->e_lfanew);
+    if (nt->Signature!=IMAGE_NT_SIGNATURE || nt->FileHeader.TimeDateStamp!=0x577de45c) return FALSE;
+    HMODULE pin=nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+        reinterpret_cast<LPCWSTR>(&Fifa16ModStart),&pin)) return FALSE;
         InitializeCriticalSection(&g_drawCs);
         InitLog();
-        Log("[DllMain] ATTACH pid=%lu", GetCurrentProcessId());
+        Log("[ModHost] START pid=%lu", GetCurrentProcessId());
 
         g_hMap=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,
             PAGE_READWRITE,0,sizeof(OverlayShared),SHMEM_NAME);
@@ -1106,10 +1115,20 @@ BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
         Log("[DllMain] shmem hMap=%p data=%p visible=%d",
             g_hMap,g_data,g_data?(int)g_data->visible:-1);
 
+        InterlockedExchange(&g_pluginStarted,1);
         HANDLE ht=CreateThread(nullptr,0,HookThread,nullptr,0,nullptr);
         if (ht) CloseHandle(ht);
 
-    } else if (reason==DLL_PROCESS_DETACH) {
+    return TRUE;
+}
+extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStop(){
+    InterlockedExchange(&g_shutdown,1);return TRUE;
+}
+BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {
+    if (reason==DLL_PROCESS_ATTACH) {
+        g_ownModule=hInst;
+        DisableThreadLibraryCalls(hInst);
+    } else if (reason==DLL_PROCESS_DETACH && g_pluginStarted) {
         InterlockedExchange(&g_shutdown,1);
         // At process exit render threads may already be gone. Never wait on a
         // render lock or call another graphics DLL while holding the loader lock.

@@ -87,19 +87,7 @@ class CareerJobsRuntime:
                 # older DLL or a failed initialization still owns game hooks.
                 if _loaded_runtime_paths(pid):
                     raise RuntimeError('A integração anterior ainda está carregada. Reinicie o FIFA e o Server.')
-                base=Path(getattr(self.app,'exedir',getattr(self.app,'base_dir',Path(__file__).resolve().parents[1])))
-                roots=[base/'ModCarrerMode',Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1])),
-                       Path(__file__).resolve().parents[1]]
-                dll=next((root/'bin/career_jobs_runtime.dll' for root in roots if (root/'bin/career_jobs_runtime.dll').is_file()),None)
-                helper=next((root/'bin/cgfs16_inject.exe' for root in roots if (root/'bin/cgfs16_inject.exe').is_file()),None)
-                if not dll or not helper:raise RuntimeError('Integração de vagas em memória não instalada.')
-                # Mapping reconnects after a Server restart; it never installs
-                # another copy over hooks already owned by this FIFA process.
-                result=run_owned_reader([str(helper),str(pid),str(dll.resolve())],capture_output=True,
-                    text=True,encoding='utf8',errors='replace',timeout=15,
-                    creationflags=getattr(__import__('subprocess'),'CREATE_NO_WINDOW',0))
-                if result.returncode:raise RuntimeError((result.stderr or result.stdout or 'Falha na integração de vagas.')[-700:])
-                self.app.log('Career native proposals module loaded')
+                raise RuntimeError('Plugin de propostas não carregado. Instale o mod e reinicie o FIFA.')
             except Exception as exc:
                 self.error=str(exc);self.app.log('Career live vacancies unavailable',exc)
             finally:self.injecting=False

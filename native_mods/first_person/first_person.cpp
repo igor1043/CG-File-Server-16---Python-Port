@@ -179,7 +179,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI Start(void* directory){
     (void)directory;if(started)return stopping?0:1;
     image=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));bc=reinterpret_cast<uintptr_t>(GetModuleHandleW(L"BCEnginezf.dll"));
     const auto pe=get<int>(image+0x3c);
-    if(!bc||pe<0||pe>4096||get<unsigned>(image+static_cast<uintptr_t>(pe)+8)!=0x577de45c)return 0;
+    if(pe<0||pe>4096||get<unsigned>(image+static_cast<uintptr_t>(pe)+8)!=0x577de45c)return 0;
+    if(!bc)return 2; // A startup-loaded plugin may precede BCEngine; keep the saved request pending.
     generator=reinterpret_cast<Generator>(bc+0x8a6b0);collect=reinterpret_cast<Collect>(bc+0x5cd20);
     moduleUpdate=reinterpret_cast<Generator>(bc+0x943d0);fixup=reinterpret_cast<Generator>(bc+0x88310);
     if(get<uintptr_t>(bc+0x1254f0)!=reinterpret_cast<uintptr_t>(generator)||get<uintptr_t>(bc+0x1130e0)!=reinterpret_cast<uintptr_t>(collect)||get<uintptr_t>(bc+0x123e40)!=reinterpret_cast<uintptr_t>(moduleUpdate))return 0;
@@ -240,6 +241,17 @@ static DWORD WINAPI controlLoop(void*){
         Sleep(50);
     }
     channel->ready=channel->enabled=0;UnmapViewOfFile(channel);CloseHandle(mapping);return 0;
+}
+// The standard FIFA mod host loads this DLL. Channel requests still own
+// activation; loading the plugin never switches camera mode by itself.
+extern "C" __declspec(dllexport) unsigned WINAPI Fifa16ModGetApiVersion(){return 1;}
+extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStart(const char*){
+    HMODULE pin=nullptr;
+    return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+        reinterpret_cast<LPCWSTR>(&Fifa16ModStart),&pin);
+}
+extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStop(){
+    if(started)Stop(nullptr);else InterlockedExchange(&stopping,1);return TRUE;
 }
 BOOL WINAPI DllMain(HINSTANCE dll,DWORD reason,LPVOID){
     if(reason==DLL_PROCESS_ATTACH){DisableThreadLibraryCalls(dll);HANDLE t=CreateThread(nullptr,0,controlLoop,nullptr,0,nullptr);if(t)CloseHandle(t);else return FALSE;}

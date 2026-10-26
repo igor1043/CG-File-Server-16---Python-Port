@@ -33,7 +33,6 @@ a = Analysis(
     binaries=[
         ('bin\\D3DCOMPILER_47.dll', '.'),
         ('bin\\cgfs16_overlay.dll', 'bin'),
-        ('bin\\cgfs16_inject.exe',  'bin'),
         ('bin\\fifa16_narration.dll', 'bin'),
         ('bin\\server16_first_person_v14.dll', 'bin'),
         ('bin\\FifaLibrary16.dll',  'bin'),

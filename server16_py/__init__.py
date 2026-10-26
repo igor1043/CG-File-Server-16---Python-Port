@@ -1,4 +1,4 @@
-__version__ = "0.2.18"
+__version__ = "0.2.19"
 
 # Release gates: keep unfinished features available in source, outside public UI.
 EXTRA_SCENES_AVAILABLE = True

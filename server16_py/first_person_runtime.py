@@ -167,7 +167,6 @@ class FirstPersonRuntime:
         if (pid and self.shared.requested and not self.shared.ready and not self.injecting
                 and time.monotonic() >= self.next_attempt):
             resources = Path(getattr(self.app, 'resource_dir', self.app.base_dir))
-            helper, dll = resources/'bin/cgfs16_inject.exe', resources/'bin'/DLL_NAME
             self.injecting = True
             self.next_attempt = time.monotonic() + 8
             def connect(target=pid):
@@ -178,13 +177,8 @@ class FirstPersonRuntime:
                         ok = True
                     elif not narration_dll_loaded(target, 'BCEnginezf.dll'):
                         raise OSError('BCEngine ainda não carregou; tentando novamente em breve')
-                    elif not helper.is_file() or not dll.is_file():
-                        raise OSError('Camera DLL or injector missing')
                     else:
-                        result = subprocess.run([str(helper), str(target), str(dll)], capture_output=True,
-                                                timeout=10, creationflags=0x08000000)
-                        ok = result.returncode == 0
-                        detail = result.stderr.decode(errors='replace')
+                        raise OSError('Plugin de câmera não carregado. Instale o mod e reinicie o FIFA.')
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     detail = str(exc)
                 finally:

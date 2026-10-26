@@ -1185,7 +1185,7 @@ class Server16App(tk.Tk):
         return True
 
     def _ensure_d3d_overlay_injected(self) -> bool:
-        """Initialize the stadium overlay and inject it once per FIFA PID."""
+        """Connect to the overlay plugin loaded by the game-owned mod host."""
         if _D3DOverlayInjector is None:
             self.log("D3D overlay: injector module not available (import failed)")
             return False
@@ -1203,7 +1203,7 @@ class Server16App(tk.Tk):
         injector = self._d3d_injector
         if not injector.is_ready():
             self.log(
-                "D3D overlay: shared channel or injector helper is unavailable"
+                "D3D overlay: shared channel or installed plugin build is unavailable"
             )
             return False
         pid = self._resolve_fifa_pid()
@@ -1211,9 +1211,9 @@ class Server16App(tk.Tk):
             return False
         if not injector.is_injected(pid):
             if not injector.inject(pid):
-                self.log("D3D overlay: injection failed")
+                self.log("D3D overlay: native plugin unavailable; restart FIFA after installing the mod")
                 return False
-            self.log(f"D3D stadium overlay injected into FIFA pid {pid}")
+            self.log(f"D3D stadium overlay connected to FIFA pid {pid}")
         return True
 
     def _cancel_stadium_loading_hide(self) -> None:
