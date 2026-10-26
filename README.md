@@ -178,3 +178,11 @@ Use o Server com o **FIFA Friends V12 e seus módulos compatíveis**. Estádios,
 - [Roteiro de uso](docs/ROTEIRO_FIFA_FRIENDS.md).
 - [Guia técnico: arquivos, execução pelos fontes e testes](docs/GUIA_TECNICO.md).
 - [Todas as melhorias do FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
+
+## Atualização 0.2.18
+
+Cenas de técnico e mascote com cinco ângulos frontais, chance de 40% por parada
+e intervalo mínimo de 10 segundos. Revisão do hino/replay, padrão da torcida
+visitante, texturas entre partidas e auxiliares portáteis.
+Consulte o [changelog de 25/10/2026](docs/RELEASE_20261025.md).
+A sala interna experimental do VAR foi retirada; a cabine de campo permanece.

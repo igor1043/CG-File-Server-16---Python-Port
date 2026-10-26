@@ -10,7 +10,7 @@ import test_prematch_panel as prematch_fixtures
 class ExtraScenesTests(unittest.TestCase):
     def setUp(self):
         # Exercise the retained development UI explicitly, outside public gates.
-        for name in ('EXTRA_SCENES_AVAILABLE','NARRATION_PICKER_AVAILABLE'):
+        for name in ('EXTRA_SCENES_AVAILABLE',):
             gate=patch('server16_py.'+name,True)
             gate.start();self.addCleanup(gate.stop)
 
@@ -29,7 +29,8 @@ class ExtraScenesTests(unittest.TestCase):
                 self.assertEqual(panel.store.document().getint('scenes','preview_serial'),0)
                 selector.handle(7,0)
                 self.assertFalse(isinstance(selector.prematch_panel,ExtraScenesPanel))
-                selector.handle(8,(400<<16)|300)
+                rect=next(rect for action,rect,labels in selector.prematch_panel.cards() if action==4)
+                selector.handle(8,(((rect[1]+rect[3])//2)<<16)|((rect[0]+rect[2])//2))
                 self.assertIsInstance(selector.prematch_panel,ExtraScenesPanel)
                 selector.app.lastpagename='game/screens/career/Home'
                 before=panel.store.path.read_bytes();selector.prematch_panel.activate(0)
@@ -55,8 +56,8 @@ class ExtraScenesTests(unittest.TestCase):
             self.assertFalse(store.values()['test_mode'])
             store.update(test_mode=1)
             doc=store.document()
-            self.assertEqual(doc.getint('scenes','chance_percent'),35)
-            self.assertEqual(doc.getint('scenes','cooldown_seconds'),45)
+            self.assertEqual(doc.getint('scenes','chance_percent'),40)
+            self.assertEqual(doc.getint('scenes','cooldown_seconds'),10)
             self.assertTrue(ExtraScenesSettings(d).values()['test_mode'])
             store.update(test_mode=0)
             self.assertFalse(store.values()['test_mode'])
@@ -77,15 +78,16 @@ class ExtraScenesTests(unittest.TestCase):
             store=ExtraScenesSettings(d);store.status_path.parent.mkdir()
             store.status_path.write_text('[runtime]\npid=10\nready=1\nactive=0\nreason=0\n')
             self.assertIn('Reinicie',store.status(11));self.assertIn('prioridade',store.status(10))
-            store.status_path.write_text('[runtime]\nmode=native_muse\npid=10\nready=1\nactive=0\nreason=0\n')
-            self.assertIn('reação nativa',store.status(10))
+            store.status_path.write_text('[runtime]\nmode=native_cut_producer\npid=10\nready=1\nactive=0\nreason=0\n')
+            self.assertIn('cutscenes originais',store.status(10))
 
-    def test_duration_display_preserves_native_selection_weights(self):
+    def test_full_sequence_display_preserves_native_selection_weights(self):
         with tempfile.TemporaryDirectory() as d:
             store=ExtraScenesSettings(d)
-            self.assertEqual(store.values()['duration_ms'],5000)
+            self.assertEqual(store.values()['chance_percent'],40)
+            self.assertEqual(store.values()['cooldown_seconds'],10)
             doc=store.document();doc['scenes']['coach_weight']='3';doc['scenes']['mascot_weight']='1';doc['scenes']['duration_ms']='12000';store.save(doc)
-            self.assertEqual(store.values()['duration_ms'],10000)
+            self.assertNotIn('duration_ms',store.values()) # Retired cap cannot cut a native reaction in half.
             store.update(coach_view=2)
             self.assertEqual(store.document()['scenes']['coach_weight'],'3')
 
@@ -94,8 +96,8 @@ class ExtraScenesTests(unittest.TestCase):
             selector=fixtures.MatchAudioTests().make_selector(Path(d))
             try:
                 selector.open(audio=True);hub=selector.audio_panel
-                self.assertEqual(hub.items()[3][0],'Cenas extras')
-                hub.focus=3;hub.handle(6,0)
+                index=next(i for i,item in enumerate(hub.items()) if item[0]=='Cenas extras')
+                hub.focus=index;hub.handle(6,0)
                 panel=hub.child;self.assertIsInstance(panel,ExtraScenesPanel)
                 panel.focus=1;panel.handle(3,0);self.assertEqual(panel.store.values()['coach_view'],0)
                 panel.handle(2,0);self.assertEqual(panel.store.values()['coach_view'],3)

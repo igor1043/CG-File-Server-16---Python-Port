@@ -99,7 +99,7 @@ class MatchHubPanel:
                 self.page = 'graphics' if index == 1 else 'camera'
             elif index == 3:
                 self.selector.open_gamepads();return
-            elif index == 4 and features.EXTRA_SCENES_AVAILABLE:
+            elif index == next((i for i,item in enumerate(self.items()) if item[0]=='Cenas extras'),-1):
                 self.child = ExtraScenesPanel(self)
             else:
                 self.selector.close();return
@@ -172,7 +172,8 @@ class MatchHubPanel:
             draw.text((40,rect[1]+9),label,font=self.selector.font(18,True),fill=ink,max_width=available)
             draw.text((40,rect[1]+31),detail,font=self.selector.font(13),fill=muted,max_width=available)
             if not self.selector.controller_connected:
-                draw.text((527,rect[1]+21),panel_function_key(index+1),font=self.selector.font(13,True),fill=blue)
+                key='Esc' if index==len(self.items())-1 else panel_function_key(index+1) if index<5 else ''
+                draw.text((527,rect[1]+21),key,font=self.selector.font(13,True),fill=blue)
         message=self.message
         if self.page == 'camera' and not message:message=self.camera().status()
         if self.page=='camera':

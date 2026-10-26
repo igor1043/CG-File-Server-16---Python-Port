@@ -10,7 +10,7 @@ from .stadium_catalog import prematch_page
 
 VIEWS = ('Desligado', 'Corpo inteiro', 'Rosto', 'Alternar')
 DEFAULTS = {'scenes': {'enabled':'1', 'coach_view':'3', 'mascot_view':'3',
-    'cooldown_seconds':'45', 'chance_percent':'35', 'duration_ms':'5000',
+    'cooldown_seconds':'10', 'chance_percent':'40',
     'coach_weight':'1', 'mascot_weight':'1',
     'test_mode':'0',
     'preview_serial':'0', 'preview_actor':'0'},
@@ -45,7 +45,8 @@ class ExtraScenesSettings:
                 'mascot_view':number('mascot_view',3,0,3),
                 'preview_actor':number('preview_actor',0,0,1),
                 'test_mode':bool(number('test_mode',0,0,1)),
-                'duration_ms':number('duration_ms',5000,1000,10000)}
+                'chance_percent':number('chance_percent',40,0,100),
+                'cooldown_seconds':number('cooldown_seconds',10,5,300)}
 
     def update(self, **values):
         ranges={'enabled':(0,1),'coach_view':(0,3),'mascot_view':(0,3),'preview_actor':(0,1),'test_mode':(0,1)}
@@ -83,7 +84,7 @@ class ExtraScenesSettings:
             if not doc.getboolean('runtime','ready'):return 'Aguardando os personagens da partida.'
             if doc.getboolean('runtime','active'):return 'Cena extra em exibição.'
             if doc.getint('runtime','reason')==4:return 'Sem ângulo frontal seguro; cena original preservada.'
-            if doc.get('runtime','mode',fallback='')=='native_muse':return 'Pronto · reação nativa em lateral ou chute para fora.'
+            if doc.get('runtime','mode',fallback='')=='native_cut_producer':return 'Pronto · tomadas durante as cutscenes originais.'
             return 'Pronto · cenas originais têm prioridade.'
         except (OSError, ValueError, configparser.Error):return 'Reinicie o FIFA após instalar o mod.'
 
@@ -99,9 +100,9 @@ class ExtraScenesPanel:
     def items(self):
         v=self.store.values()
         preview=('Teste durante a partida','Entre em campo e use Cenas extras para solicitar uma tomada.') if self.prematch else ('Testar na próxima parada',('Técnico' if v['preview_actor']==0 else 'Mascote')+' · lateral ou chute para fora')
-        return [('Cenas extras',f"Ligadas · até {v['duration_ms']/1000:g} s" if v['enabled'] else 'Desligadas'),
+        return [('Cenas extras','Ligadas · sequência nativa completa' if v['enabled'] else 'Desligadas'),
                 ('Técnico',VIEWS[v['coach_view']]),('Mascote',VIEWS[v['mascot_view']]),
-                preview,('Frequência','Teste · sempre que houver espaço' if v['test_mode'] else 'Normal · exibição ocasional'),
+                preview,('Frequência','Teste · próxima cutscene compatível' if v['test_mode'] else f"Normal · {v['chance_percent']}% · intervalo {v['cooldown_seconds']} s"),
                 ('Voltar','Prévia da partida' if self.prematch else 'Ajustes da partida')]
 
     def targets(self):return [(i,(24,94+i*52,576,136+i*52)) for i in range(6)]
@@ -124,7 +125,7 @@ class ExtraScenesPanel:
                 if adjust:self.store.update(preview_actor=1-v['preview_actor'])
                 else:
                     self.store.preview(v['preview_actor'])
-                    self.message='Solicitado · lateral ou chute para fora, após cenas originais.'
+                    self.message='Solicitado · durante a próxima cutscene compatível.'
             elif index==4:self.store.update(test_mode=int(not v['test_mode']))
             if index!=3:self.message='Opção salva; vale para as próximas tomadas.'
         except (OSError,ValueError) as exc:self.message=str(exc)

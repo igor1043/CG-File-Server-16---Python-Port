@@ -210,7 +210,7 @@ class HubTests(unittest.TestCase):
                 selector.open(audio=True)
                 hub=selector.audio_panel
                 self.assertIsInstance(hub,MatchHubPanel)
-                self.assertEqual([i[0] for i in hub.items()],['Música','Gráficos','Câmera','Controles','Fechar'])
+                self.assertEqual([i[0] for i in hub.items()],['Música','Gráficos','Câmera','Controles','Cenas extras','Fechar'])
                 selector.handle(6,0)
                 self.assertFalse(hub.child.include_cloth)
                 selector.handle(2,0)
@@ -242,7 +242,7 @@ class HubTests(unittest.TestCase):
                     for pad in (False,True):
                         selector.controller_connected=pad
                         image=hub.render()
-                        self.assertEqual(image.size,(1200,980))
+                        self.assertEqual(image.size,(1200,1096))
                     selector.handle(3,0)
                     runtime.configure.assert_called_with(fov=110)
                     runtime.fov=145

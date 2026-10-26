@@ -427,6 +427,8 @@ def restore_native_assets(app) -> int:
     """
     exedir = Path(app.exedir)
     fsw = exedir / "FSW"
+    from .stadium_match_assets import clear_match_routes
+    clear_match_routes(exedir)
     restored = 0
     tree_pairs = (
         (fsw / "stadium", exedir / "data" / "sceneassets"),

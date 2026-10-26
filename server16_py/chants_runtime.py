@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .memory_access import Memory
-from .match_state import GoalClockProgress, outside_match_page, pause_page
+from .match_state import GoalClockProgress, outside_match_page, pause_page, read_native_match_scene
 from .rival_chants import RivalChants
 
 if TYPE_CHECKING:
@@ -460,8 +460,12 @@ class ChantsRuntime:
             last_safety_position = 0
             player_paused = False
             app._chants_paused = False
-            progress = GoalClockProgress(required_hits=2, sample_seconds=.5) if goal_song else GoalClockProgress()
+            # The runtime counter still advances ~1 unit/s in celebrations.
+            # Native live/replay state takes precedence; the fallback requires
+            # sustained gameplay speed, not just an advancing counter.
+            progress = GoalClockProgress(required_hits=3, sample_seconds=.5, minimum_rate=6.0)
             non_running_reads = resume_reads = 0
+            live_scene_reads = 0
             active_seconds = 0.0
             last_tick = time.monotonic()
             while not app._chants_stop.is_set() and not getattr(app, "_chants_reset_requested", False) and app.module_enabled("Chants"):
@@ -486,12 +490,15 @@ class ChantsRuntime:
                         app.log(f"Goal audio stopped: playback safety timeout ({source})")
                         break
                 if chants_memory is not None:
-                    is_running = app._is_game_running_with(chants_memory)
+                    scene = read_native_match_scene(chants_memory)
+                    explicit_pause = pause_page(getattr(app, 'lastpagename', ''))
+                    is_running = not explicit_pause and (scene is not None or app._is_game_running_with(chants_memory))
                     if not is_running:
                         progress.reset()
+                        live_scene_reads = 0
                         resume_reads = 0
                         non_running_reads += 1
-                        confirmed_pause = pause_page(getattr(app, 'lastpagename', '')) or non_running_reads >= 3
+                        confirmed_pause = explicit_pause or non_running_reads >= 3
                         if confirmed_pause and not player_paused and player.is_playing():
                             fade_from = app._chants_target_volume if crowd_volume or goal_song else volume
                             app._chants_paused = True
@@ -522,15 +529,25 @@ class ChantsRuntime:
                         # anthem playing over the next attack. A pause still
                         # preserves playback position and never counts as kickoff.
                         if active_seconds >= (1.0 if goal_song else 6.0):
-                            try:
-                                game_time = chants_memory.get_int(app.offsets.GAMESTATSBASE, app.offsets.GAMERANTIME)
-                            except Exception:
-                                game_time = None
-                            if progress.observe(game_time, time.monotonic()):
-                                app.log(f"Goal audio cut: kick-off detected ({source}) hits={progress.hits}")
+                            if scene is not None:
+                                progress.reset()
+                                live_scene_reads = live_scene_reads + 1 if scene.live else 0
+                                returned_to_play = live_scene_reads >= 3
+                                reason = 'native live scene'
+                            else:
+                                live_scene_reads = 0
+                                try:
+                                    game_time = chants_memory.get_int(app.offsets.GAMESTATSBASE, app.offsets.GAMERANTIME)
+                                except Exception:
+                                    game_time = None
+                                returned_to_play = progress.observe(game_time, time.monotonic())
+                                reason = f'clock speed fallback, hits={progress.hits}'
+                            if returned_to_play:
+                                app.log(f"Goal audio cut: kick-off detected ({source}); {reason}")
                                 break
                         else:
                             progress.reset()
+                            live_scene_reads = 0
                 time.sleep(0.2)
             fade_from = app._chants_target_volume if crowd_volume or goal_song else volume
             self.fade_player(player, fade_from, 0, fade_out_ms)

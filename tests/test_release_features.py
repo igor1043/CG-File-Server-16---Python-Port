@@ -1,4 +1,4 @@
-"""Unfinished features stay hidden without deleting their implementation."""
+"""Public cinematic controls and the separate unreleased narration gate."""
 from pathlib import Path
 import tempfile
 import unittest
@@ -29,7 +29,7 @@ class ReleaseFeaturesTests(unittest.TestCase):
         app.show_narration_loading.assert_called_once_with('Narrador',100,'Narração aplicada')
 
     def test_public_prematch_has_no_hidden_shortcuts_or_empty_cards(self):
-        self.assertFalse(features.EXTRA_SCENES_AVAILABLE)
+        self.assertTrue(features.EXTRA_SCENES_AVAILABLE)
         self.assertFalse(features.NARRATION_PICKER_AVAILABLE)
         with tempfile.TemporaryDirectory() as folder:
             selector=fixtures.MatchAudioTests().make_selector(Path(folder))
@@ -37,33 +37,34 @@ class ReleaseFeaturesTests(unittest.TestCase):
                 selector.open(hub=True)
                 panel=selector.prematch_panel
                 self.assertIsInstance(panel,PrematchPanel)
-                self.assertEqual([action for action,_,_ in panel.cards()],[0,1,2,6])
+                self.assertEqual([action for action,_,_ in panel.cards()],[0,1,2,6,4])
                 self.assertEqual(panel.cards()[-1][1][2],576)
                 with patch.object(selector,'open_gamepads') as controls:
                     panel.handle(16,4)
                     controls.assert_called_once()
-                panel.handle(16,5)
-                for action in (3,4):panel.activate(action)
+                panel.activate(3) # narration remains hidden
                 self.assertIs(selector.prematch_panel,panel)
                 for connected in (False,True):
                     selector.controller_connected=connected
                     self.assertEqual(panel.render().size,(1200,panel.HEIGHT*2))
             finally:selector.shutdown()
 
-    def test_public_match_menu_closes_instead_of_opening_extra_scenes(self):
+    def test_public_match_menu_opens_separate_cinematic_controls(self):
         with tempfile.TemporaryDirectory() as folder:
             selector=fixtures.MatchAudioTests().make_selector(Path(folder))
             try:
                 selector.open(audio=True)
                 panel=selector.audio_panel
                 self.assertIsInstance(panel,MatchHubPanel)
-                self.assertEqual([label for label,_ in panel.items()],['Música','Gráficos','Câmera','Controles','Fechar'])
+                self.assertEqual([label for label,_ in panel.items()],['Música','Gráficos','Câmera','Controles','Cenas extras','Fechar'])
                 with patch.object(selector,'open_gamepads') as controls:
                     panel.handle(16,4)
                     controls.assert_called_once()
                 panel.handle(16,5)
+                from server16_py.extra_scenes_panel import ExtraScenesPanel
+                self.assertIsInstance(panel.child,ExtraScenesPanel)
+                panel.back();panel.handle(7,0)
                 self.assertFalse(selector.opened)
-                self.assertIsNone(panel.child)
             finally:selector.shutdown()
 
     def test_development_gates_restore_both_preserved_panels(self):

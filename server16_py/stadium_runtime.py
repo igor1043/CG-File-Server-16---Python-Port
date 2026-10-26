@@ -26,6 +26,7 @@ from .dialogs import StadiumChoiceDialog
 from .match_string_patcher import patch_match_string
 from .stadium_catalog import prematch_page
 from .stadium_transaction import StadiumAssetTransaction
+from .stadium_match_assets import stage_match_assets
 
 if TYPE_CHECKING:
     from .app import Server16App
@@ -494,6 +495,8 @@ class StadiumRuntime:
             texture = stad / name
             if texture.exists() and (not texture.is_file() or texture.stat().st_size == 0):
                 raise RuntimeError(f'Stadium package has an invalid texture: {stad_name}/{name}')
+        if not any((stad/name).is_file() for name in ('texture_day.rx3', 'texture_night.rx3')):
+            raise RuntimeError(f'Stadium package has no textures: {stad_name}')
         self._validate_copy_context(expected_context, section, injid)
         transaction = StadiumAssetTransaction(app.exedir, app.log)
         try:
@@ -527,10 +530,16 @@ class StadiumRuntime:
         glare1 = stad / "1"
         glare3 = stad / "3"
         no_seats = stad / "NoSeats.rx3"
+        day_texture = stad/'texture_day.rx3'
+        night_texture = stad/'texture_night.rx3'
+        if not day_texture.is_file():
+            day_texture = night_texture
+        if not night_texture.is_file():
+            night_texture = day_texture
         steps: list[tuple[str, callable]] = [
             ("Copying stadium model", lambda: copy_pack(stad / "model.rx3", dest / "stadium" / f"stadium_{injid}.rx3")),
-            ("Copying day textures", lambda: copy_pack(stad / "texture_day.rx3", dest / "stadium" / f"stadium_{injid}_1_textures.rx3")),
-            ("Copying night textures", lambda: copy_pack(stad / "texture_night.rx3", dest / "stadium" / f"stadium_{injid}_3_textures.rx3")),
+            ("Copying day textures", lambda: copy_pack(day_texture, dest / "stadium" / f"stadium_{injid}_1_textures.rx3")),
+            ("Copying night textures", lambda: copy_pack(night_texture, dest / "stadium" / f"stadium_{injid}_3_textures.rx3")),
             ("Copying entrance scene", lambda: copy_or_clear(stad / "EntranceScene" / f"bcstadiumcams_{injid}.dat", game / "data" / "bcdata" / "camera" / f"bcstadiumcams_{injid}.dat")),
             ("Copying crowd day", lambda: copy_pack(stad / "crowd_day.dat", dest / "crowdplacement" / f"crowd_{injid}_1.dat")),
             ("Copying crowd night", lambda: copy_pack(stad / "crowd_night.dat", dest / "crowdplacement" / f"crowd_{injid}_3.dat")),
@@ -566,9 +575,12 @@ class StadiumRuntime:
             copy_pack(stad / "StadiumBumper.big", game / app.MOVBUMP.relative_to(app.exedir))
         managed = {Path('data/sceneassets') / rel for rel in stadium_injection_paths(str(injid))}
         managed.add(Path('data/bcdata/camera') / f'bcstadiumcams_{injid}.dat')
+        identity, route = stage_match_assets(transaction, str(injid),
+            getattr(app, 'HID', hid), getattr(app, 'AID', '0'))
+        managed.add(route)
         app._worker_queue.put(('progress', 86, 'Publishing prepared stadium assets'))
         transaction.commit(managed, lambda: self._validate_copy_context(expected_context, section, injid))
-        app.log(f'Stadium assets prepared and published as one validated set: {stad_name}; inactive injID={injid}')
+        app.log(f'Stadium assets prepared and published as one validated set: {stad_name}; inactive injID={injid}; resources={identity}')
         return {
             "section_id": hid,
             "section_name": section,

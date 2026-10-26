@@ -55,7 +55,7 @@ from .file_tools import (
     restore_native_assets,
 )
 from .dialogs import FifaLocationWarningDialog, ImgbbApiKeyDialog
-from .ini_file import SessionIniFile
+from .ini_file import SessionIniFile, module_setting_enabled, ensure_audio_module_defaults
 from .memory_access import Memory, MemoryAccessError
 from .match_state import outside_match_page, pause_page, post_match_page
 from .localization import LANGUAGE_LABELS, LocalizationManager, SUPPORTED_LANGUAGES
@@ -2681,7 +2681,8 @@ class Server16App(tk.Tk):
 
     def _load_module_states(self) -> None:
         module_names = ["Stadium", "TvLogo", "ScoreBoard", "Movies", "Autorun", "StadiumNet", "Chants", "StadiumName", "AwayChants", "AwayClubSong", "TeamEntrance"]
-        self.module_states = {name: self.settings_ini.read(name, "Modules") == "1" for name in module_names}
+        ensure_audio_module_defaults(self.settings_ini)
+        self.module_states = {name: module_setting_enabled(self.settings_ini, name) for name in module_names}
         previous_rpc_state = self._discord_rpc_enabled
         discord_ini_value = self.settings_ini.read("DiscordRPC", "Modules")
         if discord_ini_value in {"0", "1"}:
@@ -2716,7 +2717,7 @@ class Server16App(tk.Tk):
             return self._discord_rpc_enabled
         if not hasattr(self, "settings_ini") or self.settings_ini is None:
             return self.module_states.get(name, False)
-        enabled = self.settings_ini.read(name, "Modules") == "1"
+        enabled = module_setting_enabled(self.settings_ini, name)
         self.module_states[name] = enabled
         return enabled
 

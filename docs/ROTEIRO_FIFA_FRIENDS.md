@@ -23,8 +23,8 @@ do jogo continuam dentro da pasta do FIFA, principalmente em `FSW` e nas pastas
 - A torcida reage ao placar e diferencia mandante e visitante.
 - Cânticos de apoio, reclamação, pausa e reação a gol continuam usando o
   mecanismo original do Server.
-- A torcida visitante pode participar quando o módulo `AwayChants` estiver ativo.
-- O `ClubSong.mp3` do mandante e do visitante toca até o final do áudio.
+- A torcida visitante participa nos intervalos dos cânticos do mandante, quando ambos têm áudios configurados. `AwayChants` vem ativo nas configurações novas; desligá-lo manualmente salva a preferência e mantém o recurso desligado nas próximas aberturas.
+- O `ClubSong.mp3` do time que marcou continua durante a comemoração e os replays, até o fim do áudio. Ao retornar ao jogo, o Server encerra o hino com fade; o relógio lento da comemoração não dispara esse corte.
 - Se o jogo for pausado, o hino pausa na posição atual. Ao voltar, continua do
   mesmo ponto.
 - Quando a partida termina ou sai para uma tela de encerramento, o áudio é
@@ -263,3 +263,11 @@ estádio, aplicação segura, RAR, ponte de público e ciclos de vida da partida
 Em **Configurações da partida**, a opção **Objetos de abertura da competição** começa em **Sim**. Aplicar salva a escolha; Voltar cancela. O Server seleciona o pacote pelo ID da competição e da fase antes do estádio e placar. Pacote ausente ou inválido deixa a partida sem os objetos.
 
 O módulo V12 mantém o conjunto nos hinos e escalações. Modelo e escudos compartilham a retirada no fim da apresentação, inclusive quando ela é avançada. Os escudos são escolhidos pelos clubes da partida e preservam o fundo transparente. A pausa não inicia uma nova apresentação.
+
+## Cenas extras — revisão 0.2.18
+
+Técnico e mascote têm controles separados, 40% por parada elegível e intervalo
+mínimo de 10 segundos, com pesos iguais. Só opera dentro de uma cutscene nativa;
+mantém o personagem na sequência compatível e libera na retomada do jogo.
+O modo forçado de teste vem desligado. A sala interna do VAR foi adiada;
+a cabine de campo não foi removida. Detalhes em [RELEASE_20261025.md](RELEASE_20261025.md).

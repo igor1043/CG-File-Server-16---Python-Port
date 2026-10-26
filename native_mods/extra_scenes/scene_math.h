@@ -44,7 +44,7 @@ inline bool build(const Actor& actor,const Lens& lens,bool portrait,Camera& out)
  }
  if(!found)return false;
  out.target=portrait?actor.head:actor.root+Vec{0,actor.height*.48f,0};
- out.eye=best;out.eye.y=portrait?actor.head.y+8:actor.root.y+static_cast<float>(std::clamp(lens.height,80,220));
+ out.eye=best;out.eye.y=portrait?actor.head.y+8+static_cast<float>(lens.height-170):actor.root.y+static_cast<float>(std::clamp(lens.height,80,220));
  const float range=length(out.eye-out.target);if(range<200||range>2000)return false;
  out.fov=static_cast<float>(std::clamp(lens.fov,8,65))*.01745329252f;
  if(!portrait){

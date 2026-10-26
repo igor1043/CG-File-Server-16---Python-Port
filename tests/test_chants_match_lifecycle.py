@@ -12,7 +12,7 @@ from server16_py.app import Server16App
 from server16_py.audio_profiles import AudioProfileRuntime
 from server16_py.chants_runtime import ChantsRuntime
 from server16_py.match_audio_panel import MatchAudioPanel
-from server16_py.match_state import GoalClockProgress
+from server16_py.match_state import GoalClockProgress, NativeMatchScene
 from server16_py.offsets import Offsets
 from server16_py.settings_store import SettingsStore
 
@@ -91,7 +91,7 @@ class ChantsLifecycleTests(unittest.TestCase):
         memory.attack.return_value = memory.is_open.return_value = True
         memory.get_int.side_effect = lambda base, offset: (
             1 if offset == app.offsets.GAMESTARTEDBINARY else
-            100 + (int(max(0, clock.now - 8)) if running_clock else 0) if offset == app.offsets.GAMERANTIME else 0
+            100 + (int(max(0, clock.now - 8)*8) if running_clock else 0) if offset == app.offsets.GAMERANTIME else 0
         )
         app._is_game_running_with = lambda mem: Server16App._is_game_running_with(app, mem)
         runtime = ChantsRuntime(app)
@@ -148,6 +148,51 @@ class ChantsLifecycleTests(unittest.TestCase):
         self.assertLess(player.closed_at, 162)
         self.assertEqual(player.position, player.duration)
         self.assertIn(.05, player.levels)
+
+    def test_slow_clock_during_entire_goal_replay_does_not_cut_anthem(self):
+        runtime, clock, player, memory = self.make_runtime(Path('.'))
+        memory.get_int.side_effect = lambda base, offset: (
+            1 if offset == runtime.app.offsets.GAMESTARTEDBINARY else 100 + int(clock.now))
+        self.simulate(runtime, clock, player, memory, lambda: runtime._play_goal_track(
+            Path('ClubSong.mp3'), .2, 'goal', 'goal', 'anthem', 'next', chants_memory=memory, goal_song=True))
+        self.assertEqual(player.position, player.duration)
+        self.assertFalse(any('kick-off detected' in call.args[0] for call in runtime.app.log.call_args_list))
+
+    def test_native_replay_wins_over_advancing_clock_then_cuts_when_play_returns(self):
+        for goal_song in (True, False):
+            with self.subTest(goal_song=goal_song):
+                runtime, clock, player, memory = self.make_runtime(Path('.'), running_clock=True)
+                def scene(_memory):
+                    return NativeMatchScene(100, 15, True) if clock.now < 35 else NativeMatchScene(100, 15, False)
+                with patch('server16_py.chants_runtime.read_native_match_scene', side_effect=scene):
+                    self.simulate(runtime, clock, player, memory, lambda: runtime._play_goal_track(
+                        Path('ClubSong.mp3'), .2, 'goal', 'goal', 'anthem', 'next',
+                        chants_memory=memory, goal_song=goal_song, crowd_volume=not goal_song))
+                self.assertGreaterEqual(player.closed_at, 35)
+                self.assertLess(player.closed_at, 37)
+                self.assertEqual(player.pauses, [])
+                self.assertTrue(any('native live scene' in call.args[0] for call in runtime.app.log.call_args_list))
+
+    def test_native_celebration_keeps_playing_even_when_running_flag_is_zero(self):
+        runtime, clock, player, memory = self.make_runtime(Path('.'))
+        memory.get_int.return_value = 0
+        memory.get_int.side_effect = None
+        with patch('server16_py.chants_runtime.read_native_match_scene', return_value=NativeMatchScene(100, 6, False)):
+            self.simulate(runtime, clock, player, memory, lambda: runtime._play_goal_track(
+                Path('ClubSong.mp3'), .2, 'goal', 'goal', 'anthem', 'next', chants_memory=memory, goal_song=True))
+        self.assertEqual(player.position, player.duration)
+        self.assertEqual(player.pauses, [])
+
+    def test_native_replay_pauses_with_menu_and_continues_from_same_position(self):
+        runtime, clock, player, memory = self.make_runtime(Path('.'), running_clock=True)
+        clock.tick=lambda: setattr(runtime.app,'lastpagename','FluxHub' if 3 <= clock.now < 13 else '')
+        with patch('server16_py.chants_runtime.read_native_match_scene', return_value=NativeMatchScene(100, 15, True)):
+            self.simulate(runtime, clock, player, memory, lambda: runtime._play_goal_track(
+                Path('ClubSong.mp3'), .2, 'goal', 'goal', 'anthem', 'next', chants_memory=memory, goal_song=True))
+        self.assertEqual(len(player.pauses), 1)
+        self.assertEqual(len(player.resumes), 1)
+        self.assertEqual(player.pauses[0][1], player.resumes[0][1])
+        self.assertEqual(player.position, player.duration)
 
     def test_repeated_pauses_never_restart_or_truncate_either_team_song(self):
         for team in ('Home', 'Away'):

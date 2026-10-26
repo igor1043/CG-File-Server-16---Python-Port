@@ -70,9 +70,14 @@ def panel_states(selector):
         audio.message='Uma mensagem bastante longa '+('W'*160)
         yield f'audio-{cloth}',audio
     hub=MatchHubPanel(selector)
-    for page in ('home','graphics','camera'):
-        hub.page=page
-        yield 'match-'+page,hub
+    # This suite checks glyph bounds, not the shared camera controller. Never
+    # open its production mapping when another Server16 is running.
+    camera=SimpleNamespace(enabled=False,mode=0,fov=85,profile=0,
+                           status=lambda:'Câmera original ativa.')
+    with patch.object(hub,'camera',return_value=camera):
+        for page in ('home','graphics','camera'):
+            hub.page=page
+            yield 'match-'+page,hub
     extra=ExtraScenesPanel(hub,prematch=True)
     yield 'extra-scenes-hidden',extra
     options=[dict(name='W'*80,commentator='W'*100)]

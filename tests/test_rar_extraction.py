@@ -20,14 +20,18 @@ from server16_py.stadium_runtime import StadiumRuntime
 class RarExtractionTests(unittest.TestCase):
     DATA = b'complete model payload'
 
-    def fake_module(self, name='BRA - Stadium/model.rx3', crc=None):
+    def fake_module(self, name='BRA - Stadium/model.rx3', crc=None, texture=False):
         data = self.DATA
         member = SimpleNamespace(filename=name, file_size=len(data),
             CRC=zlib.crc32(data) if crc is None else crc, isdir=lambda:False)
+        members = [member]
+        if texture:
+            members.append(SimpleNamespace(filename='BRA - Stadium/texture_day.rx3',
+                file_size=len(data), CRC=zlib.crc32(data), isdir=lambda:False))
         class Reader:
             def __enter__(self): return self
             def __exit__(self,*args): return False
-            def infolist(self): return [member]
+            def infolist(self): return members
         return SimpleNamespace(RarFile=lambda *args:Reader())
 
     def extract(self, root, run, tools=None, module=None, **options):
@@ -239,9 +243,13 @@ class RarExtractionTests(unittest.TestCase):
                 def rename(path,target):
                     if fail:raise PermissionError('locked')
                     return original_rename(path,target)
-                with patch.object(file_tools,'_rarmod',self.fake_module()), \
+                def extract_complete(command,**kwargs):
+                    result=self.fake_success(command,**kwargs)
+                    (Path(command[-1])/'BRA - Stadium/texture_day.rx3').write_bytes(self.DATA)
+                    return result
+                with patch.object(file_tools,'_rarmod',self.fake_module(texture=True)), \
                      patch.object(file_tools,'_rar_extractors',return_value=[('UnRAR','fake-unrar')]), \
-                     patch.object(file_tools.subprocess,'run',side_effect=self.fake_success), \
+                     patch.object(file_tools.subprocess,'run',side_effect=extract_complete), \
                      patch.object(Path,'rename',autospec=True,side_effect=rename):
                     payload=StadiumRuntime(app).run_stadium_copy_job('1043','stadium','176','BRA - Stadium')
                 self.assertEqual(payload['stad_name'],'BRA - Stadium')

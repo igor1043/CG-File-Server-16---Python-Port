@@ -11,6 +11,7 @@ from server16_py.app import Server16App
 from server16_py.offsets import Offsets
 from server16_py.stadium_runtime import StadiumRuntime
 from server16_py.stadium_transaction import StadiumAssetTransaction
+from server16_py.stadium_match_assets import clear_match_routes
 
 
 class StadiumReplacementTests(unittest.TestCase):
@@ -279,6 +280,78 @@ class StadiumReplacementTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'invalid texture'):
             self.runtime.run_stadium_copy_job('1','manual','176','A','A,None,None,None',self.context()[:3])
         self.assertEqual(self.files(),before)
+
+    def test_model_without_textures_cannot_use_unrelated_native_backup(self):
+        before=self.files()
+        for name in ('texture_day.rx3','texture_night.rx3'):
+            (self.packages/'A'/name).unlink()
+        with self.assertRaisesRegex(RuntimeError,'no textures'):
+            self.apply_synchronously('A')
+        self.assertEqual(self.files(),before)
+        self.app.memory.write_int.assert_not_called()
+
+    def test_single_texture_is_used_for_both_lighting_conditions(self):
+        (self.packages/'A/texture_night.rx3').unlink()
+        slot=self.apply_synchronously('A')
+        self.assertEqual((self.game/f'data/sceneassets/stadium/stadium_{slot}_3_textures.rx3').read_bytes(),b'A day')
+
+    def test_native_lua_repeated_matches_use_same_model_texture_identity(self):
+        from lupa import LuaRuntime
+        lua=LuaRuntime(unpack_returned_tuples=True)
+        def load_script(path):
+            lua.execute((self.game/path).read_text(encoding='ascii'))
+            return 1
+        lua.globals().load_script=load_script
+        lua.execute('gSportsRNA = {LoadScriptAsync = function(self,path) return load_script(path) end, LoadScriptAsyncComplete=function() end}; db={stadium={}}')
+        helper=Path(__file__).resolve().parents[1]/'native_mods/frontend_stadium/frontend_stadium.lua'
+        lua.execute(helper.read_text(encoding='utf8'))
+        observed=[]
+        for name in ('A','B','C','A'):
+            slot=self.apply_synchronously(name)
+            lua.execute(f'db.stadium[1]={{stadiumID={slot},homeKitTeamID=1,awayKitTeamID=2,lightType=1}}; Server16FrontendUpdate(1)')
+            model=lua.globals().Server16FrontendModel(1).rstrip(';')
+            day=lua.globals().Server16FrontendTexture(1).rstrip(';')
+            lua.execute('db.stadium[1].lightType=3')
+            night=lua.globals().Server16FrontendTexture(1).rstrip(';')
+            self.assertEqual((self.game/model).read_bytes(),(name+' model').encode())
+            self.assertEqual((self.game/day).read_bytes(),(name+' day').encode())
+            self.assertEqual((self.game/night).read_bytes(),(name+' night').encode())
+            self.assertEqual(Path(model).parent,Path(day).parent)
+            self.assertEqual(Path(day).parent,Path(night).parent)
+            observed.append((model,day,night))
+        self.assertEqual(observed[0],observed[3])
+        self.assertNotEqual(observed[0],observed[2])
+        # Old cached files are immutable even when the injection slot is reused.
+        for name,paths in zip(('A','B','C'),observed):
+            self.assertEqual((self.game/paths[0]).read_bytes(),(name+' model').encode())
+        # A different fixture must not inherit an old route, even on the same ID.
+        lua.execute('db.stadium[1].awayKitTeamID=3; Server16FrontendUpdate(1)')
+        self.assertEqual(lua.globals().Server16FrontendModel(1),'')
+        self.assertEqual(lua.globals().Server16FrontendTexture(1),'')
+        clear_match_routes(self.game)
+        lua.execute('db.stadium[1].awayKitTeamID=2; Server16FrontendUpdate(1)')
+        self.assertEqual(lua.globals().Server16FrontendModel(1),'')
+        self.assertEqual(lua.globals().Server16FrontendTexture(1),'')
+
+    def test_failed_route_load_does_not_reuse_previous_lua_table(self):
+        from lupa import LuaRuntime
+        self.apply_synchronously('A')
+        lua=LuaRuntime(unpack_returned_tuples=True)
+        lua.execute('gSportsRNA={LoadScriptAsync=function() error("missing") end}; db={stadium={[1]={stadiumID=176,homeKitTeamID=1,awayKitTeamID=2}}}')
+        lua.execute((Path(__file__).resolve().parents[1]/'native_mods/frontend_stadium/frontend_stadium.lua').read_text(encoding='utf8'))
+        lua.execute('Server16MatchRoutes[176]={home=1,away=2,model="old",day="old",night="old"}; Server16FrontendUpdate(1)')
+        self.assertEqual(lua.globals().Server16FrontendModel(1),'')
+
+    def test_frontend_route_and_match_route_remain_separate(self):
+        from lupa import LuaRuntime
+        lua=LuaRuntime(unpack_returned_tuples=True)
+        lua.execute('gSportsRNA={LoadScriptAsync=function() return 1 end, LoadScriptAsyncComplete=function() end}; db={stadium={[0]={stadiumID=176,lightType=1},[1]={stadiumID=261,lightType=3,homeKitTeamID=1,awayKitTeamID=2}}}')
+        lua.execute((Path(__file__).resolve().parents[1]/'native_mods/frontend_stadium/frontend_stadium.lua').read_text(encoding='utf8'))
+        lua.execute('Server16FrontendRoutes[176]={team=4,model="menu",day="menu day",night="menu night"}; Server16FrontendUpdate(0)')
+        self.assertEqual(lua.globals().Server16FrontendModel(0),'menu;')
+        self.assertEqual(lua.globals().Server16FrontendTexture(0),'menu day;')
+        lua.execute('Server16FrontendRoutes[261]=Server16FrontendRoutes[176]; Server16FrontendUpdate(1)')
+        self.assertEqual(lua.globals().Server16FrontendModel(1),'')
 
     def test_recovery_backup_is_kept_if_windows_refuses_rollback(self):
         tx=StadiumAssetTransaction(self.game,self.app.log)

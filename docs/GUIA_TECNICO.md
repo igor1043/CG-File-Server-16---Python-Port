@@ -178,3 +178,19 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 `scripts/export_code.py` gera um ZIP de fontes, configurações e documentação sem assets ou executáveis. O ZIP precisa ser compilado antes de usar no jogo.
+
+## Áudio e recursos de estádio — revisão 0.2.18
+
+`match_state.read_native_match_scene` lê a fase e o sinal de replay do `GameStateInterface`, validando vtable e getters. A leitura não chama funções nem escreve na memória do FIFA. Se a assinatura não corresponder, o áudio usa o detector de velocidade do relógio, com confirmação sustentada. A pausa explícita sempre tem prioridade.
+
+`AwayChants` usa padrão ligado apenas quando a chave está ausente; `0` salvo pelo usuário é preservado. O INI distribuído também traz `AwayChants=1`.
+
+`stadium_match_assets` publica modelo, textura de dia e textura de noite em caminhos identificados pelo SHA-256 do conjunto. `server16_frontend_stadium.lua` mantém separadas as rotas do cenário de menu (índice zero) e da partida. A rota da partida valida os dois clubes; não reutiliza uma tabela anterior se sua leitura falhar. Os assets e a rota pertencem à transação de arquivos, e o ID só muda após a publicação. O encerramento limpa as rotas, mantendo os recursos imutáveis que a engine ainda pode estar liberando. A validação visual da revisão está pendente.
+
+## Cenas extras — revisão 0.2.18
+
+Técnico e mascote têm controles separados, 40% por parada elegível e intervalo
+mínimo de 10 segundos, com pesos iguais. Só opera dentro de uma cutscene nativa;
+mantém o personagem na sequência compatível e libera na retomada do jogo.
+O modo forçado de teste vem desligado. A sala interna do VAR foi adiada;
+a cabine de campo não foi removida. Detalhes em [RELEASE_20261025.md](RELEASE_20261025.md).

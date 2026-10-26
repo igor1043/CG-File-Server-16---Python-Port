@@ -10,7 +10,9 @@ def run(output):
     from . import __version__
     root=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
     modules=('sqlite3','numpy','PIL.Image','psutil','server16_py.app','server16_py.club_environment',
-             'server16_py.career_context','server16_py.frontend_stadium','server16_py.gamepad_panel')
+             'server16_py.career_context','server16_py.frontend_stadium','server16_py.gamepad_panel',
+             'server16_py.stadium_match_assets','server16_py.match_state',
+             'server16_py.extra_scenes_panel')
     result={'version':__version__,'frozen':bool(getattr(sys,'frozen',False)),'modules':{},'binaries':{},'ok':True}
     for name in modules:
         try:importlib.import_module(name);result['modules'][name]='ok'

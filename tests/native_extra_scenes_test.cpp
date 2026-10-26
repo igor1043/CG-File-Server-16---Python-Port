@@ -4,11 +4,61 @@
 #include "../native_mods/extra_scenes/scene_tracking.h"
 #include "../native_mods/extra_scenes/reaction_policy.h"
 #include "../native_mods/extra_scenes/scene_readiness.h"
+#include "../native_mods/extra_scenes/frame_camera.h"
+#include "../native_mods/extra_scenes/shot_variants.h"
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include "../common/scene_camera_lease.h"
 #include <cassert>
 #include <cstdio>
 using namespace extra;
 static Input input(uint64_t now,Window w,bool preview=false){Input in;in.now=now;in.fixture=123;in.window=w;in.preview=preview;in.chance=100;in.cooldown=0;return in;}
-int main(){
+int main(int argc,char** argv){
+ (void)argc;(void)argv;
+ {
+  // One continuous subject across a package -> emotion -> package handoff,
+  // including an original cut longer than the retired five-second timer.
+  for(unsigned elapsed:{0u,750u,2600u,5100u,8000u}){
+   (void)elapsed;
+   assert(nativeCutContinuation(6,"Iso Medium","package_gk_unintentional_endplay",true,true,false));
+   assert(nativeCutContinuation(6,"Iso High","emotion",true,true,false));
+   assert(nativeCutContinuation(6,"Iso Medium","emotion_shot_missed",true,true,false));
+  }
+  for(int phase:{1,5,13,15})assert(!nativeCutContinuation(phase,"Iso Medium","emotion",true,true,false));
+  for(const char* camera:{"Broadcast Pos","UserGameplayCamera","Unknown camera",""})
+   assert(!nativeCutContinuation(6,camera,"emotion",true,true,false));
+  for(const char* graph:{"package_goal","package_gk_place_ball","package_crowdchant_throwin","unrelated",""})
+   assert(!nativeCutContinuation(6,"Iso Medium",graph,true,true,false));
+  assert(!nativeCutContinuation(6,"Iso Medium","emotion",false,true,false));
+  assert(!nativeCutContinuation(6,"Iso Medium","emotion",true,false,false));
+  assert(!nativeCutContinuation(6,"Iso Medium","emotion",true,true,true));
+  assert(!nativeCutContinuation(6,"Iso Medium",nullptr,true,true,false));
+  SceneRandom frequency(20261025);unsigned selected=0;
+  for(unsigned i=0;i<10000;++i)selected+=frequency.chance(40)?1:0;
+  assert(selected>3700&&selected<4300);
+ }
+ {
+  SceneRandom rng(42);unsigned accepted=0,variants[shotVariants]{};
+  for(unsigned i=0;i<10000;++i){accepted+=rng.chance(35)?1:0;++variants[rng.below(shotVariants)];}
+  assert(accepted>3200&&accepted<3800);
+  for(auto count:variants)assert(count>1700&&count<2300);
+  for(unsigned i=0;i<100;++i){assert(!rng.chance(0));assert(rng.chance(100));}
+  for(const Actor actor:{Actor{{-1000,0,-3700},{-1000,170,-3700},{0,0,1},195},
+                         Actor{{5850,0,2700},{5850,190,2700},{-1,0,0},240}}){
+   for(bool portrait:{false,true})for(unsigned variant=0;variant<shotVariants;++variant){
+    const Lens base=actor.height==240?Lens{850,portrait?12:24,portrait?170:120,0}:Lens{600,portrait?12:26,portrait?170:120,0};
+    Camera camera;assert(build(actor,shotLens(base,variant,portrait),portrait,camera));
+    assert(frontal(actor,camera));Actor turned=actor;turned.forward=turned.forward*-1;
+    assert(!frontal(turned,camera));
+   }
+  }
+  SceneCameraClaim extra(111),var(222);assert(extra.open()&&var.open());
+  assert(extra.take(100,1000));assert(!var.take(100,1000));
+  assert(extra.take(100,1100));assert(!var.take(200,1100));
+  extra.release();assert(var.take(200,1100));assert(!extra.take(200,1100));
+  assert(extra.take(300,1701)); // A stale owner cannot block another mod forever.
+  var.release();assert(!var.take(300,1701));extra.release();
+ }
  {
   Actor actor{{0,0,-3600},{0,170,-3600},{0,0,1},195};ActorReadiness gate;
   gate.observe(42,1,1000,&actor);gate.observe(42,1,1200,&actor);assert(!gate.ready(1200));
@@ -25,6 +75,18 @@ int main(){
  }
  assert(stoppedScenePhase(4)&&stoppedScenePhase(6)&&stoppedScenePhase(14));
  assert(!stoppedScenePhase(15)&&!stoppedScenePhase(5)&&!stoppedScenePhase(-1));
+ assert(nativeCutCamera("Iso Medium")&&nativeCutCamera("Iso High")&&nativeCutCamera("Manager_0_Home_Pos"));
+ for(const char* name:{"Broadcast Pos","UserGameplayCamera","", "Unknown camera","IsolatedGameplay"})
+  assert(!nativeCutCamera(name));
+ assert(!nativeCutCamera(nullptr));
+ assert(nativeCutAllowed(4,"Iso High",CueKind::ThrowIn,true,true,false));
+ assert(nativeCutAllowed(14,"Iso Medium",CueKind::GoalKick,true,true,false));
+ assert(!nativeCutAllowed(15,"Iso High",CueKind::ThrowIn,true,true,false));
+ assert(!nativeCutAllowed(4,"Broadcast Pos",CueKind::ThrowIn,true,true,false));
+ assert(!nativeCutAllowed(14,"Iso Medium",CueKind::None,true,true,false));
+ assert(!nativeCutAllowed(14,"Iso Medium",CueKind::GoalKick,false,true,false));
+ assert(!nativeCutAllowed(14,"Iso Medium",CueKind::GoalKick,true,false,false));
+ assert(!nativeCutAllowed(14,"Iso Medium",CueKind::GoalKick,true,true,true));
  assert(nativeReactionCue("emotion_shot_missed",false));
  assert(nativeReactionCue("emotion",true));
  assert(nativeReactionCue("package_throwin",false));
@@ -32,6 +94,51 @@ int main(){
  assert(!nativeReactionCue("emotion",false)); // Generic reactions elsewhere cannot arm an extra.
  assert(!nativeReactionCue("emotion_foul",true));
  assert(!nativeReactionCue(nullptr,true));
+ assert(nativeCueKind("package_gk_unintentional_endplay")==CueKind::GoalKick);
+ assert(nativeCueKind("package_cornerkick_unintentional_endplay")==CueKind::Corner);
+ assert(nativeCueKind("emotion",false,true)==CueKind::Corner);
+ assert(nativeCueKind("emotion_shot_missed",false,true)==CueKind::Corner);
+ for(const char* name:{"package_crowdchant_corner","package_crowdchant_throwin","package_cornerkick_save_replay","package_goal","package_setpiece_cornerkick"})
+  assert(nativeCueKind(name)==CueKind::None); // Gameplay, goals and replays cannot arm an extra.
+ {
+  StoppageLatch latch;latch.observe(1,false,false,1000);assert(latch.claim());
+  for(uint64_t n=1100;n<20000;n+=100){latch.observe(1,false,false,n);assert(!latch.claim());}
+  latch.observe(1,true,false,20000);latch.observe(1,true,false,20500);assert(!latch.claim());
+  latch.observe(1,false,false,20600);assert(!latch.claim()); // Pause/replay is not a fresh event.
+  latch.observe(1,true,false,21000);latch.observe(1,true,false,22000);assert(latch.claim());
+  latch.observe(2,false,false,23000);assert(latch.claim()); // New fixture may reuse pointers.
+  latch.observe(2,false,true,23100);latch.observe(2,false,false,23200);assert(latch.claim());
+  assert(actorSceneIdentity(99,1,1043)!=actorSceneIdentity(99,2,1043));
+  assert(actorSceneIdentity(99,2,1043)!=actorSceneIdentity(99,2,569));
+ }
+ {
+  const uint64_t pool=0x100000;
+  assert(producerFrame(pool,1,2,pool+2*0xd70+0x10));
+  assert(producerFrame(pool,5,6,pool+0x10));
+  assert(!producerFrame(pool,1,1,pool+0xd70+0x10));
+  assert(!producerFrame(pool,1,7,pool+0xd70+0x10)); // Same published slot after wrap.
+  assert(!producerFrame(pool,1,2,pool+0xd70+0x10)); // A reader's frame.
+  assert(!producerFrame(pool,1,2,pool+0x10));
+  assert(!producerFrame(0,1,2,0x1000));
+  Actor actor{{-1000,0,-3700},{-1000,170,-3700},{0,0,1},195};Camera c;
+  assert(build(actor,Lens{600,12,170,0},true,c));
+  unsigned char frame[0x100]{},before[sizeof frame]{};
+  std::memset(frame,0xa5,sizeof frame);
+  const float scaleX=1.6f,scaleY=.9f;
+  std::memcpy(frame+0x88,&scaleX,4);std::memcpy(frame+0x8c,&scaleY,4);
+  std::memcpy(before,frame,sizeof frame);
+  assert(cameraFrame(frame,sizeof frame,c));
+  assert(!std::memcmp(frame+0x30,c.matrix,sizeof c.matrix));
+  float x=0,y=0;std::memcpy(&x,frame+0x88,4);std::memcpy(&y,frame+0x8c,4);
+  assert(std::fabs(x/y-scaleX/scaleY)<.0001f);
+  for(size_t i=0;i<sizeof frame;++i){
+   const bool changed=(i>=0x30&&i<0x70)||(i>=0x88&&i<0x90)||(i>=0xa0&&i<0xa4)||i==0xb0||(i>=0xbc&&i<0xc4);
+   if(!changed)assert(frame[i]==before[i]); // Opaque engine metadata stays intact.
+  }
+  const Camera valid=c;c.fov=NAN;assert(!cameraFrame(frame,sizeof frame,c));
+  c=valid;c.matrix[3]=NAN;assert(!cameraFrame(frame,sizeof frame,c));
+  assert(!cameraFrame(frame,0xc3,valid));
+ }
  {
   ReactionWindow w{10000,true,true,true,false,false,true,false};
   assert(reactionDecision(9000,w)==ReactionDecision::Wait);
@@ -127,7 +234,7 @@ int main(){
  assert(build(mascot,lens,false,camera));assert(camera.eye.x<=5150&&std::fabs(camera.eye.z)<=3250);
  assert(std::tan(camera.fov*.5f)*camera.focus>=mascot.height*.58f);
  mascot.head.x=NAN;assert(!build(mascot,lens,true,camera));
- std::puts("PASS: native cuts retain priority, additive gap only, immediate live/replay/menu cancellation, one extra per stoppage, cooldown and preview guards");
+ std::puts("PASS: only original cinematic cuts, no live-ball/replay/menu/filler takeover, one extra per stoppage, cooldown and preview guards");
  std::puts("PASS: frontal pitch-side cameras, stands rejected, full-body feet/head framing, orthonormal lens and malformed actor rejection");
- std::puts("PASS: five-second duration, planted tripod ignores head/body sway, limited smooth pans for walking, frame-rate independence, no orbit on actor turn or teleport");
+ std::puts("PASS: unpublished producer frames only, same camera for all readers, opaque frame data preserved, actor motion and duration policy");
 }

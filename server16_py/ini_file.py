@@ -10,6 +10,19 @@ def _normalize_key(key: str) -> str:
     return unicodedata.normalize("NFC", key).strip()
 
 
+def module_setting_enabled(settings, name: str) -> bool:
+    """Default away chants on; an explicit saved off always wins."""
+    value = settings.read(name, 'Modules')
+    return value == '1' or (value == '' and name == 'AwayChants')
+
+
+def ensure_audio_module_defaults(settings) -> None:
+    # Never manufacture a partial FIFA configuration for a missing game root.
+    if settings.path.is_file() and settings.read('AwayChants', 'Modules') == '':
+        settings.write('AwayChants', '1', 'Modules')
+        settings.save()
+
+
 class IniFile:
     def __init__(self, ini_path: str | Path) -> None:
         self.path = Path(ini_path)
