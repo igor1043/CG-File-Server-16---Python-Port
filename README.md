@@ -14,7 +14,7 @@ O host nativo do FIFA carrega overlay, câmera e propostas. O Server se conecta 
 
 O V12 recebe comandos diretos do vestiário, prontidão sem recargas repetidas, melhorias de quadro/iluminação e da prévia da partida, além da pose autoral dos onze. Os fontes do Server e seus módulos embutidos no EXE foram conferidos. Código desta branch e executável pronto na branch `fifa-friends-v12` do [V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
 
-Use o complemento **FIFA-Friends-Assets-Complementares-20261026.zip** do V12 (651 assets). Se já tem o complemento completo de 25/10, basta o delta de 26/10 para a pose, junto do código novo. Não copie runtimes, SQL financeiro ou saves do desenvolvedor. A bancada de cenas/IA é um ZIP opcional separado, executado fora do FIFA. [Notas detalhadas](docs/LOCAL_HOTFIX_20261026.md).
+Use o complemento completo de **25/10/2026** já distribuído e aplique somente **FIFA-Friends-Assets-Delta-20261026.zip** para a pose, junto do código novo. Os 650 assets anteriores continuam iguais e não precisam ser enviados novamente. Não copie runtimes, SQL financeiro ou saves do desenvolvedor. A bancada de cenas/IA é um ZIP opcional separado, executado fora do FIFA. [Notas detalhadas](docs/LOCAL_HOTFIX_20261026.md).
 
 ### Revisão do carregador — 25/10/2026
 
