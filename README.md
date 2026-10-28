@@ -4,9 +4,15 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.19 · **Atualizado em:** 26/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.19 · **Atualizado em:** 28/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
+
+## Revisão do overlay — 28/10/2026
+
+O overlay nativo desenha com estado gráfico independente e restaura o estado do FIFA, preservando os vínculos de materiais dos jogadores animados. Limpa também suas referências ao backbuffer antes de redimensionar a janela. Fonte, cabeçalho e `bin/cgfs16_overlay.dll` correspondem aos instalados no FIFA Friends V12.
+
+O executável permanece em **0.2.19**. Esta atualização altera o overlay carregado pelo host do mod; atualize também a branch do V12 para receber competições, copas, perfil do técnico, elenco no vestiário e recuperação de empréstimos. [Detalhes e validação](docs/OVERLAY_20261028.md). Não é necessário reenviar o complemento de assets anterior.
 
 ## Entrega — 26/10/2026 (0.2.19)
 

@@ -1,2 +1,5 @@
 # Preserve the upstream license verbatim, including its intentional blank lines.
 tools/pyinstaller-COPYING.txt -text whitespace=-blank-at-eol
+# Shared with the installed FIFA Friends overlay; retain identical file hashes.
+server16_py/d3d_overlay/cgfs16_overlay.cpp -text whitespace=cr-at-eol
+server16_py/d3d_overlay/ui_pipeline_state.h -text whitespace=cr-at-eol

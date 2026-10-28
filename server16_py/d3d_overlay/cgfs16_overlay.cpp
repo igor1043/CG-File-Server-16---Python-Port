@@ -17,6 +17,8 @@
 #include <initguid.h>    // must precede wincodec.h to define GUIDs inline
 #include <wincodec.h>    // WIC
 #include <d3d11.h>
+#include "ui_pipeline_state.h"
+static clubgfx::UiPipelineState g_uiPipeline;
 #include <dxgi.h>
 #include <dxgi1_2.h>
 #include <psapi.h>
@@ -964,10 +966,14 @@ static void RenderSwapchain(IDXGISwapChain *sc) {
             if (ctx) {
                 EnterCriticalSection(&g_drawCs);
                 __try {
-                    if (SUCCEEDED(dev->GetDeviceRemovedReason())) DrawOverlay11(sc,dev,ctx);
+                    if (SUCCEEDED(dev->GetDeviceRemovedReason())) {
+                        const bool isolated=g_uiPipeline.enter(ctx);
+                        DrawOverlay11(sc,dev,ctx);
+                        if(isolated)g_uiPipeline.leave();
+                    }
                     else ReleaseOverlayResources();
                 }
-                __except(EXCEPTION_EXECUTE_HANDLER){ Log("[Present] EXCEPTION DrawOverlay11"); }
+                __except(EXCEPTION_EXECUTE_HANDLER){ g_uiPipeline.leave(); Log("[Present] EXCEPTION DrawOverlay11"); }
                 LeaveCriticalSection(&g_drawCs);
                 ctx->Release();
             }
