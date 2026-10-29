@@ -4,6 +4,18 @@ from unittest.mock import patch
 from server16_py.club_environment import prepare_runtime,worker,ENTRIES
 
 class PortableRuntimeTest(unittest.TestCase):
+    def test_manager_market_worker_logs_in_its_own_runtime(self):
+        with tempfile.TemporaryDirectory(prefix='FIFA manager bootstrap ') as temp:
+            game=Path(temp);self.fixture(game)
+            flags={'SERVER16_MANAGER_MARKET_WORKER':'1',
+                   'SERVER16_CLUB_BROWSER_WORKER':'','SERVER16_TRANSFER_MARKET_WORKER':''}
+            with patch.dict(os.environ,flags),patch.object(sys,'path',list(sys.path)),patch.object(sys,'argv',list(sys.argv)):
+                worker(game,'preview',123)
+            log=game/'ModCarrerMode/runtime/manager_market/bootstrap.log'
+            self.assertIn('WORKER_START',log.read_text(encoding='utf8'))
+            self.assertTrue((game/'ModCarrerMode/runtime/club_environment/preview/prepare.called').is_file())
+            self.assertFalse((game/'ModCarrerMode/runtime/club_environment/preview/runtime/service.log').exists())
+
     def test_invalid_inherited_stdout_cannot_abort_the_worker(self):
         class BrokenStream:
             def write(self,*args):raise OSError(22,'Invalid argument')

@@ -48,6 +48,7 @@ def worker(game,kind,pid):
     log=runtime/kind/'runtime/service.log'
     if os.environ.get('SERVER16_CLUB_BROWSER_WORKER')=='1':log=game/'ModCarrerMode/runtime/club_browser'/str(pid)/'service.log'
     elif os.environ.get('SERVER16_TRANSFER_MARKET_WORKER')=='1':log=runtime/'market/service.log'
+    elif os.environ.get('SERVER16_MANAGER_MARKET_WORKER')=='1':log=game/'ModCarrerMode/runtime/manager_market/bootstrap.log'
     log.parent.mkdir(parents=True,exist_ok=True)
     with log.open('a',encoding='utf8',buffering=1) as stream,contextlib.redirect_stdout(stream),contextlib.redirect_stderr(stream):
         print('WORKER_START',json.dumps(dict(kind=kind,game=str(game),game_pid=pid,helper_pid=os.getpid()),ensure_ascii=True))

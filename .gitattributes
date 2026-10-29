@@ -3,3 +3,8 @@ tools/pyinstaller-COPYING.txt -text whitespace=-blank-at-eol
 # Shared with the installed FIFA Friends overlay; retain identical file hashes.
 server16_py/d3d_overlay/cgfs16_overlay.cpp -text whitespace=cr-at-eol
 server16_py/d3d_overlay/ui_pipeline_state.h -text whitespace=cr-at-eol
+
+# Exact shared worker bytes for the joint 29/10 release.
+server16_py/club_environment.py -text
+tests/test_club_environment.py -text whitespace=cr-at-eol
+docs/RELEASE_20261029.md -text whitespace=cr-at-eol
