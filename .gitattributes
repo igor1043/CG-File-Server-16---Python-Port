@@ -14,3 +14,19 @@ server16_py/file_tools.py -text whitespace=cr-at-eol
 server16_py/stadium_runtime.py -text whitespace=cr-at-eol
 tests/test_file_tools_permissions.py -text whitespace=cr-at-eol
 docs/RELEASE_20261029_R2.md -text whitespace=cr-at-eol
+
+# Preserve the exact validated inputs of the joint 30/10 release.
+README.md -text whitespace=cr-at-eol
+docs/RELEASE_20261030.md -text whitespace=cr-at-eol
+server16_py/__init__.py -text whitespace=cr-at-eol
+server16_py/d3d_injector.py -text whitespace=cr-at-eol
+server16_py/first_person_runtime.py -text whitespace=cr-at-eol
+server16_py/grass_quality_runtime.py -text whitespace=cr-at-eol
+server16_py/loading_notices.py -text whitespace=cr-at-eol
+server16_py/match_hub_panel.py -text whitespace=cr-at-eol
+server16_py/stadium_selector.py -text whitespace=cr-at-eol
+tests/test_first_person_and_hub.py -text whitespace=cr-at-eol
+tests/test_grass_quality.py -text whitespace=cr-at-eol
+tests/test_loading_notice_retry.py -text whitespace=cr-at-eol
+tests/test_overlay_reattach.py -text whitespace=cr-at-eol
+tests/test_release_features.py -text whitespace=cr-at-eol

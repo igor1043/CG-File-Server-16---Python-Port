@@ -4,10 +4,34 @@ import unittest
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock, patch
-from server16_py.d3d_injector import D3DOverlayInjector
+from server16_py.d3d_injector import D3DOverlayInjector, installed_overlay_path
 
 
 class OverlayReattachTests(unittest.TestCase):
+    def test_installed_host_plugin_takes_priority_over_frozen_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);game=root/'game';resources=root/'frozen'
+            installed=game/'ModCarrerMode/mods/server16_overlay/cgfs16_overlay.dll'
+            bundled=resources/'bin/cgfs16_overlay.dll'
+            for path,data in ((installed,b'installed'),(bundled,b'stale bundle')):
+                path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
+            expected=installed_overlay_path(game,resources)
+            self.assertEqual(expected,installed)
+            instance=self.injector(expected)
+            with patch('server16_py.d3d_injector._loaded_overlay_path',return_value=installed):
+                self.assertTrue(instance.inject(123))
+                instance._do_inject.assert_not_called()
+
+    def test_fallback_without_host_plugin_uses_game_bin_before_bundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);game=root/'game';resources=root/'frozen'
+            bundled=resources/'bin/cgfs16_overlay.dll'
+            bundled.parent.mkdir(parents=True);bundled.write_bytes(b'bundled')
+            self.assertEqual(installed_overlay_path(game,resources),bundled)
+            local=game/'bin/cgfs16_overlay.dll'
+            local.parent.mkdir(parents=True);local.write_bytes(b'installed')
+            self.assertEqual(installed_overlay_path(game,resources),local)
+
     def injector(self, path):
         instance=D3DOverlayInjector.__new__(D3DOverlayInjector)
         instance._dll_path=str(path)

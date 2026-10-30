@@ -25,6 +25,17 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
+def installed_overlay_path(game_root, resource_root):
+    """Use the plugin deployed with this game, not a frozen build's older copy."""
+    game = Path(game_root)
+    candidates = (
+        game / 'ModCarrerMode/mods/server16_overlay/cgfs16_overlay.dll',
+        game / 'bin/cgfs16_overlay.dll',
+        Path(resource_root) / 'bin/cgfs16_overlay.dll',
+    )
+    return next((path for path in candidates if path.is_file()), candidates[-1])
+
+
 def _loaded_overlay_path(pid):
     """Read the module inventory; a Server restart must not add a second hook."""
     from .memory_access import Memory, MODULEENTRY32W, INVALID_HANDLE_VALUE

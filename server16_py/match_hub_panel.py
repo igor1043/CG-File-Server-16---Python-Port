@@ -7,6 +7,7 @@ from .input_hints import navigation_hint, footer_y, panel_function_key
 from .match_audio_panel import MatchAudioPanel
 from .cloth_motion_switch import ClothMotionSwitch
 from .first_person_runtime import first_person_runtime, fov_limits, HEAD_SMOOTHING
+from .grass_quality_runtime import grass_quality_runtime
 from .extra_scenes_panel import ExtraScenesPanel
 import server16_py as features
 
@@ -41,7 +42,7 @@ class MatchHubPanel:
     def items(self):
         if self.page == 'home':
             items = [('Música', 'Cânticos, torcida e hinos de gol'),
-                    ('Gráficos', 'Física de roupas'),
+                    ('Gráficos', 'Física de roupas e qualidade do gramado' if features.GRASS_QUALITY_AVAILABLE else 'Física de roupas'),
                     ('Câmera', 'Primeira pessoa e terceira pessoa · carreira'),
                     ('Controles', 'Mapear botões, analógicos e testar comandos')]
             if features.EXTRA_SCENES_AVAILABLE:
@@ -50,7 +51,10 @@ class MatchHubPanel:
         if self.page == 'graphics':
             live = self.cloth.live_enabled(pid=self.selector.app._resolve_fifa_pid())
             value = self.cloth_value if live is None else live
-            return [('Física de roupas', 'Ligada' if value else 'Desligada'), ('Voltar', 'Ajustes da partida')]
+            items=[('Física de roupas', 'Ligada' if value else 'Desligada')]
+            if features.GRASS_QUALITY_AVAILABLE:
+                items.append(('Gramado em alta qualidade', grass_quality_runtime(self.selector.app).status()))
+            return items+[('Voltar', 'Ajustes da partida')]
         runtime = self.camera()
         items = [('Câmera do jogador', ('Ligada' if runtime.enabled else 'Desligada') + ' · escolha salva'),
                 ('Modo', 'Terceira pessoa · carreira' if runtime.mode else 'Primeira pessoa'),
@@ -83,6 +87,9 @@ class MatchHubPanel:
                     self.cloth_pending = False
                     self.message = 'Opção salva. Reinicie o FIFA para atualizar o módulo.'
             status = (live, self.message)
+            if features.GRASS_QUALITY_AVAILABLE:
+                grass=grass_quality_runtime(self.selector.app)
+                status += (grass.enabled, grass.active, grass.status())
         else:return
         if status != self._last_status:
             self._last_status = status
@@ -91,6 +98,7 @@ class MatchHubPanel:
     def activate(self, index, direction=1):
         if not self.selector.match_eligible() or self.selector.context != self.selector._context():
             self.selector.close();return
+        if not 0<=index<len(self.items()):return
         if self.page == 'home':
             if index == 0:
                 self.child = MatchAudioPanel(self.selector, on_back=self.back, include_cloth=False)
@@ -109,12 +117,17 @@ class MatchHubPanel:
         else:
             try:
                 if self.page == 'graphics':
-                    if not self.cloth.available():raise RuntimeError('Módulo de física de roupas indisponível.')
-                    self.cloth_value = not self.cloth_value
-                    self.cloth.set_enabled(self.cloth_value)
-                    self.cloth_pending = True
-                    self.cloth_deadline = time.monotonic()+3
-                    self.message = 'Aplicando física de roupas…'
+                    if index==1 and features.GRASS_QUALITY_AVAILABLE:
+                        grass=grass_quality_runtime(self.selector.app)
+                        grass.set_enabled(not grass.enabled)
+                        self.message=grass.status()
+                    else:
+                        if not self.cloth.available():raise RuntimeError('Módulo de física de roupas indisponível.')
+                        self.cloth_value = not self.cloth_value
+                        self.cloth.set_enabled(self.cloth_value)
+                        self.cloth_pending = True
+                        self.cloth_deadline = time.monotonic()+3
+                        self.message = 'Aplicando física de roupas…'
                 else:
                     runtime = self.camera()
                     if index == 0:runtime.configure(enabled=not runtime.enabled)
@@ -168,14 +181,21 @@ class MatchHubPanel:
         for (index,rect),(label,detail) in zip(self.targets(),self.items()):
             draw.rounded_rectangle(rect,10,fill='#f4f7fb',outline='#dbe3ed')
             if self.focus==index:draw_focus_ring(draw,rect)
-            available=470 if not self.selector.controller_connected else 520
+            switch=self.page=='graphics' and index<len(self.items())-1
+            available=390 if switch else 470 if not self.selector.controller_connected else 520
             draw.text((40,rect[1]+9),label,font=self.selector.font(18,True),fill=ink,max_width=available)
             draw.text((40,rect[1]+31),detail,font=self.selector.font(13),fill=muted,max_width=available)
+            if switch:
+                enabled=self.cloth_value if index==0 else grass_quality_runtime(self.selector.app).enabled
+                cy=(rect[1]+rect[3])/2
+                draw.rounded_rectangle((453,cy-12,499,cy+12),12,fill=blue if enabled else '#d6dee9')
+                cx=487 if enabled else 465;draw.ellipse((cx-9,cy-9,cx+9,cy+9),fill='white')
             if not self.selector.controller_connected:
                 key='Esc' if index==len(self.items())-1 else panel_function_key(index+1) if index<5 else ''
                 draw.text((527,rect[1]+21),key,font=self.selector.font(13,True),fill=blue)
         message=self.message
         if self.page == 'camera' and not message:message=self.camera().status()
+        if self.page=='graphics' and features.GRASS_QUALITY_AVAILABLE and not message:message='Grama 3D mais detalhada pode reduzir o FPS.'
         if self.page=='camera':
             draw.text((24,400),'Visão de campo e bola · ajustes salvos automaticamente',font=self.selector.font(13),fill=muted)
         if message:

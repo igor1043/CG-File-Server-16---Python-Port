@@ -13,20 +13,18 @@ import test_match_audio_panel as fixtures
 
 
 class ReleaseFeaturesTests(unittest.TestCase):
-    def test_narration_loading_and_applied_notifications_are_hidden(self):
+    def test_narration_notifications_do_not_enable_experimental_picker(self):
         app=SimpleNamespace(log=Mock(),show_narration_loading=Mock(),
                             _hide_asset_loading=Mock(),_show_asset_loading=Mock(),
+                            show_stadium_loading_var=Mock(get=Mock(return_value=True)),
                             _ensure_d3d_overlay_injected=Mock())
         Server16App.show_narration_applied(app,'Narrador')
         Server16App.show_narration_loading(app,'Narrador')
-        Server16App._show_asset_loading(app,'narration','Narração aplicada','Narrador','',100)
-        app.show_narration_loading.assert_not_called()
-        app._hide_asset_loading.assert_not_called()
-        app._show_asset_loading.assert_not_called()
-        app._ensure_d3d_overlay_injected.assert_not_called()
-        with patch.object(features,'NARRATION_PICKER_AVAILABLE',True):
-            Server16App.show_narration_applied(app,'Narrador')
         app.show_narration_loading.assert_called_once_with('Narrador',100,'Narração aplicada')
+        app._show_asset_loading.assert_called_once_with('narration','Carregando narração',
+            'Narrador','Carregando narração…',5,image_path='')
+        app._hide_asset_loading.assert_called_once_with('narration',delay_ms=3500)
+        self.assertFalse(features.NARRATION_PICKER_AVAILABLE)
 
     def test_public_prematch_has_no_hidden_shortcuts_or_empty_cards(self):
         self.assertTrue(features.EXTRA_SCENES_AVAILABLE)

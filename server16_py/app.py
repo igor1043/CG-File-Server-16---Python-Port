@@ -24,6 +24,7 @@ from PIL import Image, ImageTk
 from . import __version__ as APP_VERSION
 import server16_py as features
 from .asset_runtime import AssetRuntime
+from .loading_notices import loading_notices
 from .audio_profiles import AudioProfileRuntime
 from .db_patcher import restore_stadium_names
 from .match_string_patcher import patch_match_string
@@ -69,7 +70,7 @@ from .first_person_runtime import first_person_runtime
 from .startup_diagnostics import StartupDiagnostics
 from .update_checker import GithubReleaseChecker, UpdateCheckResult
 try:
-    from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector
+    from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector, installed_overlay_path
 except Exception:
     _D3DOverlayInjector = None  # type: ignore[assignment,misc]
 
@@ -1141,20 +1142,23 @@ class Server16App(tk.Tk):
         if not self.show_stadium_loading_var.get():
             return
         self._cancel_stadium_loading_hide()
+        loading_notices(self).cancel('stadium')
         if use_d3d and self._try_d3d_overlay_show(stadium_name, detail, progress, narration=title=='Narração aplicada'):
             return
         # Keep the main Server16 status available while the game renderer starts.
         # Only the native overlay may display loading notices over the FIFA window.
         self.log(f"Stadium loading notification awaiting native overlay: {stadium_name}")
+        if use_d3d:
+            loading_notices(self).wait('stadium', stadium_name, detail, progress,
+                                       narration=title=='Narração aplicada')
 
     def show_narration_applied(self, name: str) -> None:
-        if not features.NARRATION_PICKER_AVAILABLE:return
         self.log(f'Narration applied: {name}; selection modal closed')
         self.show_narration_loading(name,100,'Narração aplicada')
         self._hide_asset_loading('narration',delay_ms=3500)
 
     def show_narration_loading(self,name: str,progress: float=5,detail: str='Carregando narração…') -> None:
-        if not features.NARRATION_PICKER_AVAILABLE:return
+        if not self.show_stadium_loading_var.get():return
         self._ensure_d3d_overlay_injected()
         image_path=''
         try:
@@ -1167,11 +1171,7 @@ class Server16App(tk.Tk):
         self._show_asset_loading('narration','Narração aplicada' if progress>=100 else 'Carregando narração',name,detail,progress,image_path=image_path)
 
     def _try_d3d_overlay_show(self, stadium_name: str, detail: str, progress: float, narration: bool = False) -> bool:
-        """Inject the D3D overlay DLL and show the notification.
-
-        Returns True if the overlay was shown via D3D injection, False if we
-        should fall back to the Tkinter modal.
-        """
+        """Publish through FIFA's installed plugin; return False to retry later."""
         if not self._ensure_d3d_overlay_injected():
             return False
         inj = self._d3d_injector
@@ -1190,7 +1190,7 @@ class Server16App(tk.Tk):
         if _D3DOverlayInjector is None:
             self.log("D3D overlay: injector module not available (import failed)")
             return False
-        dll_path = self.resource_dir / "bin" / "cgfs16_overlay.dll"
+        dll_path = installed_overlay_path(self.exedir, self.resource_dir)
         if not dll_path.exists():
             self.log(f"D3D overlay: DLL not found at {dll_path}")
             return False
@@ -1232,6 +1232,8 @@ class Server16App(tk.Tk):
             self._d3d_overlay_hide_job = None
 
     def _hide_stadium_loading_modal(self, delay_ms: int = 0) -> None:
+        if loading_notices(self).defer_hide('stadium', delay_ms):
+            return
         if delay_ms > 0:
             self._cancel_stadium_loading_hide()
             self._stadium_loading_hide_job = self.after(delay_ms, self._hide_stadium_loading_modal)
@@ -1289,6 +1291,8 @@ class Server16App(tk.Tk):
     def _update_stadium_loading_modal(self, value: float, detail: str) -> None:
         if not self.show_stadium_loading_var.get():
             return
+        if loading_notices(self).update('stadium', value, detail):
+            return
         # ── D3D injection overlay ─────────────────────────────────────────────
         if self._d3d_injector is not None and self._d3d_injector.is_injected():
             self._d3d_injector.update(value, detail)
@@ -1307,9 +1311,10 @@ class Server16App(tk.Tk):
             self.stadium_loading_modal.update_idletasks()
 
     def _show_asset_loading(self, kind: str, title: str, name: str, detail: str, progress: float, image_path: str = '') -> None:
-        if kind == 'narration' and not features.NARRATION_PICKER_AVAILABLE:return
-        if kind != 'narration' and not self.show_stadium_loading_var.get():
+        # Notifications describe actual loads, independently of the experimental picker.
+        if not self.show_stadium_loading_var.get():
             return
+        loading_notices(self).cancel(kind)
         previous = self._asset_loading_hide_jobs.pop(kind, None)
         if previous is not None:
             try:
@@ -1323,14 +1328,19 @@ class Server16App(tk.Tk):
             self._d3d_injector.show_asset(kind, name, detail, progress, image_path=image_path)
         else:
             self.log(f"{kind} loading notification awaiting native overlay: {name}")
+            loading_notices(self).wait(kind, name, detail, progress, image_path)
 
     def _update_asset_loading(self, kind: str, progress: float, detail: str) -> None:
+        if loading_notices(self).update(kind, progress, detail):
+            return
         if kind in self._asset_loading_fallback:
             self._update_stadium_loading_modal(progress, detail)
         elif self._d3d_injector is not None and self._d3d_injector.is_injected():
             self._d3d_injector.update_asset(kind, progress, detail)
 
     def _hide_asset_loading(self, kind: str, delay_ms: int = 0) -> None:
+        if loading_notices(self).defer_hide(kind, delay_ms):
+            return
         if kind not in self._asset_loading_started_at and kind not in self._asset_loading_fallback:
             return
         previous = self._asset_loading_hide_jobs.pop(kind, None)
@@ -1347,6 +1357,7 @@ class Server16App(tk.Tk):
         self._finish_asset_loading(kind)
 
     def _finish_asset_loading(self, kind: str) -> None:
+        loading_notices(self).cancel(kind)
         self._asset_loading_hide_jobs.pop(kind, None)
         self._asset_loading_started_at.pop(kind, None)
         if kind=='narration' and getattr(self,'_narration_notice',None) is not None:self._narration_notice.withdraw()

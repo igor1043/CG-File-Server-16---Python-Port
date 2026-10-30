@@ -7,12 +7,22 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
 from PIL import Image
-from server16_py.first_person_runtime import CameraShared, FirstPersonRuntime, load_preferences, save_preferences
+from server16_py.first_person_runtime import CameraShared, FirstPersonRuntime, load_preferences, save_preferences, load_head_smoothing
 from server16_py.match_hub_panel import MatchHubPanel
 import test_match_audio_panel as audio_fixtures
 
 
 class CameraRuntimeTests(unittest.TestCase):
+    def test_new_install_defaults_to_130_and_extra_high_then_preserves_explicit_choices(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'camera.json'
+            self.assertEqual(load_preferences(p),(False,130,0))
+            self.assertEqual(load_head_smoothing(p),2)
+            save_preferences(p,True,100,head_smoothing=0)
+            self.assertEqual(load_preferences(p),(True,100,0))
+            self.assertEqual(load_head_smoothing(p),0)
+            for data in ('[]','broken','{"head_smoothing":true}', '{"head_smoothing":99}'):
+                p.write_text(data);self.assertEqual(load_head_smoothing(p),2)
     def test_head_smoothing_persists_all_levels_and_survives_other_edits(self):
         with tempfile.TemporaryDirectory() as d:
             app=SimpleNamespace(base_dir=Path(d),memory=SimpleNamespace(is_open=lambda:False),log=Mock())
@@ -33,18 +43,18 @@ class CameraRuntimeTests(unittest.TestCase):
     def test_preferences_validate_corrupt_and_wrong_types(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'camera.json'
-            self.assertEqual(load_preferences(p),(False,85,0))
+            self.assertEqual(load_preferences(p),(False,130,0))
             for data in ('[]','null','broken','{"enabled":1,"fov":true}', '{"enabled":"true","fov":121}'):
                 p.write_text(data)
-                self.assertEqual(load_preferences(p),(False,85,0))
+                self.assertEqual(load_preferences(p),(False,130,0))
             p.write_text('{"profile":0,"framing":0,"fov":90,"look_bias":20}')
-            self.assertEqual(load_preferences(p),(False,85,0))
+            self.assertEqual(load_preferences(p),(False,130,0))
             p.write_text('{"fov":115}')
-            self.assertEqual(load_preferences(p),(False,85,0))
+            self.assertEqual(load_preferences(p),(False,130,0))
             save_preferences(p,True,80,1)
             self.assertEqual(load_preferences(p),(True,80,1))  # New explicit choices survive.
             p.write_text('{"version":3,"mode":true}')
-            self.assertEqual(load_preferences(p),(False,85,0))
+            self.assertEqual(load_preferences(p),(False,130,0))
 
     def test_command_ack_preferences_and_shutdown(self):
         self.assertEqual(ctypes.sizeof(CameraShared),80)
@@ -55,7 +65,7 @@ class CameraRuntimeTests(unittest.TestCase):
             try:
                 self.assertEqual(runtime.status(),'Câmera original ativa.')
                 runtime.configure(enabled=True,fov=85,mode=1)
-                self.assertEqual((runtime.shared.profile,runtime.shared.framing,runtime.shared.look_bias),(0,1,0))
+                self.assertEqual((runtime.shared.profile,runtime.shared.framing,runtime.shared.look_bias),(2,1,0))
                 self.assertEqual((runtime.shared.version,runtime.shared.fov,runtime.shared.mode),(4,85,1))
                 runtime.shared.ready=1
                 runtime.tick()  # Initial pid must not discard first activation.
@@ -65,7 +75,7 @@ class CameraRuntimeTests(unittest.TestCase):
                 runtime.shared.enabled=runtime.shared.valid=1
                 self.assertEqual(runtime.status(),'Terceira pessoa ativa.')
                 saved=json.loads(runtime.path.read_text())
-                self.assertEqual(saved,{'version':4,'enabled':True,'mode':1,'fov_first_person':85,'fov_career':85,'distance':0,'head_smoothing':0})
+                self.assertEqual(saved,{'version':4,'enabled':True,'mode':1,'fov_first_person':130,'fov_career':85,'distance':0,'head_smoothing':2})
                 command=runtime.shared.command
                 for kwargs in ({'fov':121},{'fov':True},{'enabled':1},{'mode':2},{'mode':False},{'distance':3},{'distance':True},{'head_smoothing':4},{'head_smoothing':True}):
                     with self.assertRaises(ValueError):runtime.configure(**kwargs)
@@ -152,7 +162,7 @@ class CameraRuntimeTests(unittest.TestCase):
                 runtime=FirstPersonRuntime(app)
                 try:
                     runtime.configure(mode=0)
-                    self.assertEqual((runtime.fov,runtime.shared.fov),(85,85))
+                    self.assertEqual((runtime.fov,runtime.shared.fov),(130,130))
                     runtime.configure(fov=150)
                     self.assertEqual((runtime.fov,runtime.shared.fov),(150,150))
                     with self.assertRaises(ValueError):runtime.configure(fov=151)
@@ -181,7 +191,7 @@ class CameraRuntimeTests(unittest.TestCase):
             try:
                 with patch('server16_py.first_person_runtime.save_preferences',side_effect=PermissionError('locked')):
                     with self.assertRaises(PermissionError):runtime.configure(enabled=True,fov=115)
-                self.assertEqual((runtime.enabled,runtime.fov,runtime.shared.requested),(False,85,0))
+                self.assertEqual((runtime.enabled,runtime.fov,runtime.shared.requested),(False,130,0))
             finally:runtime.close()
 
 

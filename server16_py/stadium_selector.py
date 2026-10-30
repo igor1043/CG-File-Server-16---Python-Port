@@ -153,6 +153,13 @@ class StadiumSelector:
         self.career_service.tick()
         camera=getattr(app,'_first_person_runtime',None)
         if camera is not None:camera.tick()
+        if features.GRASS_QUALITY_AVAILABLE:
+            from .grass_quality_runtime import grass_quality_runtime
+            grass_quality_runtime(app).tick()
+        else:
+            grass=getattr(app,'_grass_quality_runtime',None)
+            if grass is not None:
+                grass.close();app._grass_quality_runtime=None
         if time.monotonic() >= getattr(self,'_next_cloth_sync',0):
             from .cloth_motion_switch import ClothMotionSwitch
             switch=ClothMotionSwitch(getattr(app,'exedir',app.base_dir))
@@ -444,6 +451,9 @@ class StadiumSelector:
         camera=getattr(self.app,'_first_person_runtime',None)
         if camera is not None:
             camera.close();self.app._first_person_runtime=None
+        grass=getattr(self.app,'_grass_quality_runtime',None)
+        if grass is not None:
+            grass.close();self.app._grass_quality_runtime=None
         self.shared=None
         self.mapping.close()
 

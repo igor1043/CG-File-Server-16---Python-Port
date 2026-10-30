@@ -12,10 +12,11 @@ from pathlib import Path
 
 MAPPING_NAME = 'Local\\FIFA16_FirstPersonCamera_v4'
 DLL_NAME = 'server16_first_person_v14.dll'
-DEFAULT_FOV = 85
+DEFAULT_FOV = 130
 CAREER_FOV = 85
 PREFERENCES_VERSION = 4
 HEAD_SMOOTHING = ('Média', 'Alta', 'Extra alta', 'Agressiva')
+DEFAULT_HEAD_SMOOTHING = 2
 
 
 class CameraShared(ctypes.Structure):
@@ -42,8 +43,8 @@ def _load_settings(path):
     enabled = data.get('enabled', False) is True
     mode = data.get('mode', 0)
     mode = mode if type(mode) is int and mode in (0, 1) else 0
-    # Migrate the old shared/wide lens to the user's requested 85-degree
-    # standard in both modes. Later explicit mode-specific choices survive.
+    # New installations use a wide first-person lens and the existing career
+    # lens. Explicit choices in the current preferences format survive.
     first = data.get('fov_first_person', DEFAULT_FOV) if data.get('version') == PREFERENCES_VERSION else DEFAULT_FOV
     career = data.get('fov_career', CAREER_FOV) if data.get('version') == PREFERENCES_VERSION else CAREER_FOV
     first = first if type(first) is int and 75 <= first <= 150 else DEFAULT_FOV
@@ -61,13 +62,13 @@ def load_preferences(path):
 def load_head_smoothing(path):
     try:
         data = json.loads(Path(path).read_text(encoding='utf-8'))
-        value = data.get('head_smoothing', 0) if isinstance(data, dict) else 0
+        value = data.get('head_smoothing', DEFAULT_HEAD_SMOOTHING) if isinstance(data, dict) else DEFAULT_HEAD_SMOOTHING
     except (OSError, ValueError):
-        value = 0
-    return value if type(value) is int and 0 <= value < len(HEAD_SMOOTHING) else 0
+        value = DEFAULT_HEAD_SMOOTHING
+    return value if type(value) is int and 0 <= value < len(HEAD_SMOOTHING) else DEFAULT_HEAD_SMOOTHING
 
 
-def save_preferences(path, enabled, fov, mode=0, *, other_fov=None, distance=0, head_smoothing=0):
+def save_preferences(path, enabled, fov, mode=0, *, other_fov=None, distance=0, head_smoothing=DEFAULT_HEAD_SMOOTHING):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.tmp')
