@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import os
+import re
 import tempfile
 import zlib
 import shutil
@@ -295,6 +296,106 @@ def checkdirs(path: str | Path) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
+_WINDOWS_USER_SID: str | None = None
+_WINDOWS_USER_SID_LOADED = False
+
+
+def _current_windows_user_sid() -> str | None:
+    """Return the SID used by this Server16 process, including under UAC."""
+    global _WINDOWS_USER_SID, _WINDOWS_USER_SID_LOADED
+    if _WINDOWS_USER_SID_LOADED:
+        return _WINDOWS_USER_SID
+    _WINDOWS_USER_SID_LOADED = True
+    if os.name != "nt":
+        return None
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    whoami = system_root / "System32" / "whoami.exe"
+    try:
+        result = subprocess.run(
+            [str(whoami), "/user", "/fo", "csv", "/nh"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = re.search(r"\bS-1-\d+(?:-\d+)+\b", result.stdout)
+    if match:
+        _WINDOWS_USER_SID = match.group(0)
+    return _WINDOWS_USER_SID
+
+
+def ensure_server16_asset_access(path: str | Path, log=None) -> bool:
+    """Restore inherited ACLs and current-user modify access on one managed tree.
+
+    This is intentionally additive: it never takes ownership or removes ACL
+    entries. Callers must pass only Server16-managed
+    FIFA asset destinations (for example ``sceneassets\\goalnet``).
+    """
+    if os.name != "nt":
+        return True
+    asset_root = Path(path)
+    if not asset_root.is_dir():
+        return True
+
+    def report(message: str) -> None:
+        if callable(log):
+            try:
+                log(message)
+            except Exception:
+                pass
+
+    sid = _current_windows_user_sid()
+    if not sid:
+        report(f"Asset permissions: could not resolve the Windows user SID for {asset_root}")
+        return False
+
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    icacls = system_root / "System32" / "icacls.exe"
+    commands = (
+        [str(icacls), str(asset_root), "/inheritance:e", "/T", "/C", "/Q"],
+        [str(icacls), str(asset_root), "/grant", f"*{sid}:(OI)(CI)(M)", "/C", "/Q"],
+    )
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=45,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            report(
+                f"Asset permissions: could not update {asset_root}: {exc}. "
+                "If Windows denied the ACL change, run Server16 as administrator once."
+            )
+            return False
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "icacls returned an error").strip()
+            report(
+                f"Asset permissions: could not update {asset_root}: {details[:500]}. "
+                "If Windows denied the ACL change, run Server16 as administrator once."
+            )
+            return False
+    report(f"Asset permissions: inherited access and user modify access ensured for {asset_root}")
+    return True
+
+
+def ensure_server16_stadium_access(sceneassets_dir: str | Path, log=None) -> None:
+    """Repair only the stadium asset trees that Server16 copies and owns."""
+    root = Path(sceneassets_dir)
+    for name in ("stadium", "crowdplacement", "crowdchair"):
+        ensure_server16_asset_access(root / name, log=log)
+
+
 def _files_match(src: Path, dst: Path) -> bool:
     try:
         if not dst.exists() or not dst.is_file():
@@ -441,7 +542,15 @@ def restore_native_assets(app) -> int:
     )
     for source, target in tree_pairs:
         if source.exists():
+            if source == fsw / "stadium":
+                ensure_server16_stadium_access(exedir / "data" / "sceneassets", log=getattr(app, "log", None))
+            elif target == exedir / "data" / "sceneassets" / "goalnet":
+                ensure_server16_asset_access(target, log=getattr(app, "log", None))
             copy(source, target)
+            if source == fsw / "stadium":
+                ensure_server16_stadium_access(exedir / "data" / "sceneassets", log=getattr(app, "log", None))
+            elif target == exedir / "data" / "sceneassets" / "goalnet":
+                ensure_server16_asset_access(target, log=getattr(app, "log", None))
             restored += sum(1 for item in source.rglob("*") if item.is_file()) if source.is_dir() else 1
 
     # Navigation and intro files belong to the original bootstrap/movie flow.
@@ -503,10 +612,12 @@ def copy_glares(src: str | Path, day_or_night: str, index: str, inj_id: str, exe
     dst.write_text("\r\n".join(rewritten) + "\r\n", encoding="utf-8")
 
 
-def extra_setup(source_dir: str | Path, dest_dir: str | Path, source_index: str, asset_prefix: str, dest_index: str) -> None:
+def extra_setup(source_dir: str | Path, dest_dir: str | Path, source_index: str, asset_prefix: str, dest_index: str, log=None) -> None:
     src_root = Path(source_dir)
     dest_root = Path(dest_dir)
     dest_root.mkdir(parents=True, exist_ok=True)
+    if asset_prefix.lower() == "netcolor":
+        ensure_server16_asset_access(dest_root, log=log)
     if not src_root.exists():
         return
     token = f"_{source_index}"

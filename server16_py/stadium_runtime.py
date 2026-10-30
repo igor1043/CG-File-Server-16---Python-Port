@@ -16,6 +16,7 @@ from .file_tools import (
     copy_if_exists,
     copy_or_clear,
     extra_setup,
+    ensure_server16_stadium_access,
     restore_stadium_inj_files,
     set_inj_id,
     stadium_injection_paths,
@@ -295,7 +296,10 @@ class StadiumRuntime:
         app._last_stadium_applied_signature = None
         app._hide_stadium_loading_modal()
         app._set_progress(25, "Restoring default stadium")
-        copy(app.exedir / "FSW" / "stadium", app.exedir / "data" / "sceneassets")
+        sceneassets = app.exedir / "data" / "sceneassets"
+        ensure_server16_stadium_access(sceneassets, log=app.log)
+        copy(app.exedir / "FSW" / "stadium", sceneassets)
+        ensure_server16_stadium_access(sceneassets, log=app.log)
         app.curstad = ""
         app.ScoreboardStadName = ""
         app.stadmovie = False
@@ -556,7 +560,7 @@ class StadiumRuntime:
         steps.extend(
             [
                 ("Applying police setup", lambda: extra_setup(app.Psource, game / app.Pdest.relative_to(app.exedir), police, "policeofficer", '9' if str(injid)=='261' else '4')),
-                ("Applying net setup", lambda: extra_setup(app.Nsource, game / app.Ndest.relative_to(app.exedir), net, "netcolor", "0")),
+                ("Applying net setup", lambda: extra_setup(app.Nsource, game / app.Ndest.relative_to(app.exedir), net, "netcolor", "0", log=app.log)),
                 ("Applying pitch setup", lambda: extra_setup(app.PitchMowsource, game / app.PitchMowdest.relative_to(app.exedir), pitch, "pitchmowpattern", "0")),
             ]
         )

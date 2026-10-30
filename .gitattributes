@@ -8,3 +8,9 @@ server16_py/d3d_overlay/ui_pipeline_state.h -text whitespace=cr-at-eol
 server16_py/club_environment.py -text
 tests/test_club_environment.py -text whitespace=cr-at-eol
 docs/RELEASE_20261029.md -text whitespace=cr-at-eol
+server16_py/app.py -text whitespace=cr-at-eol
+server16_py/asset_runtime.py -text whitespace=cr-at-eol
+server16_py/file_tools.py -text whitespace=cr-at-eol
+server16_py/stadium_runtime.py -text whitespace=cr-at-eol
+tests/test_file_tools_permissions.py -text whitespace=cr-at-eol
+docs/RELEASE_20261029_R2.md -text whitespace=cr-at-eol

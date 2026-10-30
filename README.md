@@ -8,6 +8,12 @@ Escolha o estádio, ajuste a apresentação, controle o áudio e configure recur
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
 
+## Correção R2 — 29/10/2026
+
+Novo executável do Server16 0.2.19 com correções de acesso às pastas de modelos de estádio, cadeiras/público e redes durante aplicação e restauração. Os quatro módulos alterados correspondem à instalação do jogo; os demais módulos e recursos embarcados foram preservados.
+
+Atualize a branch do FIFA Friends V12 e use **FIFA-Friends-Assets-Complementares-20261029-R2.zip**, refeito com o catálogo/fotos atuais e todos os assets necessários da entrega anterior. [Detalhes da R2 e testes](docs/RELEASE_20261029_R2.md).
+
 ## Entrega conjunta — 29/10/2026
 
 O auxiliar da carreira agora mantém o bootstrap do mercado de técnicos em seu próprio log. O executável pronto publicado com o V12 foi atualizado com esse mesmo fonte, preservando o restante do pacote e a versão **0.2.19**.

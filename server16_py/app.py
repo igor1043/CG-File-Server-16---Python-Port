@@ -51,6 +51,7 @@ from .file_tools import (
     copy,
     copy_if_exists,
     extra_setup,
+    ensure_server16_stadium_access,
     resolve_stadium_preview_path,
     restore_native_assets,
 )
@@ -3502,9 +3503,12 @@ class Server16App(tk.Tk):
             checkdirs(path)
         extra_setup(self.Psource, self.Pdest, "4", "4", "4")
         extra_setup(self.Psource, self.Pdest, "9", "9", "9")
-        extra_setup(self.Nsource, self.Ndest, "0", "netcolor", "0")
+        extra_setup(self.Nsource, self.Ndest, "0", "netcolor", "0", log=self.log)
         extra_setup(self.PitchMowsource, self.PitchMowdest, "0", "pitchmowpattern", "0")
-        copy(self.exedir / "FSW" / "stadium", self.exedir / "data" / "sceneassets")
+        sceneassets = self.exedir / "data" / "sceneassets"
+        ensure_server16_stadium_access(sceneassets, log=self.log)
+        copy(self.exedir / "FSW" / "stadium", sceneassets)
+        ensure_server16_stadium_access(sceneassets, log=self.log)
         copy(self.exedir / "FSW" / "TVLogo", self.TVdata)
         copy(self.exedir / "FSW" / "ScoreBoard", self.Scoredata / "game")
         if self.module_enabled("Movies"):
