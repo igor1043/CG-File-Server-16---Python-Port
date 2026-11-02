@@ -30,3 +30,17 @@ tests/test_grass_quality.py -text whitespace=cr-at-eol
 tests/test_loading_notice_retry.py -text whitespace=cr-at-eol
 tests/test_overlay_reattach.py -text whitespace=cr-at-eol
 tests/test_release_features.py -text whitespace=cr-at-eol
+
+# Preserve the exact validated inputs of the 02/11 joint release.
+docs/RELEASE_20261102.md -text whitespace=cr-at-eol
+server16_py/build_check.py -text whitespace=cr-at-eol
+server16_py/career_options.py -text whitespace=cr-at-eol
+server16_py/native_asset_cleanup.py -text whitespace=cr-at-eol
+server16_py/settings_editor.py -text whitespace=cr-at-eol
+server16_py/substitution_audio.py -text whitespace=cr-at-eol
+server16_py/substitution_audio_settings.py -text whitespace=cr-at-eol
+server16_py/substitution_events.py -text whitespace=cr-at-eol
+tests/test_career_options.py -text whitespace=cr-at-eol
+tests/test_narration_panel.py -text whitespace=cr-at-eol
+tests/test_native_asset_cleanup.py -text whitespace=cr-at-eol
+tests/test_substitution_audio.py -text whitespace=cr-at-eol

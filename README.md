@@ -4,9 +4,21 @@ Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.19 · **Atualizado em:** 30/10/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.19 · **Atualizado em:** 02/11/2026 · **Plataforma:** Windows / FIFA 16 compatível
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
+
+## Entrega conjunta — 02/11/2026
+
+Opções da carreira e anúncios/áudio de substituição integrados, recuperação de
+recursos de estádio e limpeza de temporários revisadas. Fontes iguais aos do jogo
+e módulos atuais presentes no executável distribuído pelo FIFA Friends V12.
+651 testes do Server e autoteste congelado aprovados.
+
+Atualize também a branch `fifa-friends-v12` e aplique somente o novo
+**FIFA-Friends-Assets-Delta-20261102-sobre-20261030.zip** sobre o complemento de
+30/10 já instalado. Ele acrescenta técnicos, imagens, vestiário e recursos externos
+alterados. [Instalação e validação](docs/RELEASE_20261102.md).
 
 ## Entrega conjunta — 30/10/2026
 

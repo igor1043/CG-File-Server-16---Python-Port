@@ -40,7 +40,11 @@ class SettingsAreaEditor(tk.Toplevel):
         self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
         self.frames: dict[str, SettingsSectionFrame] = {}
         for spec in specs:
-            frame = SettingsSectionFrame(self.notebook, app, spec)
+            if spec.kind == 'substitution_audio':
+                from .substitution_audio_settings import SubstitutionAudioSettingsFrame
+                frame = SubstitutionAudioSettingsFrame(self.notebook, app, spec)
+            else:
+                frame = SettingsSectionFrame(self.notebook, app, spec)
             self.notebook.add(frame, text=app.tr(spec.title) if hasattr(app, "tr") else spec.title)
             self.frames[spec.section.lower()] = frame
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -56,7 +60,7 @@ class SettingsAreaEditor(tk.Toplevel):
 
     def _refresh_active_frame(self) -> None:
         current_tab = self.notebook.nametowidget(self.notebook.select())
-        if isinstance(current_tab, SettingsSectionFrame):
+        if hasattr(current_tab, 'reload_entries'):
             current_tab.reload_entries()
 
 
@@ -786,4 +790,5 @@ def asset_specs() -> list[SectionSpec]:
 def audio_specs() -> list[SectionSpec]:
     return [
         SectionSpec("chantsid", "dialog.editor.choice.chants_ids", kind="chants", directory="FSW\\Chants", recursive=True),
+        SectionSpec('substitution_audio','Som de substituição',kind='substitution_audio'),
     ]

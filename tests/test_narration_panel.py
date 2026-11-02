@@ -17,7 +17,7 @@ class NarrationPanelTests(unittest.TestCase):
             selector=fixtures.StadiumSelectorTests().make_selector(Path(tmp))
             selector.app.show_narration_applied=Mock()
             try:
-                selector.open(hub=True);selector.handle(16,4)
+                selector.open(hub=True);selector.prematch_panel.activate(3)
                 panel=selector.prematch_panel
                 selector.handle(5,0);selector.handle(6,0)
                 self.assertEqual(panel.index,1)
@@ -35,7 +35,7 @@ class NarrationPanelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,patch('server16_py.narration_panel.narration_runtime',return_value=runtime):
             selector=fixtures.StadiumSelectorTests().make_selector(Path(tmp))
             try:
-                selector.open(hub=True);selector.handle(16,4);selector.handle(3,0)
+                selector.open(hub=True);selector.prematch_panel.activate(3);selector.handle(3,0)
                 self.assertEqual(selector.prematch_panel.focus,4)
             finally:selector.shutdown()
     def test_failed_application_keeps_selector_open(self):
@@ -43,7 +43,7 @@ class NarrationPanelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,patch('server16_py.narration_panel.narration_runtime',return_value=runtime):
             selector=fixtures.StadiumSelectorTests().make_selector(Path(tmp));selector.app.show_narration_applied=Mock()
             try:
-                selector.open(hub=True);selector.handle(16,4);selector.handle(16,1)
+                selector.open(hub=True);selector.prematch_panel.activate(3);selector.handle(16,1)
                 selector.prematch_panel.tick()
                 self.assertTrue(selector.opened)
                 self.assertEqual(selector.prematch_panel.message,'Perfil rejeitado')
@@ -55,7 +55,7 @@ class NarrationPanelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,patch('server16_py.narration_panel.narration_runtime',return_value=runtime):
             selector=fixtures.StadiumSelectorTests().make_selector(Path(tmp))
             try:
-                selector.open(hub=True);selector.handle(16,4)
+                selector.open(hub=True);selector.prematch_panel.activate(3)
                 for _ in range(3):selector.handle(5,0)
                 selector.handle(6,0);selector.handle(16,1)
                 runtime.apply.assert_called_once_with('Novo narrador')

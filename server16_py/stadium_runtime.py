@@ -185,6 +185,8 @@ class StadiumRuntime:
 
     def apply_stadium_runtime(self) -> None:
         app = self.app
+        cleanup=getattr(app,'_native_asset_cleanup',None)
+        if cleanup and cleanup.pending:return
         preview = 'stadiumpan' in (app.lastpagename or '').lower()
         if getattr(app, '_stadium_fixture_entered', False) or not (prematch_page(app.lastpagename) or preview):
             # Never replace models/textures or the stadium ID after loading has
@@ -295,11 +297,10 @@ class StadiumRuntime:
             return
         app._last_stadium_applied_signature = None
         app._hide_stadium_loading_modal()
-        app._set_progress(25, "Restoring default stadium")
-        sceneassets = app.exedir / "data" / "sceneassets"
-        ensure_server16_stadium_access(sceneassets, log=app.log)
-        copy(app.exedir / "FSW" / "stadium", sceneassets)
-        ensure_server16_stadium_access(sceneassets, log=app.log)
+        if not getattr(app,'_stadium_assets_native',False):
+            app._set_progress(25, "Preparing native stadium assets in background")
+            app._restore_native_runtime_assets()
+            return
         app.curstad = ""
         app.ScoreboardStadName = ""
         app.stadmovie = False
@@ -399,6 +400,9 @@ class StadiumRuntime:
 
     def apply_manual_stadium(self, name: str, context: tuple) -> None:
         app = self.app
+        cleanup=getattr(app,'_native_asset_cleanup',None)
+        if cleanup and cleanup.pending:
+            raise RuntimeError('Aguarde a preparação dos arquivos da partida anterior antes de escolher o estádio.')
         if context != (app._kickoff_generation,app.HID,app.AID,app.TOURNAME,app.TOURROUNDID):
             raise RuntimeError('The match context has changed')
         if app._stadium_task_running:
@@ -631,6 +635,7 @@ class StadiumRuntime:
                 if str(app.memory.get_int(app.offsets.ORISTADIDBASE,fallback_offsets)) != str(payload['injid']):
                     raise RuntimeError('Stadium ID could not be confirmed in FIFA memory')
             activated = True
+            app._stadium_assets_native=False
             self._applied_slot = str(payload['injid'])
             self._previous_manual_override = None
             if transaction is not None:

@@ -34,6 +34,7 @@ from .cloth_motion_switch import ClothMotionSwitch
 from .competition_icons import CompetitionIconService
 from .shutdown import cleanup_step, bounded_cleanup, finish_frozen_process, close_owned_readers
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
+from .substitution_audio import SubstitutionAudioRuntime
 from .entrance_runtime import TeamEntranceRuntime
 from .entrance_props_runtime import EntrancePropsRuntime
 from .discord_rpc_runtime import DiscordRPCRuntime, StadiumPreviewUploader
@@ -431,6 +432,8 @@ class Server16App(tk.Tk):
         self.after(3000, lambda: self.check_updates(silent=True))
         if self.module_enabled("Chants"):
             self._start_chants_runtime()
+        self._substitution_audio = SubstitutionAudioRuntime(self)
+        self._substitution_audio.start()
         if any(slot.get('enabled') or slot.get('hide_from_fifa') for slot in self.settings.data.get('gamepad_bridge',{}).get('slots',[])):
             from .gamepad_panel import bridge_for
             self.after(800,lambda:bridge_for(self))
@@ -2610,7 +2613,8 @@ class Server16App(tk.Tk):
             self.page_banner.configure(text=page_name or "-")
 
     def _should_auto_apply_runtime(self, page_name: str) -> bool:
-        return page_name == "game/screens/playNow/KickOffHub"
+        cleanup=getattr(self,'_native_asset_cleanup',None)
+        return page_name == "game/screens/playNow/KickOffHub" and not (cleanup and cleanup.pending)
 
     def _schedule_worker_poll(self) -> None:
         if self._closing or self._worker_poll_job is not None:
@@ -3520,6 +3524,7 @@ class Server16App(tk.Tk):
         ensure_server16_stadium_access(sceneassets, log=self.log)
         copy(self.exedir / "FSW" / "stadium", sceneassets)
         ensure_server16_stadium_access(sceneassets, log=self.log)
+        self._stadium_assets_native=True
         copy(self.exedir / "FSW" / "TVLogo", self.TVdata)
         copy(self.exedir / "FSW" / "ScoreBoard", self.Scoredata / "game")
         if self.module_enabled("Movies"):
@@ -3587,6 +3592,10 @@ class Server16App(tk.Tk):
                 self._attached_once = True
                 self._set_process_status(self.status_text("fifa_attached"), self.success)
                 self.update_page_name()
+                cleanup=getattr(self,'_native_asset_cleanup',None)
+                if cleanup and cleanup.pulse() and self._should_auto_apply_runtime(self.lastpagename):
+                    self._last_runtime_signature=None
+                    self.refresh_live_context(self.lastpagename)
             else:
                 self._sync_page_banner("Process not running")
                 self._set_process_status(self.status_text("waiting_fifa"), self.accent)
@@ -4212,7 +4221,17 @@ class Server16App(tk.Tk):
 
     def _restore_native_runtime_assets(self) -> None:
         try:
+            cleanup=getattr(self,'_native_asset_cleanup',None)
+            if self._is_target_process_running():
+                if cleanup is None:
+                    from .native_asset_cleanup import NativeAssetCleanup
+                    cleanup=self._native_asset_cleanup=NativeAssetCleanup(self)
+                cleanup.request()
+                return
+            if cleanup is not None:
+                cleanup.close();self._native_asset_cleanup=None
             restored = restore_native_assets(self)
+            self._stadium_assets_native=True
             self.log(f"Native runtime assets restored from FSW ({restored} source files processed; not a changed-file count)")
         except Exception as exc:
             self.log("Failed to restore native runtime assets", exc, exc_info=sys.exc_info())
@@ -4308,6 +4327,7 @@ class Server16App(tk.Tk):
             return
         # Do not interrupt a BIG/BH or stadium write to force the UI closed.
         if (getattr(self, '_stadium_task_running', False) or getattr(self, '_bh_regen_running', False)
+                or (getattr(self,'_native_asset_cleanup',None) is not None and self._native_asset_cleanup.future is not None)
                 or (getattr(self, 'competition_icons', None) is not None and self.competition_icons.busy)):
             if not getattr(self, '_close_pending', False):
                 self._close_pending = True
@@ -4339,6 +4359,8 @@ class Server16App(tk.Tk):
         if selector is not None:
             step('match panels and shared memory', selector.shutdown)
         def audio_cleanup():
+            substitution=getattr(self,'_substitution_audio',None)
+            if substitution is not None:step('substitution audio',substitution.close)
             step('entrance audio', self._reset_team_entrance)
             step('chants audio', self._reset_chants_state)
         bounded_cleanup('audio', audio_cleanup, self.log)
@@ -4346,6 +4368,8 @@ class Server16App(tk.Tk):
         bounded_cleanup('discord', self.discord_rpc.disconnect, self.log)
         if step('game process state', self._is_target_process_running) is False:
             step('native runtime assets', self._restore_native_runtime_assets)
+        if getattr(self,'_native_asset_cleanup',None) is not None:
+            step('native asset worker',self._native_asset_cleanup.close)
         step('stadium names', lambda:restore_stadium_names(self))
         if self._d3d_injector is not None:
             step('overlay mapping', self._d3d_injector.destroy)

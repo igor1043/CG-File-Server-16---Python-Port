@@ -151,6 +151,14 @@ class StadiumSelector:
     def tick(self):
         app = self.app
         self.career_service.tick()
+        try:
+            from .career_options import CareerOptions
+            if not hasattr(self, '_career_options'):self._career_options=CareerOptions(self.career_service)
+            self._career_options.tick()
+        except Exception as exc:
+            if str(exc)!=getattr(self,'_career_options_error',None):
+                app.log('In-game career options unavailable',exc);self._career_options_error=str(exc)
+
         camera=getattr(app,'_first_person_runtime',None)
         if camera is not None:camera.tick()
         if features.GRASS_QUALITY_AVAILABLE:
