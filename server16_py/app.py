@@ -69,6 +69,7 @@ from .stadium_runtime import StadiumRuntime
 from .stadium_selector import StadiumSelector
 from .first_person_runtime import first_person_runtime
 from .startup_diagnostics import StartupDiagnostics
+from .session_logs import SessionLogs, FILE_LIMIT, TAIL_BYTES, UI_LINES, Result as LogCleanupResult, trim as trim_log
 from .update_checker import GithubReleaseChecker, UpdateCheckResult
 try:
     from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector, installed_overlay_path
@@ -135,6 +136,8 @@ class Server16App(tk.Tk):
             self._launch_splash.set_message(self.tr("splash.starting"))
         self.log_backup_path = self.log_path.with_suffix(".previous.log")
         self._prepare_runtime_log()
+        self._session_logs = SessionLogs(exclude=(self.log_path,), protected=self._active_diagnostic_folders)
+        self._session_logs.bind(self.base_dir)
         self.offsets = Offsets.load()
         self.memory = Memory()
         self.pagechange = False
@@ -230,6 +233,8 @@ class Server16App(tk.Tk):
         self.start_overlay_button = None
         self.log_status_label = None
         self.log_follow_button = None
+        self.clear_logs_button = None
+        self._log_ui_lines = 0
         self.language_label = None
         self.language_combo = None
         self.language_var = tk.StringVar(value=self.settings.language)
@@ -520,6 +525,8 @@ class Server16App(tk.Tk):
             self.logs_group.configure(text=self.tr("logs.group"))
         if self.log_follow_button is not None:
             self.log_follow_button.configure(text=self.tr("button.jump_latest"))
+        if self.clear_logs_button is not None:
+            self.clear_logs_button.configure(text=self.tr("button.clear_logs"))
         if getattr(self, "keep_open_switch", None) is not None:
             self.keep_open_switch.configure(text=self.tr("toggle.keep_open"))
         if getattr(self, "random_stadium_switch", None) is not None:
@@ -804,10 +811,6 @@ class Server16App(tk.Tk):
     def _prepare_runtime_log(self) -> None:
         header = self._build_runtime_log_header()
         try:
-            if self.log_path.exists():
-                previous_content = self.log_path.read_text(encoding="utf-8", errors="replace")
-                if previous_content and previous_content != header:
-                    self.log_backup_path.write_text(previous_content, encoding="utf-8")
             self.log_path.write_text(header, encoding="utf-8")
         except Exception:
             pass
@@ -821,8 +824,11 @@ class Server16App(tk.Tk):
             line = f"{line}\n{''.join(traceback.format_exception(*exc_info)).strip()}"
         elif error is not None:
             line = f"{line}\n{traceback.format_exc().strip()}" if traceback.format_exc().strip() != "NoneType: None" else line
+        if len(line)>65536:line='[message truncated]\n'+line[-65500:]
         try:
             with self._log_lock:
+                if self.log_path.exists() and self.log_path.stat().st_size>FILE_LIMIT:
+                    trim_log(self.base_dir,self.log_path,TAIL_BYTES,LogCleanupResult())
                 with self.log_path.open("a", encoding="utf-8") as handle:
                     handle.write(line + "\n")
         except Exception:
@@ -834,7 +840,12 @@ class Server16App(tk.Tk):
             if self._log_widget_is_near_bottom():
                 self._log_autofollow = True
             self.log_widget.configure(state="normal")
+            line=str(line)[-65536:]
             self.log_widget.insert("end", line + "\n")
+            self._log_ui_lines=getattr(self,'_log_ui_lines',0)+line.count('\n')+1
+            if self._log_ui_lines>UI_LINES:
+                self.log_widget.delete('1.0',f'{self._log_ui_lines-UI_LINES+1}.0')
+                self._log_ui_lines=UI_LINES
             if self._log_autofollow:
                 self.log_widget.see("end")
             self.log_widget.configure(state="disabled")
@@ -2284,6 +2295,8 @@ class Server16App(tk.Tk):
         self.log_status_label.pack(side="left")
         self.log_follow_button = ttk.Button(header, text=self.tr("button.jump_latest"), command=self._jump_logs_to_latest)
         self.log_follow_button.pack(side="right")
+        self.clear_logs_button = ttk.Button(header, text=self.tr("button.clear_logs"), command=self._clear_session_logs)
+        self.clear_logs_button.pack(side="right", padx=(0, 8))
         logs_body = tk.Frame(logs, bg=self.panel)
         logs_body.pack(fill="both", expand=True)
         self.log_widget = tk.Text(
@@ -2666,6 +2679,8 @@ class Server16App(tk.Tk):
             self.settings.fifa_exe = self.fifaEXE
         self.MP = Path(self.fifaEXE).stem if self.fifaEXE != "default" else ""
         self.exedir = Path(self.fifaEXE).parent if self.fifaEXE != "default" else self.base_dir
+        if getattr(self,'_session_logs',None) is not None:
+            self._session_logs.bind(self.exedir)
         self.TVLogo = self.exedir / "TVLogoGBD"
         self.TVdata = self.exedir / "data" / "ui" / "game" / "overlays"
         self.Scoredata = self.exedir / "data" / "ui"
@@ -2803,6 +2818,26 @@ class Server16App(tk.Tk):
         self._discord_rpc_last_presence = None
         self.log("ImgBB API key updated")
         messagebox.showinfo(self.tr("dialog.imgbb_key.title"), self.tr("message.imgbb_key_saved"))
+
+    def _active_diagnostic_folders(self):
+        diagnostics=getattr(self,'_startup_diagnostics',None)
+        return tuple(session.folder for session in tuple(getattr(diagnostics,'sessions',{}).values())
+                     if session.thread.is_alive())
+
+    def _clear_session_logs(self) -> None:
+        if self.clear_logs_button is not None:self.clear_logs_button.configure(state='disabled')
+        with self._log_lock:self._prepare_runtime_log()
+        if self.log_widget is not None:
+            self.log_widget.configure(state='normal');self.log_widget.delete('1.0','end');self.log_widget.configure(state='disabled')
+        self._log_ui_lines=0
+        def complete(report):
+            self.log(self.tr('message.logs_cleared',count=report.files,size=f'{report.freed/(1024*1024):.1f}'))
+            if report.failed:self.log(self.tr('message.logs_busy',count=len(report.failed)))
+            self._post_ui(self._finish_clear_logs)
+        self._session_logs.clear(complete)
+
+    def _finish_clear_logs(self):
+        if self.clear_logs_button is not None:self.clear_logs_button.configure(state='normal')
 
     def _clean_generated_cache(self) -> None:
         if not messagebox.askyesno(
@@ -4338,6 +4373,8 @@ class Server16App(tk.Tk):
         def step(label, action):
             return cleanup_step(label, action, self.log)
         step('start log', lambda:self.log("Shutdown: starting cleanup"))
+        maintenance=getattr(self,'_session_logs',None)
+        if maintenance is not None:step('log maintenance',maintenance.close)
         diagnostics = getattr(self, '_startup_diagnostics', None)
         if diagnostics is not None:
             step('startup diagnostics', diagnostics.close)

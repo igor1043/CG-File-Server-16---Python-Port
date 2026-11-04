@@ -1,10 +1,23 @@
 # Server16 — FIFA Friends
 
+## Entrega — 04/11/2026
+
+Vestiário V3 oficial, mercado de técnicos com acompanhamento diário e navegação revisados, clubes/seleções e Server16 0.2.20. O ZIP incremental de assets é `FIFA-Friends-Assets-Delta-20261104-sobre-20261102-R2.zip`, sobre a entrega de 02/11 R2. V1/V2 ficam em backup e não acompanham o pacote.
+[Instalação, mudanças e validação](docs/RELEASE_20261104.md).
+
 Seu painel para preparar a partida e personalizar o FIFA 16.
 
 Escolha o estádio, ajuste a apresentação, controle o áudio e configure recursos do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) pelo Server16. O painel reúne as opções antes e durante o jogo, com navegação por mouse, teclado ou controle, conforme a tela.
 
-**Versão:** 0.2.19 · **Atualizado em:** 02/11/2026 · **Plataforma:** Windows / FIFA 16 compatível
+**Versão:** 0.2.20 · **Atualizado em:** 04/11/2026 · **Plataforma:** Windows / FIFA 16 compatível
+
+## Logs por sessão — 04/11/2026
+
+Logs do Server16 e dos mods são limpos em segundo plano a cada abertura. A aba
+Logs agora tem **Limpar logs**, que também limpa os arquivos dos mods. Há limites
+por arquivo, por conjunto e por diagnósticos antigos, além de um limite de linhas
+no painel. Saves, bancos, preferências e assets são preservados.
+[Escopo, limites e validação](docs/LOGS_20261104.md).
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
 
