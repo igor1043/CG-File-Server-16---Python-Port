@@ -21,7 +21,8 @@ class SessionLogTests(unittest.TestCase):
             managed=[self.file(root,p) for p in ('runtime/server16.log','runtime/server16.previous.log',
                 'ModCarrerMode/logs/mascot.log','ModCarrerMode/runtime/club_browser/18/service.log',
                 'ModCarrerMode/runtime/club_environment/room/runtime/native_room.log',
-                'ModCarrerMode/data/bank/worker.log.1','ModCarrerMode/mods/camera/trace.log','dinput8_L9.log')]
+                'ModCarrerMode/data/bank/worker.log.1','ModCarrerMode/mods/camera/trace.log','dinput8_L9.log',
+                'ModCarrerMode/crowd_attendance_runtime.log','bin/overlay.log')]
             preserved=[self.file(root,p) for p in ('ModCarrerMode/runtime/career.json','runtime/settings.json',
                 'ModCarrerMode/data/bank/state.sqlite3','ModCarrerMode/data/room/profile.json',
                 'ModCarrerMode/runtime/native_components_v2.txt','data/player.rx3','FSW/settings.ini',

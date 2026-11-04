@@ -69,9 +69,11 @@ def log_files(root):
     root = Path(root).absolute()
     if not safe(root, root):return []
     paths = set()
-    try:
-        paths.update(p for p in root.iterdir() if p.is_file() and LOG_NAME.fullmatch(p.name) and safe(root,p))
-    except OSError:pass
+    for folder in (root,root/'ModCarrerMode',root/'bin'):
+        if not safe(root,folder):continue
+        try:
+            paths.update(p for p in folder.iterdir() if p.is_file() and LOG_NAME.fullmatch(p.name) and safe(root,p))
+        except OSError:pass
     for rel in ('runtime', 'logs', 'ModCarrerMode/logs', 'ModCarrerMode/runtime',
                 'ModCarrerMode/data', 'ModCarrerMode/mods'):
         paths.update(walk(root,root/rel,LOG_NAME.fullmatch))
