@@ -269,5 +269,8 @@
   "progress.runtime_ready": "Runtime pronto",
   "message.warning.missing_fifa_settings": "Não foi encontrada a configuração do Server 16:\n\n{path}\n\nMantenha o Server16Python.exe ao lado do fifa16.exe e restaure a pasta FSW da sua instalação. Nenhum INI vazio será criado no lugar do original.",
   "module.cloth_physics": "Física de roupas",
-  "module.cloth_physics_note": "Física de roupas: aplica no jogo aberto e nas próximas partidas."
+  "module.cloth_physics_note": "Física de roupas: aplica no jogo aberto e nas próximas partidas.",
+  "button.clear_logs": "Limpar logs",
+  "message.logs_cleared": "Logs limpos: {count} arquivos, {size} MB liberados.",
+  "message.logs_busy": "{count} arquivo(s) em uso; os demais logs foram limpos."
 }

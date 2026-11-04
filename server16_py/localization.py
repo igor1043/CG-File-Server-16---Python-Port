@@ -47,7 +47,8 @@ class LocalizationManager:
         path = self.locales_dir / f"{language}.json"
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
-            self._catalogs[language] = loaded if isinstance(loaded, dict) else {}
+            self._catalogs[language] = dict(LOCALE_CATALOGS.get(language, {}))
+            if isinstance(loaded,dict):self._catalogs[language].update(loaded)
         except Exception:
             fallback = LOCALE_CATALOGS.get(language, {})
             self._catalogs[language] = dict(fallback) if isinstance(fallback, dict) else {}
