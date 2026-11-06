@@ -117,12 +117,22 @@ class CareerOverlayTests(unittest.TestCase):
                 self.assertIsNone(selector.career_panel)
             finally:selector.shutdown()
 
+    def test_native_tools_are_hidden_without_removing_their_implementations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            selector=self.make_ready(Path(temporary))
+            try:
+                selector.open(career=True);panel=selector.career_panel
+                self.assertEqual([r[0] for r in panel.items()],['Estádio de fundo','Fechar'])
+                panel.activate(0)
+                self.assertIsNotNone(selector.frontend_panel)
+            finally:selector.shutdown()
+
     def test_funds_keyboard_confirmation_and_cancel_do_not_write_save(self):
         with tempfile.TemporaryDirectory() as temporary:
             selector=self.make_ready(Path(temporary))
             try:
                 selector.open(career=True);panel=selector.career_panel
-                panel.activate(1);self.assertEqual(panel.page,'finances')
+                panel.page='finances';self.assertEqual(panel.page,'finances')
                 panel.activate(0)
                 for character in '12500000':panel.handle(10,ord(character))
                 self.assertEqual(panel.amount,'12500000')
@@ -146,7 +156,7 @@ class CareerOverlayTests(unittest.TestCase):
             selector=self.make_ready(Path(temporary))
             try:
                 selector.open(career=True);panel=selector.career_panel
-                panel.activate(0);self.assertEqual(panel.page,'clubs')
+                panel.page='clubs';panel.reset_filters();self.assertEqual(panel.page,'clubs')
                 panel.country=14;panel.reset_filters()
                 self.assertEqual(panel.league,13)
                 self.assertEqual([r['id'] for r in panel.teams()],[1,2])

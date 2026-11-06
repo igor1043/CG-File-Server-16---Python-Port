@@ -70,6 +70,7 @@ from .stadium_selector import StadiumSelector
 from .first_person_runtime import first_person_runtime
 from .startup_diagnostics import StartupDiagnostics
 from .session_logs import SessionLogs, FILE_LIMIT, TAIL_BYTES, UI_LINES, Result as LogCleanupResult, trim as trim_log
+from .cache_maintenance import SessionCaches
 from .update_checker import GithubReleaseChecker, UpdateCheckResult
 try:
     from .d3d_injector import D3DOverlayInjector as _D3DOverlayInjector, installed_overlay_path
@@ -138,6 +139,10 @@ class Server16App(tk.Tk):
         self._prepare_runtime_log()
         self._session_logs = SessionLogs(exclude=(self.log_path,), protected=self._active_diagnostic_folders)
         self._session_logs.bind(self.base_dir)
+        self._visual_caches = SessionCaches(self.log, occupied=lambda: bool(
+            getattr(self, '_stadium_task_running', False) or getattr(self, '_bh_regen_running', False)
+            or (getattr(self, '_native_asset_cleanup', None) is not None
+                and self._native_asset_cleanup.future is not None)))
         self.offsets = Offsets.load()
         self.memory = Memory()
         self.pagechange = False
@@ -2681,6 +2686,8 @@ class Server16App(tk.Tk):
         self.exedir = Path(self.fifaEXE).parent if self.fifaEXE != "default" else self.base_dir
         if getattr(self,'_session_logs',None) is not None:
             self._session_logs.bind(self.exedir)
+        if getattr(self,'_visual_caches',None) is not None:
+            self._visual_caches.bind(self.exedir)
         self.TVLogo = self.exedir / "TVLogoGBD"
         self.TVdata = self.exedir / "data" / "ui" / "game" / "overlays"
         self.Scoredata = self.exedir / "data" / "ui"
@@ -2840,31 +2847,16 @@ class Server16App(tk.Tk):
         if self.clear_logs_button is not None:self.clear_logs_button.configure(state='normal')
 
     def _clean_generated_cache(self) -> None:
-        if not messagebox.askyesno(
-            self.tr("message.clean_cache_title"),
-            self.tr("message.clean_cache_confirm"),
-        ):
+        if not messagebox.askyesno(self.tr('message.clean_cache_title'),self.tr('message.clean_cache_confirm')):
             return
-        try:
-            bytes_freed, folders_removed = clear_generated_cache(self.base_dir)
-        except Exception as exc:
-            self.log("Error clearing generated cache", exc, exc_info=sys.exc_info())
-            messagebox.showerror(
-                self.tr("message.clean_cache_title"),
-                self.tr("message.clean_cache_error", error=exc),
-            )
-            return
-        if folders_removed == 0:
-            self.log("Clean cache: nothing to clean")
-            messagebox.showinfo(self.tr("message.clean_cache_title"), self.tr("message.clean_cache_empty"))
-            return
-        size_mb = bytes_freed / (1024 * 1024)
-        size_text = f"{size_mb:.1f} MB" if size_mb >= 0.1 else f"{bytes_freed} B"
-        self.log(f"Clean cache: removed {folders_removed} folder(s), freed {size_text}")
-        messagebox.showinfo(
-            self.tr("message.clean_cache_title"),
-            self.tr("message.clean_cache_done", size=size_text, count=folders_removed),
-        )
+        def complete(report):
+            self.log(f'Visual cache request completed: {report.files} paths, {report.released_bytes} bytes released, {report.moved_bytes} bytes quarantined')
+            size_text=f'{report.released_bytes/(1024*1024):.1f} MB'
+            text=(self.tr('message.clean_cache_done',size=size_text,count=report.files)
+                  if report.files else self.tr('message.clean_cache_empty'))
+            self._post_ui(messagebox.showinfo,self.tr('message.clean_cache_title'),text)
+        self._visual_caches.request(self.exedir,complete)
+        messagebox.showinfo(self.tr('message.clean_cache_title'),self.tr('message.cache_queued'))
 
     def _check_fifa_location(self) -> bool:
         if self.fifaEXE == "default":
@@ -3094,6 +3086,10 @@ class Server16App(tk.Tk):
             return
         if self._is_target_process_running():
             self.log(f"FIFA process already running: {self.fifaEXE}")
+            return
+        maintenance=getattr(self,'_visual_caches',None)
+        if maintenance is not None and not maintenance.reserve_launch():
+            self.after(100,self.launch_fifa)
             return
         try:
             from .loose_ui import activate
@@ -4375,6 +4371,8 @@ class Server16App(tk.Tk):
         step('start log', lambda:self.log("Shutdown: starting cleanup"))
         maintenance=getattr(self,'_session_logs',None)
         if maintenance is not None:step('log maintenance',maintenance.close)
+        caches=getattr(self,'_visual_caches',None)
+        if caches is not None:step('visual cache maintenance',caches.close)
         diagnostics = getattr(self, '_startup_diagnostics', None)
         if diagnostics is not None:
             step('startup diagnostics', diagnostics.close)

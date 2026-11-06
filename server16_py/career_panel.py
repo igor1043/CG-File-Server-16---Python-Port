@@ -118,10 +118,9 @@ class CareerPanel:
         if self.data_gate():
             return [('Fechar','Voltar ao FIFA')]
         if self.page == 'home':
-            return [('Transferir para outro clube','Escolha país / região, divisão e clube'),
-                    ('Finanças','Solicitar verba para transferências'),
-                    ('Aposentadoria','Remover aposentadoria ou rejuvenescer'),
-                    ('Estádio de fundo','Trocar o cenário 3D do clube da carreira'), ('Fechar','Voltar ao FIFA')]
+            # The native career screens now expose these three tools. Keep
+            # their implementation below for compatibility, only hide entries.
+            return [('Estádio de fundo','Trocar o cenário 3D do clube da carreira'), ('Fechar','Voltar ao FIFA')]
         if self.page == 'retirement':
             return [('Remover aposentadoria','Manter a idade dos jogadores'),
                     ('Remover e rejuvenescer',f'Jogadores em aposentadoria voltam a ter {self.target_age} anos'),
@@ -189,12 +188,7 @@ class CareerPanel:
             return
         try:
             if self.page == 'home':
-                if index in (0,1,2):
-                    if svc.pending:
-                        self.page='status'
-                    else:
-                        self.page=('clubs','finances','retirement')[index]
-                elif index==3:
+                if index==0:
                     self.selector.open(frontend=True,career=True);return
                 else:
                     self.selector.close();return
@@ -404,9 +398,8 @@ class CareerPanel:
             info_y=max(rect[3] for _,rect in self.targets())+24
             save=self.service.selected['title'] if self.service.selected else 'Identificando…'
             text(24,info_y,'Carreira em execução: '+save,13,bold=True)
-            text(24,info_y+24,'Clubes: proposta para você aceitar pelo FIFA.',14,bold=True)
-            text(24,info_y+48,'Finanças e aposentadoria: salve antes do pedido.',14,muted)
-            text(24,info_y+72,'Essas alterações são aplicadas após sair da carreira.',13,muted)
+            text(24,info_y+24,'Escolha o cenário 3D usado ao fundo da carreira.',14,bold=True)
+            text(24,info_y+48,'As outras ferramentas estão disponíveis dentro do FIFA.',14,muted)
         elif self.page=='retirement':
             text(24,370,'As duas opções afetam jogadores marcados para se aposentar.',13,muted)
             text(24,400,'Salve seu progresso antes de confirmar o pedido.',14,bold=True)

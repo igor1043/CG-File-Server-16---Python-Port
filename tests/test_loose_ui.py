@@ -9,6 +9,7 @@ class LooseUITest(unittest.TestCase):
         self.assertIn('data/ui/nav/careermode/mainmenuhubflow.nav',PANORAMA_TARGETS)
         self.assertNotIn('data/ui/layout/careermanagerhubcfg.xml',PANORAMA_TARGETS)
         self.assertIn('data/ui/layout/careermanagerhubcfg.xml',TARGETS)
+        self.assertIn('data/ui/game/screens/fluxhub/fluxhub.big',TARGETS)
     def fixture(self,game):
         name='data/ui/game/screens/misc/stadiumpan.big';payload=game/name;payload.parent.mkdir(parents=True);payload.write_bytes(b'APT')
         names=['unrelated',name,'also/unrelated'];directory=b'';records=b''

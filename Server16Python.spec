@@ -40,6 +40,7 @@ a = Analysis(
     ] + gamepad_binaries,
     datas=[
         ('server16_py\\assets\\startup_baseline.json', 'server16_py/assets'),
+        ('server16_py\\assets\\cache_protected_assets.json', 'server16_py/assets'),
         ('server16_py\\assets\\flags', 'server16_py/assets/flags'),
         ('server16_py\\offsets.json', 'server16_py'),
         ('server16_py\\db_worker.py', 'server16_py'),

@@ -1,12 +1,49 @@
 #include <cassert>
 #include <map>
 #include <string>
+#include <windows.h>
 #include "../native_mods/frontend_stadium/background_provider.h"
 #include "../native_mods/frontend_stadium/frontend_visibility.h"
 #include "../native_mods/frontend_stadium/scene_context.h"
 #include "../native_mods/frontend_stadium/menu_page.h"
 #include "../native_mods/frontend_stadium/profile_reload.h"
 #include "../native_mods/frontend_stadium/stadium_metadata.h"
+
+static bool profileEngineLoaded=true;
+static HMODULE WINAPI profileModule(LPCWSTR name){
+    return reinterpret_cast<HMODULE>(static_cast<uintptr_t>(std::wcscmp(name,L"dinput8.dll")==0?0x70000000:
+        (profileEngineLoaded?0x60000000:0)));
+}
+static FARPROC WINAPI profileExport(HMODULE,LPCSTR name){
+    return std::strcmp(name,"Fifa16CareerContextRead")==0?reinterpret_cast<FARPROC>(0x71000000):nullptr;
+}
+#define GetModuleHandleW profileModule
+#define GetProcAddress profileExport
+#include "../native_mods/frontend_stadium/career_profile.h"
+#undef GetModuleHandleW
+#undef GetProcAddress
+
+static void testCareerIdentity(){
+    struct Record {uint32_t schema=1,size=48,sequence=2,pid=GetCurrentProcessId();uintptr_t service=0x80000000,vtable=0x140123456,registry=0x81000000;uint32_t epoch=7,thread=123;} identity;
+    int selected=0,team=1629;bool resolved=false;
+    const uintptr_t game=0x140000000;
+    auto read=[&](uintptr_t address,void* output,size_t size){
+        if(address==0x71000000&&size==sizeof identity){std::memcpy(output,&identity,size);return true;}
+        if(address==game+0x5aafff0){const unsigned char code[]={0x48,0x63,0x41,0x14,0x83,0xf8,0xff,0x75,3,0x31,0xc0,0xc3,0x48,0x69,0xc0,0x18,3,0,0,0x48,3,0x41};std::memcpy(output,code,size);return true;}
+        if(address==game+0x44575e0&&size==24){std::memset(output,0,size);auto* p=static_cast<unsigned char*>(output);p[7]=0xc7;p[8]=1;p[9]=121;return true;}
+        if(address==identity.service+0x14&&size==4){std::memcpy(output,&selected,size);return true;}
+        if(address==0x82000000+0x1a4&&size==4){std::memcpy(output,&team,size);return true;}
+        const std::map<uintptr_t,uintptr_t> values{{0x600b13f0,1},{identity.registry+121*32+24,0x83000000},{0x83000000,identity.service},{identity.service,identity.vtable},{identity.service+0x18,0x82000000}};
+        const auto at=values.find(address);if(at==values.end()||size!=8)return false;
+        std::memcpy(output,&at->second,size);return true;
+    };
+    assert(activeCareerClub(game,read,&resolved)==1629&&resolved); // No deferred card owner exists.
+    team=0;assert(activeCareerClub(game,read,&resolved)==0&&!resolved);team=1629;
+    identity.sequence=3;assert(activeCareerClub(game,read,&resolved)==0&&!resolved);identity.sequence=2;
+    selected=-1;assert(activeCareerClub(game,read,&resolved)==0&&resolved); // A genuine exit permits the favourite club.
+    selected=0;identity.pid++;assert(activeCareerClub(game,read,&resolved)==0&&!resolved);
+    profileEngineLoaded=false;assert(activeCareerClub(game,read,&resolved)==0&&resolved);profileEngineLoaded=true;
+}
 
 struct BackgroundProvider {
     std::map<std::string,std::string> fields{{"Id","FIFA"},{"Param","BOOTFLOW"}};
@@ -17,6 +54,12 @@ static void __fastcall setString(void* raw,const char* field,const char* value){
     provider.fields[field]=value;provider.writes++;
 }
 int main(){
+    testCareerIdentity();
+    using Page=frontend_stadium::PageKind;
+    assert(frontend_stadium::refreshOnMenuReturn(Page::Other,Page::Menu,true,true));
+    assert(frontend_stadium::refreshOnMenuReturn(Page::Transition,Page::Menu,true,true));
+    assert(!frontend_stadium::refreshOnMenuReturn(Page::Menu,Page::Menu,true,true));
+    assert(!frontend_stadium::refreshOnMenuReturn(Page::Other,Page::Menu,true,false));
     assert(frontend_stadium::metadataCount(L"",-1)==-1);
     assert(frontend_stadium::metadataCount(L"0",-1)==0);
     assert(frontend_stadium::metadataCount(L"50000",0)==50000);
@@ -27,7 +70,7 @@ int main(){
     assert(frontend_stadium::photographPolicy(false,true,true,false,false)==Photo::Friends);
     assert(frontend_stadium::photographPolicy(true,true,false,false,false)==Photo::Friends);
     assert(frontend_stadium::photographPolicy(true,true,false,true,true)==Photo::Stadium);
-    assert(frontend_stadium::photographPolicy(false,true,false,true,true)==Photo::Original);
+    assert(frontend_stadium::photographPolicy(false,true,false,true,true)==Photo::Stadium);
     // Career exit has already finished loading, but its page is temporarily
     // absent. The profile's photograph (229/Grêmio here) must stay covered.
     assert(frontend_stadium::photographPolicy(false,true,false,true,true,true)==Photo::Friends);
@@ -106,6 +149,8 @@ int main(){
     assert(frontend_stadium::reloadPage(0,pageRead));
     page="game/screens/saveload_pc/profile";
     assert(frontend_stadium::reloadPage(0,pageRead));
+    page="game/screens/career/server16/ClubBrowser";
+    assert(frontend_stadium::pageKind(0,pageRead)==frontend_stadium::PageKind::ClubBrowser);
     page="game/screens/playNow/KickOffHub";
     assert(!frontend_stadium::reloadPage(0,pageRead));
     assert(frontend_stadium::pageKind(0,pageRead)==frontend_stadium::PageKind::Other);
@@ -149,5 +194,14 @@ int main(){
     assert(panorama.state==before);
     for(const auto visible:panorama.visible)assert(visible==0);
     assert(!frontend_stadium::panoramaVisibility(123,16,panorama,read));
+    assert(frontend_stadium::sameCareerRoute(true,8,8));
+    assert(!frontend_stadium::sameCareerRoute(true,2,8));
+    assert(!frontend_stadium::sameCareerRoute(true,8,0));
+    assert(frontend_stadium::sameCareerRoute(false,0,0));
+    assert(!frontend_stadium::photographRefreshReady(true,true,0,1000));
+    assert(!frontend_stadium::photographRefreshReady(false,false,0,1000));
+    assert(!frontend_stadium::photographRefreshReady(false,true,14,1000));
+    assert(!frontend_stadium::photographRefreshReady(false,true,12,499));
+    assert(frontend_stadium::photographRefreshReady(false,true,0,500));
     return 0;
 }

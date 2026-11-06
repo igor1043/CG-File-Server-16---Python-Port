@@ -1,4 +1,10 @@
-# Estádio de fundo do perfil e da carreira — Server16 0.2.14
+Atualização 06/11/2026: a troca de estádio na carreira de jogador preserva os descritores escalares dos atores e o índice selecionado da cena nativa. O contexto fica limitado ao clube e à geração da carreira; a nova rota continua controlando estádio e luz. Não são mantidos ponteiros de jogadores ou recursos entre recargas. Os registros `PLAYER_CAREER_PREPARE_CONTEXT_PRESERVED` e `PLAYER_CAREER_LOAD_CONTEXT_PRESERVED` permitem conferir a aplicação na próxima sessão.
+
+# Estádio de fundo do perfil e da carreira — Server16 0.2.15
+
+Atualização 05/11/2026: `ClubBrowser` força temporariamente o estádio de fundo durante o fluxo do globo e de suas telas de clubes, sem alterar a preferência global salva. Ao sair desse fluxo, a preferência original volta a valer. Nas páginas de fundo nativas do FIFA, o componente Background mantém a imagem `BOOTFLOW` durante a inicialização e enquanto o estádio está sendo preparado; quando a rota 3D fica estável, o mesmo componente passa a mostrar o estádio somente se a opção do usuário estiver ativa. Com a opção desativada, `BOOTFLOW` permanece como imagem de fundo. Não há uma camada D3D sobreposta à cena.
+
+Atualização 24/10/2026: seleção do perfil/clube preservada ao entrar na panorâmica, retorno das telas customizadas restaurando o estádio e respeito à opção do usuário de exibir o fundo. O carregamento de recursos permanece fora da thread de desenho; chamadas da engine seguem seu callback de cena validado. A visualização dos onze titulares não recarrega o estádio.
 
 Atualização 22/10/2026: preparação/extração fora da thread de desenho e fora
 da trava compartilhada com ela. Resultados de uma seleção vencida não são

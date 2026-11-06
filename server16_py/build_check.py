@@ -13,7 +13,7 @@ def run(output):
              'server16_py.career_context','server16_py.career_options','server16_py.frontend_stadium','server16_py.gamepad_panel',
              'server16_py.stadium_match_assets','server16_py.match_state','server16_py.native_asset_cleanup',
              'server16_py.extra_scenes_panel','server16_py.substitution_audio','server16_py.substitution_events',
-             'server16_py.substitution_audio_settings','server16_py.session_logs')
+             'server16_py.substitution_audio_settings','server16_py.session_logs','server16_py.cache_maintenance')
     result={'version':__version__,'frozen':bool(getattr(sys,'frozen',False)),'modules':{},'binaries':{},'ok':True}
     for name in modules:
         try:importlib.import_module(name);result['modules'][name]='ok'
@@ -22,6 +22,9 @@ def run(output):
         p=root/'bin'/name;result['binaries'][name]=p.exists()
         if not p.exists():result['ok']=False
     result['external_overlay_injector_absent']=not (root/'bin/cgfs16_inject.exe').exists()
+    from .cache_maintenance import policy_assets
+    result['cache_protected_asset_policy_valid']=policy_assets() is not None
+    result['ok']=result['ok'] and result['cache_protected_asset_policy_valid']
     result['ok']=result['ok'] and result['external_overlay_injector_absent']
     result['gamepad_package_present']=importlib.util.find_spec('vgamepad') is not None
     result['vigem_client_present']=(root/'vgamepad/win/vigem/client/x64/ViGEmClient.dll').exists()

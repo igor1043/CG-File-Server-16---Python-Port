@@ -2,6 +2,7 @@
 #include <cstdint>
 
 namespace frontend_stadium {
+inline bool sameCareerRoute(bool career,uint32_t preparedEpoch,uint32_t currentEpoch){return !career||(currentEpoch&&preparedEpoch==currentEpoch);}
 // Native command 0x18 takes two bytes. The second bypasses FIFA's comparison
 // with the unchanged profile stadium ID when a virtual route changes.
 struct ProfileReloadRequest { uint8_t loading=0,force=1; };

@@ -1,16 +1,20 @@
 #pragma once
+#include <cstdint>
 #include <cstring>
 
 namespace frontend_stadium {
 enum class Photograph { Original, Friends, Stadium };
+inline bool photographRefreshReady(bool pending,bool ready,int state,uint64_t settled){return !pending&&ready&&(state==0||state==12)&&settled>=500;}
 inline Photograph photographPolicy(bool menuPage,bool bootComplete,bool pending,bool ready,bool validRoute,bool transition=false){
-    // The native loader temporarily clears the page name. That interval must
-    // keep the cover too, rather than falling back to its profile photo.
+    // The native loader temporarily clears the page name. Keep BOOTFLOW during
+    // that interval rather than falling back to its profile photograph.
     // Career exit can finish the 3D reload before the next menu exists. Even
     // with no pending request, that gap must not restore the profile photo.
-    if(transition)return Photograph::Friends;
-    if(menuPage||!bootComplete||pending)
-        return menuPage&&ready&&validRoute?Photograph::Stadium:Photograph::Friends;
+    if(transition||pending)return Photograph::Friends;
+    // The active career can have a page ID outside the menu/background list.
+    // Once its native route is loaded, still select the stadium component.
+    if(ready&&validRoute)return Photograph::Stadium;
+    if(menuPage||!bootComplete)return Photograph::Friends;
     return Photograph::Original;
 }
 using SetProviderString = void(__fastcall*)(void*,const char*,const char*);
