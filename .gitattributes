@@ -44,3 +44,21 @@ tests/test_career_options.py -text whitespace=cr-at-eol
 tests/test_narration_panel.py -text whitespace=cr-at-eol
 tests/test_native_asset_cleanup.py -text whitespace=cr-at-eol
 tests/test_substitution_audio.py -text whitespace=cr-at-eol
+
+# Preserve validated native source and documentation bytes.
+native_mods/career_native/** -text whitespace=cr-at-eol
+native_mods/common/competition_identity.h text eol=lf whitespace=cr-at-eol
+native_mods/frontend_stadium/** -text whitespace=cr-at-eol
+native_mods/frontend_stadium/**/*.cpp text eol=lf whitespace=cr-at-eol
+native_mods/frontend_stadium/**/*.h text eol=lf whitespace=cr-at-eol
+docs/NATIVE_SOURCE_SYNC_20261106.md -text whitespace=cr-at-eol
+docs/RELEASE_20261106.md -text whitespace=cr-at-eol
+
+# Match the Server repository's existing LF source convention; binary code stays raw.
+native_mods/career_native/**/*.c text eol=lf whitespace=cr-at-eol
+native_mods/career_native/**/*.h text eol=lf whitespace=cr-at-eol
+native_mods/career_native/**/*.inc text eol=lf whitespace=cr-at-eol
+native_mods/career_native/**/*.def text eol=lf whitespace=cr-at-eol
+native_mods/career_native/**/*.cmd text eol=lf whitespace=cr-at-eol
+.gitattributes text eol=lf
+native_mods/career_native/src/catalogs/global_brazil_league.inc whitespace=cr-at-eol,-blank-at-eol

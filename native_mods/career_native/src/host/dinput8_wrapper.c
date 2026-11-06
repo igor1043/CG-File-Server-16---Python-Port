@@ -20,6 +20,8 @@
 #include "../features/retirement/retirement_engine.h"
 #include "swiss_delta.h"
 #include "card_refresh_schedule.h"
+#include "card_refresh_scope.h"
+#include "career_relay_page.h"
 #include "../../../common/competition_identity.h"
 #include "calendar_icon_identity.h"
 static void native_prepare(void *owner);
@@ -42,6 +44,13 @@ static void publish_coach_record(void *provider);
 static void native_context_reset(void);
 static int native_club;
 static void append_loader_log(const char *event);
+/* Optional plugins may chain shared UI setters only after the complete
+ * all-or-nothing career preflight and installation have finished. */
+static volatile LONG g_career_hooks_ready;
+__declspec(dllexport) BOOL WINAPI Fifa16CareerHooksReady(void)
+{
+    return InterlockedCompareExchange(&g_career_hooks_ready, 0, 0) == 1;
+}
 
 
 typedef HRESULT(WINAPI *DirectInput8CreateFn)(
@@ -149,7 +158,6 @@ typedef int (*StatContainerCountFn)(void *);
 typedef void *(*StatContainerItemFn)(void *, int);
 typedef int (*StatItemValueFn)(void *, int);
 typedef void (*ResolvePlayerNameFn)(void *, void *, char *, int);
-typedef void (*ResolveTeamFn)(void *, int, void *);
 typedef int (*FullStatsCategoryFn)(void *, const char *);
 typedef void *(*GetCareerContextFn)(void *);
 typedef void *(*GetUserTeamFn)(void *, int);
@@ -186,7 +194,6 @@ static StatContainerCountFn g_stat_container_count;
 static StatContainerItemFn g_stat_container_item;
 static StatItemValueFn g_stat_item_value;
 static ResolvePlayerNameFn g_resolve_player_name;
-static ResolveTeamFn g_resolve_team;
 static FullStatsCategoryFn g_full_stats_category;
 static GetServiceDescriptorFn g_get_career_service_descriptor;
 static GetCareerContextFn g_get_career_context;
@@ -204,6 +211,9 @@ static void *g_current_stats_provider_owner;
 static void *g_pending_stats_provider_owner;
 static void *g_pending_stats_provider_vtable;
 static void *g_pending_stats_provider_registry;
+static uintptr_t g_pending_stats_hub_view;
+static ULONGLONG g_pending_stats_hub_deadline;
+static unsigned long g_stats_confirmed_hub_context;
 static CardRefreshSchedule g_stats_refresh_schedule;
 static unsigned long g_pending_stats_context_epoch;
 static DWORD g_pending_stats_thread;
@@ -2262,6 +2272,8 @@ static void clear_pending_stats_refresh(void)
     g_pending_stats_provider_owner = NULL;
     g_pending_stats_provider_vtable = NULL;
     g_pending_stats_provider_registry = NULL;
+    g_pending_stats_hub_view = 0;
+    g_pending_stats_hub_deadline = 0;
     g_pending_stats_context_epoch = 0;
     g_pending_stats_thread = 0;
     memset(&g_stats_refresh_schedule, 0, sizeof(g_stats_refresh_schedule));
@@ -2269,16 +2281,44 @@ static void clear_pending_stats_refresh(void)
 }
 
 
+static int read_card_scope(uintptr_t address, void *out, size_t size)
+{
+    SIZE_T received = 0;
+    return address && ReadProcessMemory(GetCurrentProcess(),
+        (const void *)address, out, size, &received) && received == size;
+}
+
+static uintptr_t current_card_hub_view(void)
+{
+    return card_refresh_hub_view((uintptr_t)g_module_base, read_card_scope);
+}
+
 static void remember_pending_stats_refresh(void *owner)
 {
-    if (!is_readable_range(owner, 2 * sizeof(void *)))
+    CardPageScope scope = card_refresh_page_scope((uintptr_t)g_module_base, read_card_scope);
+    ULONGLONG now = GetTickCount64();
+    unsigned long context = fce_runtime_context_epoch();
+    if ((scope.kind != CARD_PAGE_HUB && scope.kind != CARD_PAGE_BUILDING)
+        || (scope.kind == CARD_PAGE_BUILDING && g_stats_confirmed_hub_context == context)
+        || !is_readable_range(owner, 2 * sizeof(void *))) {
+        clear_pending_stats_refresh();
         return;
+    }
     g_pending_stats_provider_owner = owner;
     g_pending_stats_provider_vtable = *(void **)owner;
     g_pending_stats_provider_registry = ((void **)owner)[1];
-    g_pending_stats_context_epoch = fce_runtime_context_epoch();
+    g_pending_stats_hub_view = scope.kind == CARD_PAGE_HUB ? scope.view : 0;
+    /* This candidate comes only from a genuine native request. It may wait
+     * through initial page construction, never through another named page.
+     * Once bound, it cannot follow a later Hub or survive a page transition. */
+    g_pending_stats_hub_deadline = scope.kind == CARD_PAGE_BUILDING ? now + 30000 : 0;
+    g_pending_stats_context_epoch = context;
     g_pending_stats_thread = GetCurrentThreadId();
-    card_refresh_enter(&g_stats_refresh_schedule, GetTickCount64());
+    if (g_pending_stats_hub_view) {
+        g_stats_confirmed_hub_context = context;
+        card_refresh_enter(&g_stats_refresh_schedule, now);
+    }
+    else memset(&g_stats_refresh_schedule, 0, sizeof(g_stats_refresh_schedule));
 }
 
 
@@ -2294,17 +2334,21 @@ static void log_card_refresh(const char *event, void *owner, void *provider,
 {
     char path[MAX_PATH];
     FILE *log;
+    CardPageScope scope;
     if (!g_mod_dir[0] || !fce_runtime_log_verbose()) return;
     snprintf(path, sizeof(path), "%s\\logs\\career_card_refresh.log", g_mod_dir);
     log = fopen(path, "ab");
     if (!log) return;
+    scope = card_refresh_page_scope((uintptr_t)g_module_base, read_card_scope);
     fprintf(log, "event=%s owner=%p provider=%p view=%lu applied=%lu "
-        "requested=%lu context=%lu thread=%lu owner_thread=%lu reason=%u completed=%d\n",
+        "requested=%lu context=%lu thread=%lu owner_thread=%lu reason=%u completed=%d "
+        "page_scope=%d active_view=%p bound_view=%p waiting_hub=%d\n",
         event, owner, provider, g_stats_refresh_schedule.view_revision,
         g_stats_refresh_schedule.applied_generation,
         g_stats_refresh_schedule.requested_generation,
         fce_runtime_context_epoch(), GetCurrentThreadId(), g_pending_stats_thread, reason,
-        g_stats_publication_completed != FALSE);
+        g_stats_publication_completed != FALSE, (int)scope.kind, (void *)scope.view,
+        (void *)g_pending_stats_hub_view, g_pending_stats_hub_deadline != 0);
     fclose(log);
 }
 
@@ -2315,18 +2359,49 @@ static void drain_pending_stats_refresh(void)
     void *expected_vtable;
     unsigned reason;
     unsigned long ready_generation;
+    CardPageScope scope;
+    ULONGLONG now;
     if (!g_pending_stats_provider_owner || g_current_stats_provider_owner)
         return;
+    /* Never replay a former Hub owner while the native results/saving flow
+     * rebuilds it. Readable/vtable-equal stale owners caused an exception
+     * inside StatisticsData and left FIFA's UI lock held by the FCE thread.
+     */
+    scope = card_refresh_page_scope((uintptr_t)g_module_base, read_card_scope);
+    now = GetTickCount64();
+    if (g_pending_stats_context_epoch != fce_runtime_context_epoch()) {
+        clear_pending_stats_refresh();
+        return;
+    }
+    if (!g_pending_stats_hub_view && g_pending_stats_hub_deadline) {
+        if (now > g_pending_stats_hub_deadline
+            || (scope.kind != CARD_PAGE_BUILDING && scope.kind != CARD_PAGE_HUB)) {
+            clear_pending_stats_refresh();
+            append_loader_log("career_card_initial_refresh_cancelled");
+            return;
+        }
+        if (scope.kind == CARD_PAGE_BUILDING) return;
+        g_pending_stats_hub_view = scope.view;
+        g_pending_stats_hub_deadline = 0;
+        g_stats_confirmed_hub_context = g_pending_stats_context_epoch;
+        card_refresh_enter(&g_stats_refresh_schedule, now);
+        log_card_refresh("initial_hub_ready", g_pending_stats_provider_owner, NULL, 0);
+    }
+    if (!g_pending_stats_hub_view || scope.kind != CARD_PAGE_HUB
+        || scope.view != g_pending_stats_hub_view) {
+        clear_pending_stats_refresh();
+        append_loader_log("career_card_refresh_cancelled_view_changed");
+        return;
+    }
     if (GetCurrentThreadId() != g_pending_stats_thread) {
         if (!InterlockedExchange(&g_stats_tick_thread_mismatch, 1))
             log_card_refresh("owner_thread_mismatch", g_pending_stats_provider_owner, NULL, 0);
         return;
     }
-    if (g_pending_stats_context_epoch != fce_runtime_context_epoch()) {
-        clear_pending_stats_refresh();
-        return;
-    }
     if (!fce_runtime_is_stable()) return;
+    /* Even a ready data generation must let the newly published view finish
+     * its native setup before StatisticsData is invoked again. */
+    if (now < g_stats_refresh_schedule.entered_at + 80) return;
     ready_generation = (unsigned long)InterlockedExchange(&g_stats_ready_generation, 0);
     card_refresh_request(&g_stats_refresh_schedule, ready_generation, GetTickCount64());
     if (InterlockedCompareExchange(&g_pending_stats_refresh_busy, 1, 0)) return;
@@ -2409,6 +2484,36 @@ static void *owner_service(
 }
 
 
+#include "career_context_read.inc"
+#include "career_market_save_state.h"
+
+static int append_market_save_state(char *record,int length,size_t capacity,ULONGLONG created)
+{
+    char path[MAX_PATH];CareerMarketSaveState state;DWORD epoch;int added;
+    AcquireSRWLockShared(&g_context_read_lock);
+    epoch=Fifa16CareerContextRead.epoch;
+    ReleaseSRWLockShared(&g_context_read_lock);
+    snprintf(path,sizeof(path),"%s\\runtime\\manager_market\\save_state.tsv",g_mod_dir);
+    if(!career_market_save_state_read(path,GetCurrentProcessId(),created,epoch,&state))return length;
+    added=snprintf(record+length,capacity-(size_t)length,
+        "market_revision=%s\r\nmarket_context=%llx\r\nmarket_date=%d\r\nmarket_club=%u\r\n",
+        state.revision,state.context,state.date,state.club);
+    return added<0?0:length+added;
+}
+
+/* I/O hooks only copy the cached identity; they never query FIFA off owner. */
+static int append_career_save_scope(char *record,int length,size_t capacity)
+{
+    uintptr_t context;DWORD epoch;int added;
+    AcquireSRWLockShared(&g_context_read_lock);
+    context=(uintptr_t)g_career_context_identity;
+    epoch=Fifa16CareerContextRead.epoch;
+    ReleaseSRWLockShared(&g_context_read_lock);
+    added=snprintf(record+length,capacity-(size_t)length,
+        "context=%llx\r\nepoch=%lu\r\n",(unsigned long long)context,(unsigned long)epoch);
+    return added<0?0:length+added;
+}
+
 static int resolve_user_club_id(void *provider_owner, FILE *log)
 {
     void *service = owner_service(provider_owner,g_get_career_service_descriptor,NULL);
@@ -2442,6 +2547,7 @@ static int resolve_user_club_id(void *provider_owner, FILE *log)
      * save transition instead of accepting the previous snapshot. */
     if(context) g_career_context_identity = context;
     if(club > 0) g_career_context_club = club;
+    if(context && club > 0) publish_career_context_read(service, provider_owner);
     InterlockedExchange(&g_user_club_id,club);
     return club;
 }
@@ -2793,6 +2899,14 @@ static void injury_refresh_cards_now(void)
 {
     void *owner = g_pending_stats_provider_owner;
     void *expected_vtable = g_pending_stats_provider_vtable;
+    /* InjuryList can finish during the same initial page construction.
+     * Leave that candidate to the Hub drain; do not cancel or replay it here. */
+    if (!g_pending_stats_hub_view && g_pending_stats_hub_deadline) return;
+    if (!g_pending_stats_hub_view
+        || current_card_hub_view() != g_pending_stats_hub_view) {
+        clear_pending_stats_refresh();
+        return;
+    }
     if (!owner || !expected_vtable || g_current_stats_provider_owner
         || GetCurrentThreadId() != g_pending_stats_thread
         || g_pending_stats_context_epoch != fce_runtime_context_epoch()
@@ -3937,6 +4051,9 @@ static BOOL write_relative_call(
 }
 
 
+#include "career_bank_mail.inc"
+#include "career_bank_input.inc"
+
 static const CallPatchSpec g_call_patches[] = {
         {"career_top_transfers",0x059BE962,0x059170A0,(void *)career_transfer_cards_publish},
         {"career_latest_transfers",0x059BE99B,0x059170A0,(void *)career_transfer_cards_publish},
@@ -4074,6 +4191,9 @@ static const CallPatchSpec g_call_patches[] = {
             0x05B14990,
             (void *)stats_mark_dirty_capture,
         },
+        {"bank_mail_read",0x59c1756,0x5c12860,(void *)bank_mail_convert},
+        {"bank_mail_inbox",0x5b5710b,0x5c12860,(void *)bank_mail_convert},
+        {"bank_mail_body",0x5beccbd,0x5c12860,(void *)bank_mail_convert},
 };
 
 /* The protected loader materializes different code regions separately. One
@@ -4113,11 +4233,7 @@ static unsigned int apply_call_patches(
     FILE *log)
 {
     if (!career_patch_sites_ready(module_base, log)) return 0;
-    unsigned char *relay_page = (unsigned char *)VirtualAlloc(
-        module_base + 0x09600000,
-        0x1000,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_EXECUTE_READWRITE);
+    unsigned char *relay_page = career_allocate_relay_page((uintptr_t)module_base);
     if (!relay_page)
     {
         fprintf(
@@ -4190,6 +4306,10 @@ static DWORD WINAPI patch_standings_provider(LPVOID unused)
     g_set_int = (SetIntFn)(module_base + 0x05A51150);
     g_set_string = (SetStringFn)(module_base + 0x05A511E0);
     g_transfer_cards_publish=(CareerTransferPublishFn)(module_base+0x059170A0);
+    g_transfer_cards_row_count=(CareerTransferRowCountFn)(module_base+0x05AC1E80);
+    g_transfer_cards_add_row=(CareerTransferAddRowFn)(module_base+0x05A2A4F0);
+    g_transfer_cards_select_row=(CareerTransferSelectRowFn)(module_base+0x05B0EB50);
+    g_transfer_cards_set_string=(CareerTransferSetStringFn)(module_base+0x05A511E0);
     g_stats_vector = (StatsVectorFn)(module_base + 0x05AC2C60);
     g_stats_provider = (StatsProviderFn)(module_base + 0x059CE0E0);
     g_stats_mark_dirty = (StatsMarkDirtyFn)(module_base + 0x05B14990);
@@ -4218,7 +4338,6 @@ static DWORD WINAPI patch_standings_provider(LPVOID unused)
         (StatItemValueFn)(module_base + 0x05C44BC0);
     g_resolve_player_name =
         (ResolvePlayerNameFn)(module_base + 0x05C38130);
-    g_resolve_team = (ResolveTeamFn)(module_base + 0x05B8E430);
     native_name_db_bind();
     g_full_stats_category =
         (FullStatsCategoryFn)(module_base + 0x05AB40F0);
@@ -4287,6 +4406,8 @@ static DWORD WINAPI patch_standings_provider(LPVOID unused)
         if (apply_patch(module_base, &g_patches[index], log))
             patched++;
     }
+    if(!install_bank_input_hook(log))
+        append_loader_log("career_bank_direct_input_unavailable_legacy_reader_retained");
     fprintf(log, "Patches de bytes=%u/%u\n", patched, (unsigned int)(
         sizeof(g_patches) / sizeof(g_patches[0])));
     fprintf(log, "Patches de chamadas=%u/%u\n", call_patched, expected_calls);
@@ -4295,6 +4416,7 @@ static DWORD WINAPI patch_standings_provider(LPVOID unused)
     {
         append_loader_log("career_native_card_hooks_installed");
         append_loader_log("career_cards_redraw_v1_hooks_installed");
+        InterlockedExchange(&g_career_hooks_ready, 1);
         swiss_delta_notify_ready(g_self, g_game_dir, g_mod_dir, SWISS_READY_NATIVE);
     }
     return (
@@ -4680,6 +4802,11 @@ void WINAPI Fifa16CareerReleaseSnapshot(void *snapshot)
 }
 
 
+#include "frontend_ui_owner.inc"
+#include "career_background_refresh.inc"
+#include "career_market_read.inc"
+#include "career_prepared_views.inc"
+#include "career_manager_read.inc"
 #include "career_ui_jobs.inc"
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
@@ -4690,6 +4817,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         g_self=instance; DisableThreadLibraryCalls(instance);
         initialize_paths(); fce_runtime_log_dir(g_mod_dir);
         fce_runtime_set_ready_callback(refresh_initial_competition_provider);
+        fce_runtime_set_date_callback(career_context_calendar_date);
         fce_runtime_set_ui_tick_callback(career_ui_jobs_tick);
         worker=CreateThread(NULL,0,patch_standings_provider,NULL,0,NULL);
         if(worker) CloseHandle(worker);

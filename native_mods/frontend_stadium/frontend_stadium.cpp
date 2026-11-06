@@ -48,6 +48,8 @@ static uintptr_t backgroundViewModel=0,backgroundVtable=0;
 static uint32_t observedEpoch=0,stageEpoch=0;
 static uint64_t lastRouteComplete=0;
 static bool uiRegistered=false;
+static DWORD backgroundOwnerThread=0;
+static void frontendUiTick();
 static uint32_t drawnRequest=0;
 static frontend_stadium::ProfileReloadProgress reloadProgress;
 static frontend_stadium::PlayerScene playerScene;
@@ -181,6 +183,13 @@ static void __fastcall panHook(void* self,int stadium,void* output){
 static void* __fastcall backgroundHook(void* self){
     auto* provider=reinterpret_cast<void*(__fastcall*)(void*)>(image+0x40893e0)(self);
     backgroundViewModel=reinterpret_cast<uintptr_t>(self);backgroundVtable=get<uintptr_t>(backgroundViewModel);
+    backgroundOwnerThread=GetCurrentThreadId();
+    using RegisterFrontend=BOOL(WINAPI*)(void(*)());
+    const auto host=GetModuleHandleW(L"dinput8.dll");
+    const auto registerFrontend=reinterpret_cast<RegisterFrontend>(host?GetProcAddress(host,"Fifa16FrontendRegisterUiCallback"):nullptr);
+    if(registerFrontend&&registerFrontend(frontendUiTick)){
+        static DWORD reported=0;if(reported!=backgroundOwnerThread){reported=backgroundOwnerThread;log("FRONTEND_UI_OWNER",0,static_cast<int>(reported));}
+    }
     const auto slot=FrontendStadiumStatus.slot;
     const auto page=frontend_stadium::pageKind(image,read);
     const bool menuPage=frontend_stadium::isBackgroundPage(page);
@@ -371,7 +380,7 @@ static void pollReload(){
         awaitingReload=false;observedTeam=0;
         InterlockedExchange(&stageRequest,0);InterlockedExchange(&stageComplete,0);
         sceneReady=false;photoDirty=true;
-        backgroundViewModel=backgroundVtable=0;observedEpoch=career?epoch:0;
+        if(career)backgroundViewModel=backgroundVtable=0;observedEpoch=career?epoch:0;
         if(!playerScene.matches(team,epoch,activeCareerRole()))playerScene.clear();
         if(newCareer){careerSession=static_cast<int>(now&0x7fffffff);log("CAREER_EPOCH_RESET",team,static_cast<int>(epoch));}
     }
@@ -433,6 +442,12 @@ static void pollReload(){
         }
     }
     ReleaseSRWLockExclusive(&gate);
+}
+static void frontendUiTick(){
+    if(stopping||GetCurrentThreadId()!=backgroundOwnerThread)return;
+    bool career=false;club(&career);
+    if(career||!frontend_stadium::isBackgroundPage(currentPage()))return;
+    pollReload();refreshPhotograph();
 }
 static void stadiumUiTick(){
     if(stopping||!careerCommandOwner())return;

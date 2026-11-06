@@ -13,6 +13,8 @@ typedef struct SaveReadHandle {
 #define SAVE_READ_HANDLE_CAPACITY 64
 static SaveReadHandle g_save_read_handles[SAVE_READ_HANDLE_CAPACITY];
 static SRWLOCK g_save_read_handles_lock = SRWLOCK_INIT;
+static int append_career_save_scope(char *record,int length,size_t capacity);
+static int append_market_save_state(char *record,int length,size_t capacity,ULONGLONG created);
 
 static BOOL is_fifa_save_data_path(const char *path)
 {
@@ -100,7 +102,7 @@ static void track_save_data_handle(HANDLE handle)
  * file position are never changed. Settings saves cannot replace this bridge. */
 static BOOL observe_career_save_io(HANDLE handle, const void *buffer, DWORD amount,
     LPOVERLAPPED overlapped, BOOL writing, char *path, size_t capacity,
-    ULONGLONG *file_size)
+    ULONGLONG *file_size, DWORD *payload_crc32)
 {
     LARGE_INTEGER size, position, zero;
     ULONGLONG offset, end;
@@ -170,6 +172,7 @@ static BOOL observe_career_save_io(HANDLE handle, const void *buffer, DWORD amou
                 && !memcmp(entry->header+116,"SaveType_Career",16)) {
                 lstrcpynA(path,current_path,(int)capacity);
                 *file_size=(ULONGLONG)size.QuadPart;
+                if(payload_crc32)memcpy(payload_crc32,entry->header+132,sizeof(DWORD));
                 entry->recorded=TRUE;
                 ready=TRUE;
             }
@@ -210,13 +213,15 @@ static BOOL write_career_save_bridge(const char *runtime_dir,
 }
 
 static void publish_active_save_access(const char *path, const char *operation,
-                                       DWORD bytes_transferred, ULONGLONG file_size)
+                                       DWORD bytes_transferred, ULONGLONG file_size,
+                                       DWORD payload_crc32)
 {
     char runtime_dir[MAX_PATH];
     char record[1600];
     FILETIME created, exited, kernel, user;
     ULARGE_INTEGER created_value;
     int length;
+    ULONGLONG tick=GetTickCount64();
     if (!is_fifa_save_data_path(path) || !operation ||
         bytes_transferred == 0 || !g_mod_dir[0]) return;
     if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user))
@@ -229,18 +234,38 @@ static void publish_active_save_access(const char *path, const char *operation,
     length = snprintf(record, sizeof(record),
         "schema=3\r\npid=%lu\r\nprocess_created_100ns=%llu\r\n"
         "access_tick_ms=%llu\r\noperation=%s\r\nio_bytes=%lu\r\n"
-        "save_type=SaveType_Career\r\ncomplete_file=1\r\nsize_bytes=%llu\r\npath=%s\r\n",
+        "save_type=SaveType_Career\r\ncomplete_file=1\r\nsize_bytes=%llu\r\npayload_crc32=%lu\r\npath=%s\r\n",
         (unsigned long)GetCurrentProcessId(),
         (unsigned long long)created_value.QuadPart,
-        (unsigned long long)GetTickCount64(), operation,
-        (unsigned long)bytes_transferred, (unsigned long long)file_size, path);
+        (unsigned long long)tick, operation,
+        (unsigned long)bytes_transferred, (unsigned long long)file_size,
+        (unsigned long)payload_crc32,path);
     if (length <= 0 || (size_t)length >= sizeof(record)) return;
+    length=append_career_save_scope(record,length,sizeof(record));
+    if(length<=0 || (size_t)length>=sizeof(record))return;
+    if(!strcmp(operation,"write"))length=append_market_save_state(record,length,sizeof(record),created_value.QuadPart);
+    if(length<=0 || (size_t)length>=sizeof(record))return;
     /* Keep the established bridge for existing mod tools and publish a
      * dedicated source bridge that cannot be confused with unrelated assets. */
     (void)write_career_save_bridge(runtime_dir, "career_active_save.tsv",
         "career_active_save", record, length);
     (void)write_career_save_bridge(runtime_dir, "career_save_source.tsv",
         "career_save_source", record, length);
+    /* Durable, write-only receipts survive the immediate verification read,
+     * UI compilation and game shutdown. Never change FIFA's DATA/INDEX. */
+    if(!strcmp(operation,"write")) {
+        char market_dir[MAX_PATH],events_dir[MAX_PATH],name[160];
+        static volatile LONG sequence=0;
+        snprintf(market_dir,sizeof(market_dir),"%s\\manager_market",runtime_dir);
+        snprintf(events_dir,sizeof(events_dir),"%s\\save_events",market_dir);
+        if((CreateDirectoryA(market_dir,NULL)||GetLastError()==ERROR_ALREADY_EXISTS)
+            &&(CreateDirectoryA(events_dir,NULL)||GetLastError()==ERROR_ALREADY_EXISTS)) {
+            snprintf(name,sizeof(name),"%llu_%020llu_%lu_%lu.tsv",
+                (unsigned long long)created_value.QuadPart,(unsigned long long)tick,
+                (unsigned long)GetCurrentProcessId(),(unsigned long)InterlockedIncrement(&sequence));
+            (void)write_career_save_bridge(events_dir,name,"save_receipt",record,length);
+        }
+    }
 }
 
 static void record_career_ui_open(const char *path, HANDLE handle, DWORD error)
@@ -313,14 +338,15 @@ static BOOL WINAPI read_file_capture(HANDLE handle, LPVOID buffer, DWORD length,
     DWORD error;
     char path[1024];
     ULONGLONG file_size;
+    DWORD payload_crc32=0;
     if (!g_original_read_file)
         return FALSE;
     result = g_original_read_file(handle, buffer, length, bytes_read, overlapped);
     error = GetLastError();
     if (result && bytes_read && *bytes_read > 0
         && observe_career_save_io(handle, buffer, *bytes_read, overlapped, FALSE,
-            path, sizeof(path), &file_size))
-        publish_active_save_access(path, "read", *bytes_read, file_size);
+            path, sizeof(path), &file_size,&payload_crc32))
+        publish_active_save_access(path, "read", *bytes_read, file_size,payload_crc32);
     SetLastError(error);
     return result;
 }
@@ -333,6 +359,7 @@ static BOOL WINAPI write_file_capture(HANDLE handle, LPCVOID buffer, DWORD lengt
     DWORD amount;
     DWORD error;
     ULONGLONG file_size;
+    DWORD payload_crc32=0;
     if (!g_original_write_file)
         return FALSE;
     result = g_original_write_file(handle, buffer, length, bytes_written,
@@ -340,8 +367,8 @@ static BOOL WINAPI write_file_capture(HANDLE handle, LPCVOID buffer, DWORD lengt
     error = GetLastError();
     amount = bytes_written ? *bytes_written : length;
     if (result && amount > 0 && observe_career_save_io(handle,buffer,amount,
-            overlapped,TRUE,path,sizeof(path),&file_size)) {
-        publish_active_save_access(path,"write",amount,file_size);
+            overlapped,TRUE,path,sizeof(path),&file_size,&payload_crc32)) {
+        publish_active_save_access(path,"write",amount,file_size,payload_crc32);
         retirement_engine_note_write(path);
     }
     SetLastError(error);

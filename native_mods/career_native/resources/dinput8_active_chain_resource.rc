@@ -1,0 +1,5 @@
+/* L9.65 low-level patcher. The input is tracked deliberately: it is embedded
+   into the project's root dinput8.dll during every reproducible build. */
+101 RCDATA "active_chain_resource.bin"
+
+102 RCDATA "swiss_delta_resource.bin"

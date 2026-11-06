@@ -464,14 +464,12 @@ static int native_display_context_competition(int requested,int club) {
     return native_best_competition(club,0);
 }
 static void native_team_name(int team,char *out,size_t size) {
-    unsigned char result[256]={0};
-    if(!size) return; out[0]=0;
-    __try {
-        if(native_names && team>0) g_resolve_team(native_names,team,result);
-        result[0x63]=0;
-        if(result[4] && result[4]!='#') lstrcpynA(out,(const char *)result+4,(int)size);
-    } __except(EXCEPTION_EXECUTE_HANDLER) { out[0]=0; }
-    if(!out[0]) native_team_name_query(team,out,size);
+    if(!out || !size) return;
+    /* 5b8e430 resolves nations.nationid, not teams.teamid. A valid country
+     * name there is still the wrong identity (e.g. team 1 becomes Albania).
+     * Every career card must resolve the actual fixture/club teamid through
+     * the current teams row, including clubs added by the mod. */
+    native_team_name_query(team,out,size);
 }
 static void native_player(const FceStat *s,FceStatSort field,RankedPlayer *out) {
     memset(out,0,sizeof(*out)); out->head=s->player; out->logo=s->team;
@@ -1347,6 +1345,7 @@ static unsigned long long native_fce_model_fingerprint(const FceModel *model)
 {
     unsigned long long hash = 1469598103934665603ULL;
     size_t i;
+    hash = native_fce_hash_value(hash, fce_runtime_derived_revision());
     hash = native_fce_hash_value(hash, (unsigned int)model->date);
     hash = native_fce_hash_value(hash, (unsigned int)model->unresolved_fixtures);
     hash = native_fce_hash_value(hash, (unsigned int)model->node_count);
@@ -1480,10 +1479,10 @@ static int native_fce_snapshot_write(void)
     if (!file) return 0;
     if (fprintf(file,
         "{\"schema\":3,\"pid\":%lu,\"processCreated100ns\":%llu,"
-        "\"generation\":%lu,\"saveSize\":%llu,\"saveWriteTime100ns\":%llu,"
+        "\"generation\":%lu,\"fceContextEpoch\":%lu,\"saveSize\":%llu,\"saveWriteTime100ns\":%llu,"
         "\"savePath\":",
         (unsigned long)pid, (unsigned long long)created_value.QuadPart,
-        generation, (unsigned long long)save_size.QuadPart,
+        generation, fce_runtime_context_epoch(), (unsigned long long)save_size.QuadPart,
         (unsigned long long)saved_write_time.QuadPart) < 0) ok = 0;
     if (ok && !native_fce_snapshot_json_string(file, save_path)) ok = 0;
     if (ok && fprintf(file, ",\"club\":%d,\"date\":%d,\"unresolvedFixtures\":%llu,\"nodes\":[",
@@ -1505,6 +1504,23 @@ static int native_fce_snapshot_write(void)
             standing->away_wins, standing->away_draws, standing->away_losses,
             standing->played) < 0) ok = 0;
     }
+    if (ok && fputs("],\"derivedStandings\":[", file) == EOF) ok = 0;
+    if (ok) {
+        size_t count=fce_runtime_derived_copy(NULL,0,model->date),row;
+        FceDerivedStanding *rows=count?calloc(count,sizeof(*rows)):NULL;
+        if(count && !rows)ok=0;
+        if(rows) {
+            count=fce_runtime_derived_copy(rows,count,model->date);
+            for(row=0;ok && row<count;++row) {
+                const FceDerivedStanding *d=rows+row;const FceStanding *s=&d->standing;
+                if(fprintf(file,"%s[%d,%d,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]",
+                    row?",":"",s->standing_id,s->competition_object,s->team,
+                    s->home_wins,s->home_draws,s->home_losses,s->away_wins,s->away_draws,s->away_losses,s->played,
+                    d->home_gf,d->home_ga,d->away_gf,d->away_ga)<0)ok=0;
+            }
+            free(rows);
+        }
+    }
     if (ok && fputs("],\"fixtures\":[", file) == EOF) ok = 0;
     for (i = 0; ok && i < model->fixture_count; ++i) {
         const FceFixture *fixture = model->fixtures + i;
@@ -1519,10 +1535,13 @@ static int native_fce_snapshot_write(void)
     if (ok && fputs("],\"stats\":[", file) == EOF) ok = 0;
     for (i = 0; ok && i < model->stat_count; ++i) {
         const FceStat *stat = model->stats + i;
-        if (fprintf(file, "%s[%d,%d,%d,%d,%d,%d,%d,%d]", i ? "," : "",
+        /* Append optional validated ratings; preserve the first eight fields
+           consumed by roster, coach and market readers. JSON output only. */
+        if (fprintf(file, "%s[%d,%d,%d,%d,%d,%d,%d,%d,%d,%u]", i ? "," : "",
             (int)stat->stats_id, (int)stat->competition, (int)stat->team,
             (int)stat->player, (int)stat->appearances, (int)stat->minutes,
-            (int)stat->goals, (int)stat->assists) < 0) ok = 0;
+            (int)stat->goals, (int)stat->assists,
+            (int)stat->rating_sum, (unsigned int)stat->profile_valid) < 0) ok = 0;
     }
     if (ok && fputs("]}\n", file) == EOF) ok = 0;
     if (fflush(file) != 0) ok = 0;
