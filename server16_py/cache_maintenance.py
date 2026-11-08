@@ -1,7 +1,7 @@
 """Bound generated visual files only after FIFA and its readers have exited.
 
-No saves, SQL, receipts, calendar journals, source assets or recovery transactions
-belong to this policy. Native paths stay immutable for the lifetime of FIFA.
+Saves, SQL, receipts, source assets and recovery transactions remain outside
+this policy. Only closed, unpinned calendar scopes join the visual sweep.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import json
 import os
 import re
 import stat
+import sys
 import threading
 import time
 
@@ -157,7 +158,7 @@ def _over_budget(units, budget, max_units=None):
     return discard
 
 
-def plan(root,check=lambda:None):
+def plan(root,check=lambda:None,*,journals_only=False):
     """Return exact allowlisted files. Never infer deletability from 'runtime'."""
     root = Path(root).absolute()
     if not game_root(root): return {}
@@ -167,6 +168,10 @@ def plan(root,check=lambda:None):
     def add(group, paths):
         for p in paths:
             if not FORBIDDEN.search(p.name): candidates[p] = group
+    from .session_storage import finished_calendar_files
+    add('finished_calendar', finished_calendar_files(root,check))
+    if journals_only:
+        return candidates
     market = root/MARKET
     # Models/labels bound to a particular session are rebuilt from persistent SQL.
     for name in ('packages', 'render_jobs'):
@@ -214,7 +219,7 @@ def plan(root,check=lambda:None):
         add('import_previews', walk(root/'runtime'/name))
     for _,_,members in units(root/'runtime', re.compile(r'server16_stad_[a-z0-9_]+$')):
         add('stadium_extractions', members)
-    # Deliberately NOT server16_stadium_apply_*/previous, SQL or calendar receipts.
+    # Deliberately exclude server16_stadium_apply_*/previous, SQL and save receipts.
     protected = room_protected(root)
     if protected is not None:
         for p in walk(root/ROOM):
@@ -274,7 +279,7 @@ class RootLock:
             self.stream.close()
 
 
-def maintain(root, *, guard=None, dry_run=False, quarantine=True, record=True):
+def maintain(root, *, guard=None, dry_run=False, quarantine=True, record=True, journals_only=False):
     root=Path(root).absolute();result=Result();cutoff=time.time_ns()
     if not game_root(root): return result
     def check():
@@ -283,7 +288,7 @@ def maintain(root, *, guard=None, dry_run=False, quarantine=True, record=True):
     try:
         check()
         with RootLock(root):
-            check();candidates=plan(root,check)
+            check();candidates=plan(root,check,journals_only=journals_only)
             # Clear only stale match routes, before deleting their resources.
             if not dry_run and any(g=='match_stadiums' for g in candidates.values()):
                 from .stadium_match_assets import clear_match_routes
@@ -379,8 +384,13 @@ class SessionCaches:
                     return last_check[1]
                 try:
                     report=maintain(root,guard=guard)
+                    if not report.deferred and getattr(sys,'frozen',False):
+                        from .session_storage import sweep_extractions
+                        extracted=sweep_extractions()
+                        if extracted.released_bytes:
+                            self.log(f'Server16 temporary files: {extracted.released_bytes/MIB:.1f} MiB released')
                     if report.files or report.moved_bytes or report.failed:
-                        self.log(f'Visual cache maintenance: {report.files} paths; {report.released_bytes/MIB:.1f} MiB released; {report.moved_bytes/MIB:.1f} MiB moved; {len(report.failed)} skipped errors')
+                        self.log(f'Session cache maintenance: {report.files} paths; {report.released_bytes/MIB:.1f} MiB released; {report.moved_bytes/MIB:.1f} MiB moved; {len(report.failed)} skipped errors')
                     with self.lock:
                         state['pending']=report.deferred
                         callback=self.callbacks.pop(root,None) if not report.deferred else None

@@ -30,6 +30,7 @@ static bool final_pass,scene_copied,ready;
 struct ImageRange {uintptr_t first,last;};
 static ImageRange game_images[2];
 static ultrawide::Backgrounds backgrounds;
+static unsigned seen_artwork;
 static thread_local bool overlay,inside;
 typedef void (STDMETHODCALLTYPE *DrawFn)(ID3D11DeviceContext*,UINT,UINT);
 typedef void (STDMETHODCALLTYPE *DrawIndexedFn)(ID3D11DeviceContext*,UINT,UINT,INT);
@@ -163,16 +164,39 @@ static void STDMETHODCALLTYPE targets_uav_hook(ID3D11DeviceContext *ctx,UINT n,I
 struct UiDraw {
     ID3D11DeviceContext *ctx;UINT nv=16,nr=16;
     D3D11_VIEWPORT view[16];D3D11_RECT rect[16];bool applied=false;
-    ID3D11ShaderResourceView *backgroundView=nullptr;UINT backgroundSlot=0;
+    ID3D11ShaderResourceView *backgroundView=nullptr;
     explicit UiDraw(ID3D11DeviceContext *c,void *caller):ctx(c) {
         if(c!=game_context||!ready||stopping||overlay||inside||!final_pass||!native_draw(caller))return;
-        if(!scene_copied){scene_copied=true;return;}
         inside=true;
-        const bool background=backgrounds.select(c,enabled!=0,backgroundSlot,backgroundView);
+        const auto artwork=backgrounds.select_artwork(c,enabled!=0,backgroundView);
+        if(artwork!=ultrawide::Artwork::None) {
+            // The boot art can be the first draw when there is no 3D scene.
+            scene_copied=true;
+            const unsigned bit=1u<<static_cast<unsigned>(artwork);
+            if(!(seen_artwork&bit)&&log_line) {
+                const char *labels[]={"","st_bootflow.DDS","notfound.dds","pressstart.big"};
+                char message[100];
+                sprintf_s(message,"Ultrawide: drawing verified %s artwork",labels[static_cast<unsigned>(artwork)]);
+                log_line(message);
+                seen_artwork|=bit;
+            }
+            if(enabled&&ultrawide::ui_region(float(width),float(height)).scale<1) {
+                c->RSGetViewports(&nv,view);
+                c->RSGetScissorRects(&nr,rect);
+                if(nv==1&&fabsf(view[0].TopLeftY)<1&&fabsf(view[0].Height-height)<1) {
+                    D3D11_VIEWPORT full={0,0,float(width),float(height),view[0].MinDepth,view[0].MaxDepth};
+                    D3D11_RECT fullClip={0,0,LONG(width),LONG(height)};
+                    c->RSSetViewports(1,&full);
+                    if(nr==1)c->RSSetScissorRects(1,&fullClip);
+                    applied=true;
+                }
+            }
+            if(!applied)inside=false;
+            return;
+        }
         inside=false;
-        // Keep only the verified native backdrop at full width, behind all UI.
-        // Its texture also switches live if FIFA cached the other DDS already.
-        if(background||!enabled)return;
+        if(!scene_copied){scene_copied=true;return;}
+        if(!enabled)return;
         auto region=ultrawide::ui_region(float(width),float(height));if(region.scale==1)return;
         inside=true;c->RSGetViewports(&nv,view);c->RSGetScissorRects(&nr,rect);
         if(nv==1&&ultrawide::centred_view(view[0].TopLeftX,view[0].Width,float(width),float(height))){inside=false;return;}
@@ -183,7 +207,7 @@ struct UiDraw {
     }
     ~UiDraw(){
         if(applied){ctx->RSSetViewports(nv,view);ctx->RSSetScissorRects(nr,rect);inside=false;}
-        if(backgroundView){ctx->PSSetShaderResources(backgroundSlot,1,&backgroundView);backgroundView->Release();}
+        if(backgroundView){ctx->PSSetShaderResources(0,1,&backgroundView);backgroundView->Release();}
     }
 };
 static void STDMETHODCALLTYPE draw_hook(ID3D11DeviceContext*c,UINT a,UINT b){UiDraw guard(c,_ReturnAddress());draw_original(c,a,b);}
@@ -268,9 +292,14 @@ void ultrawide_initialize(HMODULE owner,void (*logger)(const char *)) {
     _snwprintf_s(ini,_countof(ini),_TRUNCATE,L"%s\\..\\ultrawide\\ultrawide.ini",path);
     _snwprintf_s(status_path,_countof(status_path),_TRUNCATE,L"%s\\..\\ultrawide\\runtime_state.txt",path);
     wchar_t standard[MAX_PATH],wide[MAX_PATH];
-    _snwprintf_s(standard,_countof(standard),_TRUNCATE,L"%s\\..\\..\\data\\ultrawide\\st_bootflow_standard.dds",path);
-    _snwprintf_s(wide,_countof(wide),_TRUNCATE,L"%s\\..\\..\\data\\ultrawide\\st_bootflow_ultrawide.dds",path);
-    backgrounds.initialize(standard,wide);
+    const wchar_t *stems[]={L"st_bootflow",L"notfound",L"pressstart"};
+    for(unsigned i=0;i<_countof(stems);++i) {
+        auto kind=static_cast<ultrawide::Artwork>(i+1);
+        const wchar_t *ext=kind==ultrawide::Artwork::PressStart?L"big":L"dds";
+        _snwprintf_s(standard,_countof(standard),_TRUNCATE,L"%s\\..\\..\\data\\ultrawide\\%s_standard.%s",path,stems[i],ext);
+        _snwprintf_s(wide,_countof(wide),_TRUNCATE,L"%s\\..\\..\\data\\ultrawide\\%s_ultrawide.%s",path,stems[i],ext);
+        backgrounds.initialize(standard,wide,kind);
+    }
     ready=locate_aspect();enabled=ready&&GetPrivateProfileIntW(L"ultrawide",L"enabled",0,ini)!=0;
     if(ready)initial_resolution();
     if(logger)logger(ready?"Ultrawide: unique native aspect anchor verified; config bridge ready":"Ultrawide: unsupported aspect anchor; no memory changed");
@@ -321,7 +350,7 @@ void ultrawide_stop() {
     // stopping makes every draw pass through without modifying the pipeline.
 }
 #ifdef ULTRAWIDE_TEST
-extern "C" void ultrawide_test_backgrounds(const wchar_t *standard,const wchar_t *wide){backgrounds.initialize(standard,wide);}
+extern "C" bool ultrawide_test_backgrounds(const wchar_t *standard,const wchar_t *wide,ultrawide::Artwork kind){return backgrounds.initialize(standard,wide,kind);}
 extern "C" bool ultrawide_test_pointer(HWND window,POINT *p,bool screen){return map_pointer(window,p,screen);}
 extern "C" LRESULT ultrawide_test_message(HWND window,UINT message,WPARAM wp,LPARAM lp,WNDPROC callback) {
     previous_proc=callback;return window_proc(window,message,wp,lp);

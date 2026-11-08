@@ -47,6 +47,10 @@ if __name__ == "__main__":
         from server16_py.club_environment import main as run_club_environment
         raise SystemExit(run_club_environment())
     _set_windows_app_id()
+    if getattr(sys, 'frozen', False):
+        from threading import Thread
+        from server16_py.session_storage import sweep_at_startup
+        Thread(target=sweep_at_startup, name='Server16ExtractionCleanup', daemon=True).start()
     splash = _start_splash()
     try:
         from server16_py.app import main

@@ -3123,8 +3123,11 @@ class Server16App(tk.Tk):
             self.after(100,self.launch_fifa)
             return
         try:
-            from .loose_ui import activate
-            self.log('Career/panorama loose UI activation', activate(self.exedir))
+            from .loose_ui import activate, TARGETS
+            from .ultrawide_background import NATIVE, NOTFOUND, PRESSSTART
+            targets = TARGETS | {path.as_posix().casefold() for path in (NATIVE, NOTFOUND, PRESSSTART)}
+            self.log('Career/panorama loose UI activation', activate(self.exedir, targets=targets))
+            UltrawideSwitch(self.exedir).sync_background()
         except Exception as exc:
             self.log('Career/panorama UI activation unavailable', exc)
             messagebox.showerror(self.tr('message.fifa16'), str(exc))

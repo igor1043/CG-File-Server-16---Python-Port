@@ -26,7 +26,7 @@ def resolve_asset(game_root: Path, competition: str, round_id: str = '', *, sett
     """Use only IDs configured in the original Server16 settings file.
 
     A configured round package has priority. When absent, use the configured
-    main competition package, matching the working Robson 12.12 behavior.
+    main competition package.
     An explicitly present but corrupt package is rejected.
     """
     root = Path(game_root)

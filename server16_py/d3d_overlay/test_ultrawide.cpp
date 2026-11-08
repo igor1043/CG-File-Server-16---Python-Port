@@ -2,15 +2,17 @@
 #define NOMINMAX
 #include "ultrawide_bridge.h"
 #include "ultrawide_math.h"
+#include "ultrawide_background.h"
 #include "ui_pipeline_state.h"
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <assert.h>
 #include <stdio.h>
 #include <vector>
+#include <algorithm>
 extern "C" void ultrawide_test_attach(IDXGISwapChain*,ID3D11DeviceContext*,bool);
 extern "C" void ultrawide_test_release();
-extern "C" void ultrawide_test_backgrounds(const wchar_t*,const wchar_t*);
+extern "C" bool ultrawide_test_backgrounds(const wchar_t*,const wchar_t*,ultrawide::Artwork);
 extern "C" bool ultrawide_test_pointer(HWND,POINT*,bool);
 extern "C" LRESULT ultrawide_test_message(HWND,UINT,WPARAM,LPARAM,WNDPROC);
 static POINT received;
@@ -99,29 +101,56 @@ int wmain(int argc,wchar_t **argv) {
     ctx->RSSetViewports(1,&vp);ctx->RSSetScissorRects(1,&rect);ctx->ClearRenderTargetView(rt,red);foreignDraw(ctx);
     ctx->CopyResource(read,bb);CHECK(ctx->Map(read,0,D3D11_MAP_READ,0,&mapped));row=(unsigned char*)mapped.pData+54*mapped.RowPitch;
     assert(row[1]==255&&row[255*4+1]==255);ctx->Unmap(read,0);FreeLibrary(foreign);
-    if(argc==3) {
-        ultrawide_test_backgrounds(argv[1],argv[2]);
-        FILE *file=nullptr;assert(!_wfopen_s(&file,argv[1],L"rb"));unsigned char header[128];assert(fread(header,1,128,file)==128);
+    assert(argc==7);
+    for(int pair=0;pair<3;++pair) {
+        auto kind=static_cast<ultrawide::Artwork>(pair+1);
+        assert(ultrawide_test_backgrounds(argv[1+pair*2],argv[2+pair*2],kind));
+        FILE *file=nullptr;
+        assert(!_wfopen_s(&file,argv[1+pair*2],L"rb"));
+        assert(!_fseeki64(file,0,SEEK_END));
+        std::vector<unsigned char> contents(size_t(_ftelli64(file)));
+        rewind(file);
+        assert(fread(contents.data(),1,contents.size(),file)==contents.size());
+        fclose(file);
+        const unsigned char magic[]={'D','D','S',' '};
+        auto start=std::search(contents.begin(),contents.end(),magic,magic+4);
+        assert(start!=contents.end()&&contents.end()-start>=128);
+        unsigned char header[128];memcpy(header,&*start,128);
         UINT w,h;memcpy(&w,header+16,4);memcpy(&h,header+12,4);std::vector<unsigned char> pixels(size_t((w+3)/4)*((h+3)/4)*16);
-        assert(fread(pixels.data(),1,pixels.size(),file)==pixels.size());fclose(file);
+        assert(size_t(contents.end()-start)>=128+pixels.size());
+        memcpy(pixels.data(),&start[128],pixels.size());
         D3D11_TEXTURE2D_DESC bg={};bg.Width=w;bg.Height=h;bg.MipLevels=bg.ArraySize=bg.SampleDesc.Count=1;
-        bg.Format=DXGI_FORMAT_BC2_UNORM;bg.BindFlags=D3D11_BIND_SHADER_RESOURCE;bg.Usage=D3D11_USAGE_IMMUTABLE;
+        bg.Format=!memcmp(header+84,"DXT5",4)?DXGI_FORMAT_BC3_UNORM:DXGI_FORMAT_BC2_UNORM;
+        bg.BindFlags=D3D11_BIND_SHADER_RESOURCE;bg.Usage=D3D11_USAGE_IMMUTABLE;
         D3D11_SUBRESOURCE_DATA data={pixels.data(),((w+3)/4)*16,0};ID3D11Texture2D *texture=nullptr;
         CHECK(device->CreateTexture2D(&bg,&data,&texture));ID3D11ShaderResourceView *image=nullptr;
         CHECK(device->CreateShaderResourceView(texture,nullptr,&image));texture->Release();
-        ultrawide_test_attach(sc,ctx,true);ctx->OMSetRenderTargets(1,&rt,nullptr);ctx->RSSetViewports(1,&vp);ctx->RSSetScissorRects(1,&rect);
-        ctx->Draw(3,0);ctx->ClearRenderTargetView(rt,red);ctx->PSSetShaderResources(0,1,&image);ctx->Draw(3,0);
+        ultrawide_test_attach(sc,ctx,true);ctx->OMSetRenderTargets(1,&rt,nullptr);
+        ctx->RSSetViewports(1,&centred);ctx->RSSetScissorRects(1,&centredRect);
+        ctx->ClearRenderTargetView(rt,red);ctx->PSSetShaderResources(0,1,&image);ctx->Draw(3,0);
         ctx->CopyResource(read,bb);D3D11_MAPPED_SUBRESOURCE map={};CHECK(ctx->Map(read,0,D3D11_MAP_READ,0,&map));
         auto pixel=(unsigned char*)map.pData+54*map.RowPitch;
         // Same draw/shader and viewport: the identified backdrop fills both
         // outer edges, while the ordinary UI draws above stayed centred.
         assert(pixel[1]==255&&pixel[255*4+1]==255);ctx->Unmap(read,0);
+        D3D11_VIEWPORT after={};UINT count=1;ctx->RSGetViewports(&count,&after);
+        assert(!memcmp(&centred,&after,sizeof(after)));
+        D3D11_RECT afterClip={};count=1;ctx->RSGetScissorRects(&count,&afterClip);
+        assert(!memcmp(&centredRect,&afterClip,sizeof(afterClip)));
         ID3D11ShaderResourceView *restored=nullptr;ctx->PSGetShaderResources(0,1,&restored);assert(restored==image);restored->Release();
         ID3D11ShaderResourceView *none=nullptr;ctx->PSSetShaderResources(0,1,&none);
+        ctx->RSSetViewports(1,&vp);ctx->RSSetScissorRects(1,&rect);
         ctx->PSSetShaderResources(3,1,&image);ctx->ClearRenderTargetView(rt,red);ctx->Draw(3,0);
         ctx->CopyResource(read,bb);CHECK(ctx->Map(read,0,D3D11_MAP_READ,0,&map));pixel=(unsigned char*)map.pData+54*map.RowPitch;
         assert(pixel[1]==0&&pixel[64*4+1]==255&&pixel[255*4+1]==0);ctx->Unmap(read,0);
-        ctx->PSSetShaderResources(3,1,&none);image->Release();
+        ctx->PSSetShaderResources(3,1,&none);
+        ultrawide_test_attach(sc,ctx,false);ctx->OMSetRenderTargets(1,&rt,nullptr);
+        ctx->RSSetViewports(1,&centred);ctx->RSSetScissorRects(1,&centredRect);
+        ctx->ClearRenderTargetView(rt,red);ctx->PSSetShaderResources(0,1,&image);ctx->Draw(3,0);
+        ctx->CopyResource(read,bb);CHECK(ctx->Map(read,0,D3D11_MAP_READ,0,&map));
+        pixel=(unsigned char*)map.pData+54*map.RowPitch;
+        assert(pixel[1]==0&&pixel[64*4+1]==255&&pixel[255*4+1]==0);ctx->Unmap(read,0);
+        ctx->PSSetShaderResources(0,1,&none);image->Release();
     }
     ultrawide_test_release();ctx->OMSetRenderTargets(0,nullptr,nullptr);rt->Release();bb->Release();read->Release();
     // No retained backbuffer references are allowed to break resize/fullscreen.

@@ -11,7 +11,7 @@ cl /nologo /O2 /LD test_ultrawide_foreign.cpp /Fo:build\ /Fe:build\test_ultrawid
 if errorlevel 1 exit /b 1
 cl /nologo /O2 /EHsc /std:c++17 /DULTRAWIDE_TEST test_ultrawide.cpp ultrawide_bridge.cpp /Fo:build\ /Fe:build\test_ultrawide.exe /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib shell32.lib
 if errorlevel 1 exit /b 1
-build\test_ultrawide.exe "..\..\..\data\ultrawide\st_bootflow_standard.dds" "..\..\..\data\ultrawide\st_bootflow_ultrawide.dds"
+build\test_ultrawide.exe "..\..\..\data\ultrawide\st_bootflow_standard.dds" "..\..\..\data\ultrawide\st_bootflow_ultrawide.dds" "..\..\..\data\ultrawide\notfound_standard.dds" "..\..\..\data\ultrawide\notfound_ultrawide.dds" "..\..\..\data\ultrawide\pressstart_standard.big" "..\..\..\data\ultrawide\pressstart_ultrawide.big"
 set "RESULT=%ERRORLEVEL%"
 popd
 exit /b %RESULT%
