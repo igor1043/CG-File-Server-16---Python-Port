@@ -14,6 +14,23 @@ def enabled(game):
     value=SessionIniFile(Path(game)/'ModCarrerMode/config/frontend_stadium.ini').read('enabled','frontend_stadium').strip()
     return value.casefold() in ('1','true','yes','on')
 
+BACKGROUND_MODES=('image','stadium','dressing_room')
+
+def background_mode(game):
+    """Keep the old enabled preference when this installation has no selector yet."""
+    value=SessionIniFile(Path(game)/'ModCarrerMode/config/frontend_stadium.ini').read('background_mode','frontend_stadium').strip()
+    return value if value in BACKGROUND_MODES else ('stadium' if enabled(game) else 'image')
+
+def save_background_mode(game,value):
+    if value not in BACKGROUND_MODES:raise ValueError('Invalid career background')
+    config=IniFile(Path(game)/'ModCarrerMode/config/frontend_stadium.ini')
+    parser=config._load()
+    if not parser.has_section('frontend_stadium'):parser.add_section('frontend_stadium')
+    parser.set('frontend_stadium','background_mode',value)
+    # The room shares the existing native menu scene; no match assignment changes.
+    parser.set('frontend_stadium','enabled','0' if value=='image' else '1')
+    _save(parser,config,reload=False)
+
 
 def selection(game,team=0,*,career=False,session=0):
     settings=SessionIniFile(Path(game)/'ModCarrerMode/config/frontend_stadium.ini')
@@ -27,9 +44,9 @@ def selection(game,team=0,*,career=False,session=0):
         return settings.read(str(team),'frontend_stadium_clubs').strip() or 'auto'
     return settings.read('selected_stadium','frontend_stadium').strip() or 'auto'
 
-def _save(parser,config):
+def _save(parser,config,*,reload=True):
     if not parser.has_section('frontend_stadium'):parser.add_section('frontend_stadium')
-    parser.set('frontend_stadium','reload_revision',str(time.time_ns()%2147483647))
+    if reload:parser.set('frontend_stadium','reload_revision',str(time.time_ns()%2147483647))
     output=io.StringIO();parser.write(output)
     from .frontend_stadium import atomic_write
     atomic_write(config.path,output.getvalue().encode('utf8'))
@@ -40,6 +57,7 @@ def save_enabled(game,value):
     parser=config._load()
     if not parser.has_section('frontend_stadium'):parser.add_section('frontend_stadium')
     parser.set('frontend_stadium','enabled','1' if value else '0')
+    parser.set('frontend_stadium','background_mode','stadium' if value else 'image')
     _save(parser,config)
 
 

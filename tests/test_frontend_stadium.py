@@ -190,17 +190,17 @@ class FrontendSelectorTest(unittest.TestCase):
                     selector.open(frontend=True)
                     panel=selector.frontend_panel
                     self.assertFalse(enabled(root))
-                    self.assertEqual([i for i,r in panel.targets()],[0,4,2])
+                    self.assertEqual([i for i,r in panel.targets()],[0,5,4,2])
                     selector.handle(6,0)
                     self.assertTrue(enabled(root))
-                    self.assertEqual([i for i,r in panel.targets()],[0,1,4,2])
+                    self.assertEqual([i for i,r in panel.targets()],[0,5,1,4,2])
                     # Hit the scaled top of the row: inputs must use the same
                     # 90% coordinates as the published panel texture.
                     selector.handle(8,(95<<16)|450)
                     self.assertFalse(enabled(root))
-                    self.assertEqual([i for i,r in panel.targets()],[0,4,2])
-                    with Image.open(selector.shared.image_path) as image:self.assertEqual(image.size,(1080,972))
-                    self.assertEqual((selector.shared.width,selector.shared.height),(540,486))
+                    self.assertEqual([i for i,r in panel.targets()],[0,5,4,2])
+                    with Image.open(selector.shared.image_path) as image:self.assertEqual(image.size,(1080,1116))
+                    self.assertEqual((selector.shared.width,selector.shared.height),(540,558))
                     selector.handle(7,0)
                     self.assertFalse(selector.opened)
                     selector.open(frontend=True)

@@ -14,6 +14,8 @@
 #include "menu_page.h"
 #include "profile_reload.h"
 #include "stadium_metadata.h"
+#include "../../common/club_stadium_scope.h"
+#include "../../common/career_background.h"
 
 // Verified call sites on the installed 577DE45C FIFA build. Scene requests
 // pass through FIFA's existing FE event queue and preparation/loading pair.
@@ -56,6 +58,7 @@ static frontend_stadium::PlayerScene playerScene;
 static bool bootComplete=false;
 static frontend_stadium::PageKind previousPage=frontend_stadium::PageKind::Transition;
 static uint32_t requestsAtPost=0;
+static DWORD publishedTeam=0;static int publishedPhase=0;
 static thread_local bool frontendCrowdLoad=false;
 struct ExtraCall {uintptr_t source,target,offset;LONG before=0,after=0;};
 static ExtraCall extraCalls[]={{0x436311b,0x4361970,0x140},{0x5cbd1b7,0x5cbb330,0x180},{0x5cbb3cb,0x5cbe930,0x1c0},
@@ -95,6 +98,7 @@ static void selection(int team,wchar_t* output,DWORD size){
     GetPrivateProfileStringW(L"frontend_stadium_clubs",key,L"auto",output,size,config);
 }
 static void publishState(int phase,int team,int career,int slot,int error){
+    publishedTeam=static_cast<DWORD>(team);publishedPhase=phase;
     sceneReady=phase==3&&activeMode!=0;photoDirty=true;
     wchar_t body[512]{};
     const int length=_snwprintf_s(body,_countof(body),_TRUNCATE,
@@ -371,17 +375,19 @@ static void pollReload(){
     if(allowedPage)bootComplete=true;
     if(!allowedPage&&!awaitingReload){ReleaseSRWLockExclusive(&gate);return;}
     bool career=stageCareer!=0;
-    const int team=allowedPage?club(&career):(stageTeam?stageTeam:static_cast<int>(FrontendStadiumStatus.team));
+    const int actualTeam=allowedPage?club(&career):careerSessionTeam;
+    const int selected=page==frontend_stadium::PageKind::ClubBrowser?club_stadium_scope::selected():0;
+    const int team=allowedPage?club_stadium_scope::target(actualTeam,selected):(stageTeam?stageTeam:static_cast<int>(FrontendStadiumStatus.team));
     const auto epoch=uiContext().epoch;
     const bool newCareer=career&&epoch&&epoch!=observedEpoch;
-    const bool contextChanged=allowedPage&&(career!=careerWasActive||(career&&team!=careerSessionTeam)||newCareer);
-    if(allowedPage)updateCareerContext(career,team);
+    const bool contextChanged=allowedPage&&(career!=careerWasActive||(career&&actualTeam!=careerSessionTeam)||newCareer);
+    if(allowedPage)updateCareerContext(career,actualTeam);
     if(contextChanged){
         awaitingReload=false;observedTeam=0;
         InterlockedExchange(&stageRequest,0);InterlockedExchange(&stageComplete,0);
         sceneReady=false;photoDirty=true;
         if(career)backgroundViewModel=backgroundVtable=0;observedEpoch=career?epoch:0;
-        if(!playerScene.matches(team,epoch,activeCareerRole()))playerScene.clear();
+        if(!playerScene.matches(actualTeam,epoch,activeCareerRole()))playerScene.clear();
         if(newCareer){careerSession=static_cast<int>(now&0x7fffffff);log("CAREER_EPOCH_RESET",team,static_cast<int>(epoch));}
     }
     if(!enabled){
@@ -485,8 +491,9 @@ static void __fastcall hook(void* self,const void* context){
     const auto page=currentPage();
     const bool forced=frontend_stadium::forcesStadium(page);
     if(stopping||!frontend_stadium::enabledForPage(setting(L"enabled",0)!=0,page)){activeMode=0;sceneReady=false;photoDirty=true;original(self,context);return;}
-    bool career=false;const int team=club(&career);
-    updateCareerContext(career,team);
+    bool career=false;const int actualTeam=club(&career);
+    updateCareerContext(career,actualTeam);
+    const int team=club_stadium_scope::target(actualTeam,page==frontend_stadium::PageKind::ClubBrowser?club_stadium_scope::selected():0);
     if(team<=0||team>2000000||(!forced&&!setting(career?L"career":L"favorite_team",1))){activeMode=0;original(self,context);return;}
     alignas(16) std::array<unsigned char,0x110> copy{};
     if(!read(reinterpret_cast<uintptr_t>(context),copy.data(),copy.size())){activeMode=0;original(self,context);return;}
@@ -697,6 +704,31 @@ static DWORD WINAPI worker(void*){
         Sleep(100);
     }
     return 0;
+}
+extern "C" __declspec(dllexport) BOOL WINAPI Fifa16FrontendStadiumView(DWORD* team,int* phase){
+    if(!team||!phase||stopping||!installed||!TryAcquireSRWLockShared(&gate))return FALSE;
+    *team=publishedTeam;*phase=publishedPhase;ReleaseSRWLockShared(&gate);return TRUE;
+}
+extern "C" __declspec(dllexport) DWORD WINAPI Fifa16FrontendRoomBackgroundClub(){
+    if(stopping||!installed)return 0;
+    wchar_t value[32]{};GetPrivateProfileStringW(L"frontend_stadium",L"background_mode",L"",value,_countof(value),config);
+    const auto mode=career_background::parse(!std::wcscmp(value,L"dressing_room")?"dressing_room":
+        !std::wcscmp(value,L"image")?"image":!std::wcscmp(value,L"stadium")?"stadium":"",setting(L"enabled",0)!=0);
+    if(mode!=career_background::Mode::DressingRoom)return 0;
+    auto p=get<uintptr_t>(image+0x3809030);
+    for(unsigned offset:{232u,192u,136u,472u})p=get<uintptr_t>(p+offset);
+    char name[128]{};if(!read(p,name,sizeof name-1))return 0;
+    for(auto& c:name)if(c>='A'&&c<='Z')c+='a'-'A';
+    const auto leaf=std::strrchr(name,'/');
+    bool resolved=false;const int team=activeCareerClub(image,read,&resolved);
+    return career_background::wantsRoom(mode,leaf&&!std::strcmp(leaf,"/fluxhub"),resolved,
+        team>0?static_cast<unsigned>(team):0,activeCareerRole(),menuScene())?static_cast<DWORD>(team):0;
+}
+extern "C" __declspec(dllexport) BOOL WINAPI Fifa16FrontendStadiumName(DWORD team,wchar_t* text,DWORD capacity){
+    if(!text||capacity<2||capacity>1024||stopping||!installed||!TryAcquireSRWLockShared(&gate))return FALSE;
+    const bool matches=team==FrontendStadiumStatus.team&&publishedPhase==3&&activeName[0];
+    if(matches)wcsncpy_s(text,capacity,activeName,_TRUNCATE);
+    ReleaseSRWLockShared(&gate);return matches?TRUE:FALSE;
 }
 extern "C" __declspec(dllexport) unsigned WINAPI Fifa16ModGetApiVersion(){return 1;}
 extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStart(const char*){

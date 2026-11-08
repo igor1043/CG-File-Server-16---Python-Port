@@ -1,5 +1,27 @@
 # Server16 — FIFA Friends
 
+## Fundos da carreira e revisão local — 08/11/2026
+
+Em **Select + Start → Configurações visuais → Fundo da carreira**, escolha
+**Imagem de fundo**, **Estádio 3D** ou **Vestiário 3D**. A preferência fica salva.
+O vestiário usa a sala V3 do clube ativo e seu passeio automático; a câmera é
+liberada ao sair da carreira ou abrir outra tela. O fundo reutiliza os recursos
+preparados durante o avanço do calendário, sem refazer a sala a cada dia.
+
+Inclui a revisão dos comandos contextuais no rodapé da carreira, as cutscenes
+dos dois técnicos com o mascote limitado ao mandante e a organização das notas
+dos módulos no README principal. Server16 incluído: **0.2.29**, com limpeza dos
+resíduos de sessões encerradas.
+
+Doze animações nativas foram recuperadas como **candidatas desativadas** na
+pasta ModCarrerMode/data/club_browser/animations/candidates/. A escolha aleatória
+atual permanece; os clipes experimentais e os que precisam de transição não
+foram habilitados automaticamente.
+
+Validação: testes de persistência e controles, enquadramento dos painéis,
+câmera e isolamento da carreira, preparação da sala e autoteste do pacote
+compilado. A aparência da nova opção deve ser conferida na instalação do jogo.
+
 ## Entrega — 04/11/2026
 
 Vestiário V3 oficial, mercado de técnicos com acompanhamento diário e navegação revisados, clubes/seleções e Server16 0.2.20. O ZIP incremental de assets é `FIFA-Friends-Assets-Delta-20261104-sobre-20261102-R2.zip`, sobre a entrega de 02/11 R2. V1/V2 ficam em backup e não acompanham o pacote.
