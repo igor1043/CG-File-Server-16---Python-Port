@@ -150,8 +150,7 @@ class CareerOptions:
                         date=str(self.next_date);self.message='O clube recusou o pedido. Tente novamente em '+date[6:8]+'/'+date[4:6]+'/'+date[:4]+'.'
                         svc.notify('transfer_declined',self.message,dict(request_id=ident))
                 elif action in ('remove_retirement','remove_and_rejuvenate'):
-                    require_saved_day(svc,today)
-                    svc.confirm(action);self.message=svc.message
+                    svc.confirm(action);self.message=''
                 else:raise ValueError('Opção desconhecida.')
             except (OSError,ValueError,KeyError,TypeError,sqlite3.Error) as exc:self.message=str(exc);svc.notify('options_error',self.message,dict(request_id=secrets.token_hex(8)))
         with self.connection() as db:

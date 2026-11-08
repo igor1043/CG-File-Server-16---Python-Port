@@ -170,11 +170,17 @@ class StadiumSelector:
                 grass.close();app._grass_quality_runtime=None
         if time.monotonic() >= getattr(self,'_next_cloth_sync',0):
             from .cloth_motion_switch import ClothMotionSwitch
+            from .native_feature_switch import UltrawideSwitch, LowDrivenShotSwitch
             switch=ClothMotionSwitch(getattr(app,'exedir',app.base_dir))
             enabled=switch.enabled()
             var=getattr(app,'module_vars',{}).get('ClothPhysics')
             if var is not None and var.get()!=enabled:var.set(enabled)
             getattr(app,'module_states',{})['ClothPhysics']=enabled
+            for name,switch_type in (('Ultrawide',UltrawideSwitch),('LowDrivenShot',LowDrivenShotSwitch)):
+                active=switch_type(getattr(app,'exedir',app.base_dir)).enabled()
+                var=getattr(app,'module_vars',{}).get(name)
+                if var is not None and var.get()!=active:var.set(active)
+                getattr(app,'module_states',{})[name]=active
             self._next_cloth_sync=time.monotonic()+1
         shared = self.shared
         shared.heartbeat = ctypes.windll.kernel32.GetTickCount()

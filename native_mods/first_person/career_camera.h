@@ -3,7 +3,8 @@
 
 namespace fp {
 // A close third-person chase view anchored to the selected player's body.
-// Follow the body/trajectory, never the animated head's gaze after acquisition.
+// In possession face the attacked goal; otherwise follow the ball. The body
+// remains only a fallback when a native target is unavailable or invalid.
 class CareerCamera {
     bool ready=false;
     float heading=0.f;
@@ -16,7 +17,7 @@ class CareerCamera {
     Vec previousRoot{},anchorTarget{},anchor{};
 public:
     void reset(){ready=false;}
-    FramedView update(const Pose& head,Vec root,Vec ball,float dt,float baseFov,int distancePreset=0,bool playerChanged=false,bool bodyValid=false,float bodyHeading=0.f,bool possessing=true){
+    FramedView update(const Pose& head,Vec root,Vec ball,float dt,float baseFov,int distancePreset=0,bool playerChanged=false,bool bodyValid=false,float bodyHeading=0.f,bool possessing=true,bool goalValid=false,Vec goal={}){
         constexpr float degrees=.01745329252f;
         const Vec travel=root-previousRoot;
         const float maxTravel=playerChanged?2500.f:350.f;
@@ -53,7 +54,20 @@ public:
                 wantedBias=clamp(angle,-.65f,.65f)*.12f*clamp((distance-250.f)/800.f,0.f,1.f);
         }
         ballBias=continuous?ballBias+(wantedBias-ballBias)*response(dt,possessing?.65f:.35f):wantedBias;
-        const float wanted=reference+ballBias;
+        float wanted=reference+ballBias;
+        const Vec target=(possessing&&goalValid)?goal:ball;
+        const Vec targetDelta=target-root;
+        const bool finiteTarget=std::isfinite(target.x)&&std::isfinite(target.y)&&std::isfinite(target.z);
+        const float targetDistance=std::hypot(targetDelta.x,targetDelta.z);
+        if((!possessing||goalValid)&&finiteTarget&&targetDistance>20.f&&targetDistance<30000.f){
+            wanted=std::atan2(-targetDelta.z,targetDelta.x);
+            // A target at the exact rear must not alternate clockwise and
+            // counterclockwise because of tiny ball-coordinate changes.
+            const float relative=wrap(wanted-heading);
+            if(std::fabs(relative)<2.2f)rearBallSide=0;
+            else if(!rearBallSide&&std::fabs(relative)>2.6f)rearBallSide=relative<0.f?-1:1;
+            if(rearBallSide&&std::fabs(relative)>2.2f)wanted=heading+std::copysign(std::fabs(relative),float(rearBallSide));
+        }
         const float wantedBoom=distancePreset==2?1150.f:distancePreset==1?750.f:480.f;
         const float wantedHeight=distancePreset==2?450.f:distancePreset==1?320.f:230.f;
         if(continuous){
@@ -73,8 +87,8 @@ public:
             height+=(heightTarget-height)*response(dt,.18f);
             const float rawError=wrap(wanted-heading);
             const float error=std::fabs(rawError)<=2.f*degrees?0.f:rawError-std::copysign(2.f*degrees,rawError);
-            const float speedLimit=possessing?.75f:1.05f;
-            const float acceleration=possessing?1.8f:2.6f;
+            const float speedLimit=possessing?.75f:1.35f;
+            const float acceleration=possessing?1.8f:3.0f;
             const float desiredSpeed=clamp(error/(possessing?.60f:.40f),-speedLimit,speedLimit);
             yawSpeed+=clamp(desiredSpeed-yawSpeed,-acceleration*dt,acceleration*dt);
             heading=wrap(heading+yawSpeed*dt);

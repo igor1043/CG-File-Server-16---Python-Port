@@ -37,6 +37,16 @@ static volatile LONG g_installing;
 static volatile LONG g_packet;
 static void (*g_log)(const char *);
 static thread_local unsigned g_raw_depth;
+typedef void (WINAPI *ShotFilterFn)(DWORD,XINPUT_STATE *,BOOL);
+static ShotFilterFn shot_filter() {
+    // Never replace another input hook. Reuse the gate that already owns input.
+    static PVOID volatile cached=nullptr;
+    if(auto filter=(ShotFilterFn)InterlockedCompareExchangePointer(&cached,nullptr,nullptr))return filter;
+    HMODULE module=GetModuleHandleA("low_driven_shot.dll");
+    auto filter=module ? (ShotFilterFn)GetProcAddress(module,"Fifa16LowDrivenShotFilter") : nullptr;
+    if(filter)InterlockedExchangePointer(&cached,(PVOID)filter);
+    return filter;
+}
 struct RawReadScope {
     RawReadScope() { ++g_raw_depth; }
     ~RawReadScope() { --g_raw_depth; }
@@ -96,6 +106,7 @@ static DWORD filter_state(XInputEntry &entry, DWORD index, XINPUT_STATE *state)
             state->dwPacketNumber = (DWORD)InterlockedIncrement(&g_packet);
     }
     ReleaseSRWLockExclusive(&g_pad_lock);
+    if(auto filter=shot_filter())filter(index,state,capture);
     return result;
 }
 static DWORD WINAPI get_state_91(DWORD index, XINPUT_STATE *state)

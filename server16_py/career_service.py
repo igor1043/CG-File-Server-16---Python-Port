@@ -21,6 +21,7 @@ from .career_context import CareerContext
 from .career_active_save import read_active_save, version, ActiveCareerUnavailable
 from .career_feedback import CareerFeedback
 from .career_jobs_runtime import CareerJobsRuntime
+from .career_retirement_runtime import RetirementRuntime
 from .career_read import read as read_career
 from .career_transfer_catalog import transfer_catalog
 
@@ -218,6 +219,7 @@ class CareerService:
         self._next_active_check = 0
         self.feedback = CareerFeedback(app)
         self.jobs_runtime = CareerJobsRuntime(app)
+        self.retirement_runtime = RetirementRuntime(app)
         self._next_preload = 0
         self._live_history = []
         self._live_started = 0
@@ -390,7 +392,7 @@ class CareerService:
             raise ValueError('Já existe um pedido aguardando aplicação.')
         if not self.in_career(self.live_page()) or not self.app.memory.is_open():
             raise ValueError('Abra o pedido dentro da carreira.')
-        self.require_active(allow_live=action=='transfer' and
+        self.require_active(allow_live=action in ('transfer','remove_retirement','remove_and_rejuvenate') and
                             (self.inspection or {}).get('context',{}).get('player_id') is None)
         request = {'request_id':uuid.uuid4().hex,'action': action, 'path': self.selected['path'],
                    'title':self.selected['title'], 'context':self.inspection['context'],
@@ -406,6 +408,13 @@ class CareerService:
         elif action in ('remove_retirement', 'remove_and_rejuvenate'):
             game = Path(getattr(self.app, 'exedir', self.app.base_dir))
             request['target_age'] = retirement_age(game)
+            profile=self.context_reader.profile(fresh=True)
+            ticket=self.retirement_runtime.request(profile,action=='remove_and_rejuvenate',request['target_age'])
+            self.pending=dict(request,action='live_retirement',original_action=action,ticket=ticket)
+            self.state,self.message='waiting_runtime','Aplicando na carreira aberta. Aguarde nesta tela, sem avançar a data.'
+            self.revision+=1
+            self.notify('applying',self.message,self.pending)
+            return
         elif action == 'transfer':
             data=transfer_catalog(self.inspection['catalog'],self.catalog)
             if not any(league==values['league_id'] and team==values['team_id'] for league,team in data['links']):
@@ -440,6 +449,9 @@ class CareerService:
         self.notify('prepared',title+'\nSaia do save sem salvar.\nAguarde a confirmação antes de reabrir.')
 
     def cancel(self):
+        if (self.pending or {}).get('action')=='live_retirement':
+            self.message='Aguarde a confirmação do FIFA. Um pedido enviado não pode ser repetido ou cancelado durante a aplicação.'
+            return
         if self.busy:
             return
         (self.root/'pending.json').unlink(missing_ok=True)
@@ -471,6 +483,31 @@ class CareerService:
         self.revision+=1
         if not recovery:
             self.notify('prepared','Pedido enviado. Volte à Central e aguarde o contrato.\nNão é preciso avançar a data.')
+
+    def _poll_live_retirement(self):
+        request=self.pending
+        if not request or request.get('action')!='live_retirement':return False
+        try:
+            result=self.retirement_runtime.poll(request['ticket'],self.context_reader.profile(fresh=True))
+            if result is None:return True
+            self.pending=None
+            count=result['players_changed']
+            self.state='done'
+            self.message=(f'Aposentadoria removida de {count} jogador(es). Salve normalmente no FIFA para manter a alteração.'
+                          if count else 'Nenhum jogador está marcado para aposentadoria nesta carreira.')
+            if count and request['original_action']=='remove_and_rejuvenate':
+                self.message=f"Aposentadoria removida e idade redefinida para {request['target_age']} anos em {count} jogador(es). Salve normalmente no FIFA."
+            self._notice_until=time.monotonic()+30
+            self.revision+=1
+            self.notify('done',self.message,request)
+            try:
+                receipt=dict(request,result=result)
+                (self.root/'last_live_retirement.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2),encoding='utf8')
+            except OSError as exc:self.app.log('Retirement applied; receipt unavailable',exc)
+        except (OSError,RuntimeError,ValueError,KeyError,TypeError) as exc:
+            self.pending=None;self.state,self.message='error',str(exc);self.revision+=1
+            self.notify('error',self.message,request)
+        return True
 
     def _poll_live_request(self):
         request=self.pending
@@ -551,7 +588,7 @@ class CareerService:
     def tick(self):
         self.feedback.tick()
         self.preload()
-        live_pending=self._poll_live_request()
+        live_pending=self._poll_live_retirement() or self._poll_live_request()
         if self._restored_notice:
             self._restored_notice=False
             self.notify('prepared','Pedido preparado.\nSaia do save sem salvar e aguarde a aplicação.')
@@ -635,7 +672,7 @@ class CareerService:
                     self.notify('error','Pedido não aplicado.\n'+str(exc))
         self.sync_active()
         self.restore_live_vacancies()
-        if live_pending or (self.pending and self.pending.get('action')=='live_job'):return
+        if live_pending or (self.pending and self.pending.get('action') in ('live_job','live_retirement')):return
         if not self.pending or self.busy or self.state == 'error':
             return
         if not self.safe_to_apply():

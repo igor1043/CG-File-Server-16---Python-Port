@@ -10,7 +10,7 @@ def run(output):
     from . import __version__
     root=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parents[1]))
     modules=('sqlite3','numpy','PIL.Image','psutil','server16_py.app','server16_py.club_environment',
-             'server16_py.career_context','server16_py.career_options','server16_py.frontend_stadium','server16_py.gamepad_panel',
+             'server16_py.career_context','server16_py.career_options','server16_py.career_retirement_runtime','server16_py.frontend_stadium','server16_py.gamepad_panel',
              'server16_py.stadium_match_assets','server16_py.match_state','server16_py.native_asset_cleanup',
              'server16_py.extra_scenes_panel','server16_py.substitution_audio','server16_py.substitution_events',
              'server16_py.substitution_audio_settings','server16_py.session_logs','server16_py.cache_maintenance')

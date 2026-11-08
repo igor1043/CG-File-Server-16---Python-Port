@@ -104,6 +104,7 @@ cl /nologo /O2 /W3 /LD /EHsc /std:c++17 ^
   "server16_py\d3d_overlay\mod_xinput_gate.cpp" ^
   "server16_py\d3d_overlay\ranking_input_gate.cpp" ^
   "server16_py\d3d_overlay\crowd_bridge.cpp" ^
+  "server16_py\d3d_overlay\ultrawide_bridge.cpp" ^
   /Fe:"%OVERLAY_DLL%" ^
   /Fd:"bin\cgfs16_overlay.pdb" ^
   /link d3d11.lib dxgi.lib d3dcompiler.lib user32.lib gdi32.lib ole32.lib

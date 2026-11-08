@@ -6,6 +6,8 @@ from .overlay_canvas import OverlayDraw, draw_focus_ring
 from .input_hints import navigation_hint, footer_y, panel_function_key
 from .match_audio_panel import MatchAudioPanel
 from .cloth_motion_switch import ClothMotionSwitch
+from .native_feature_switch import UltrawideSwitch, LowDrivenShotSwitch
+from .career_feedback import show_ultrawide_restart
 from .first_person_runtime import first_person_runtime, fov_limits, HEAD_SMOOTHING
 from .grass_quality_runtime import grass_quality_runtime
 from .extra_scenes_panel import ExtraScenesPanel
@@ -26,6 +28,8 @@ class MatchHubPanel:
         self._next_tick = 0
         self.cloth = ClothMotionSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
         self.cloth_value = self.cloth.enabled()
+        self.ultrawide = UltrawideSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
+        self.low_driven_shot = LowDrivenShotSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
         self.cloth_pending = False
         self.cloth_deadline = 0
 
@@ -42,7 +46,7 @@ class MatchHubPanel:
     def items(self):
         if self.page == 'home':
             items = [('Música', 'Cânticos, torcida e hinos de gol'),
-                    ('Gráficos', 'Física de roupas e qualidade do gramado' if features.GRASS_QUALITY_AVAILABLE else 'Física de roupas'),
+                    ('Gráficos e jogabilidade', 'Ultrawide, física de roupas e chute rasteiro'),
                     ('Câmera', 'Primeira pessoa e terceira pessoa · carreira'),
                     ('Controles', 'Mapear botões, analógicos e testar comandos')]
             if features.EXTRA_SCENES_AVAILABLE:
@@ -52,6 +56,8 @@ class MatchHubPanel:
             live = self.cloth.live_enabled(pid=self.selector.app._resolve_fifa_pid())
             value = self.cloth_value if live is None else live
             items=[('Física de roupas', 'Ligada' if value else 'Desligada')]
+            items.append(('Ultrawide', 'Reinicie o FIFA após alterar.'))
+            items.append(('Chute rasteiro', 'Ligado · dois toques no chute' if self.low_driven_shot.enabled() else 'Desligado'))
             if features.GRASS_QUALITY_AVAILABLE:
                 items.append(('Gramado em alta qualidade', grass_quality_runtime(self.selector.app).status()))
             return items+[('Voltar', 'Ajustes da partida')]
@@ -64,7 +70,7 @@ class MatchHubPanel:
         return items + [('Voltar', 'Ajustes da partida')]
 
     def targets(self):
-        pitch, height = (58,48) if self.page in ('home','camera') and len(self.items())>=5 else (72,60)
+        pitch, height = (58,48) if len(self.items())>=5 else (72,60)
         return [(i, (24, 98+i*pitch, 576, 98+i*pitch+height)) for i in range(len(self.items()))]
 
     def tick(self):
@@ -86,7 +92,7 @@ class MatchHubPanel:
                 elif now >= self.cloth_deadline:
                     self.cloth_pending = False
                     self.message = 'Opção salva. Reinicie o FIFA para atualizar o módulo.'
-            status = (live, self.message)
+            status = (live, self.message, self.ultrawide.enabled(), self.low_driven_shot.enabled())
             if features.GRASS_QUALITY_AVAILABLE:
                 grass=grass_quality_runtime(self.selector.app)
                 status += (grass.enabled, grass.active, grass.status())
@@ -117,7 +123,14 @@ class MatchHubPanel:
         else:
             try:
                 if self.page == 'graphics':
-                    if index==1 and features.GRASS_QUALITY_AVAILABLE:
+                    if index == 1:
+                        enabled = not self.ultrawide.enabled()
+                        self.ultrawide.set_enabled(enabled)
+                        self.message = show_ultrawide_restart(self.selector.app, enabled)
+                    elif index == 2:
+                        self.low_driven_shot.set_enabled(not self.low_driven_shot.enabled())
+                        self.message = 'Chute rasteiro atualizado.'
+                    elif index==3 and features.GRASS_QUALITY_AVAILABLE:
                         grass=grass_quality_runtime(self.selector.app)
                         grass.set_enabled(not grass.enabled)
                         self.message=grass.status()
@@ -186,7 +199,8 @@ class MatchHubPanel:
             draw.text((40,rect[1]+9),label,font=self.selector.font(18,True),fill=ink,max_width=available)
             draw.text((40,rect[1]+31),detail,font=self.selector.font(13),fill=muted,max_width=available)
             if switch:
-                enabled=self.cloth_value if index==0 else grass_quality_runtime(self.selector.app).enabled
+                enabled=(self.cloth_value if index==0 else self.ultrawide.enabled() if index==1 else
+                         self.low_driven_shot.enabled() if index==2 else grass_quality_runtime(self.selector.app).enabled)
                 cy=(rect[1]+rect[3])/2
                 draw.rounded_rectangle((453,cy-12,499,cy+12),12,fill=blue if enabled else '#d6dee9')
                 cx=487 if enabled else 465;draw.ellipse((cx-9,cy-9,cx+9,cy+9),fill='white')

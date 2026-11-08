@@ -261,6 +261,7 @@ void selector_tick(HWND window,float width,float height) {
         patch_keyboard_imports(GetModuleHandleW(nullptr));
         patch_keyboard_imports(GetModuleHandleW(L"fifa16.bin"));
         ranking_input_install_cursor_import(GetModuleHandleW(nullptr));
+        ranking_input_install_cursor_import(GetModuleHandleW(L"fifa16.exe"));
         ranking_input_install_cursor_import(GetModuleHandleW(L"fifa16.bin"));
         mod_xinput_install(g_log);
         g_selector->ready |= 4;

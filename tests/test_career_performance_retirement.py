@@ -117,23 +117,28 @@ class CareerRetirementFlowTests(unittest.TestCase):
                     worker.assert_called_once_with(Path(temporary),request)
             finally:selector.shutdown()
 
-    def test_both_actions_require_review_close_panel_and_persist_request(self):
+    def test_both_actions_wait_for_native_confirmation_without_an_offline_request(self):
         for choice, action in ((0,'remove_retirement'),(1,'remove_and_rejuvenate')):
             with self.subTest(action=action), tempfile.TemporaryDirectory() as temporary:
                 selector = overlay_fixtures.CareerOverlayTests().make_ready(Path(temporary))
                 try:
-                    selector.open(career=True);panel = selector.career_panel
-                    panel.activate(2);self.assertEqual(panel.page,'retirement')
-                    panel.activate(choice)
-                    self.assertEqual(panel.page,'confirm');self.assertEqual(panel.focus,1)
-                    self.assertIsNone(selector.career_service.pending)
-                    panel.activate(0)
-                    self.assertIsNone(selector.career_panel)
                     svc = selector.career_service
-                    self.assertEqual(svc.pending['action'],action)
+                    svc.retirement_runtime=Mock()
+                    svc.retirement_runtime.request.return_value={'id':'request'}
+                    svc.retirement_runtime.poll.return_value=None
+                    svc.confirm(action)
+                    self.assertEqual(svc.pending['action'],'live_retirement')
+                    self.assertEqual(svc.pending['original_action'],action)
                     self.assertEqual(svc.pending['target_age'],18)
-                    self.assertEqual(svc.state,'waiting_exit')
-                    self.assertTrue((svc.root/'pending.json').is_file())
+                    self.assertEqual(svc.state,'waiting_runtime')
+                    self.assertFalse((svc.root/'pending.json').exists())
+                    self.assertTrue(svc._poll_live_retirement())
+                    self.assertIsNotNone(svc.pending)
+                    svc.retirement_runtime.poll.return_value={'players_changed':3,'native_save_pending':True}
+                    self.assertTrue(svc._poll_live_retirement())
+                    self.assertIsNone(svc.pending);self.assertEqual(svc.state,'done')
+                    self.assertIn('Salve normalmente',svc.message)
+                    self.assertTrue((svc.root/'last_live_retirement.json').exists())
                 finally:selector.shutdown()
 
     def test_catalog_preloads_on_ram_connection_before_career(self):

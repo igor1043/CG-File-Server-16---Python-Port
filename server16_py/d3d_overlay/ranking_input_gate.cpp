@@ -8,6 +8,7 @@
 #include <vector>
 #include "ranking_input_gate.h"
 #include "mod_overlay_screens.h"
+#include "ultrawide_bridge.h"
 #pragma comment(lib, "dinput8.lib")
 #pragma comment(lib, "dxguid.lib")
 
@@ -276,6 +277,7 @@ static BOOL WINAPI gated_cursor_position(POINT *position)
         packed = InterlockedCompareExchange64(&g_cursor_position, 0, 0);
         memcpy(position, &packed, sizeof(packed));
     }
+    if(!mod_screen_captures_input())ultrawide_cursor_position(position);
     return result;
 }
 extern "C" BOOL ranking_input_install_cursor_import(HMODULE module)

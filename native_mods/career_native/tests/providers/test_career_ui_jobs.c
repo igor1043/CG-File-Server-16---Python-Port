@@ -14,6 +14,7 @@ static void drain_bank_mail(void) {}
 static void drain_market_read(void) {}
 static void drain_manager_read(void) {++manager_drains;}
 static void drain_prepared_views(void) {}
+static void drain_retirement_live(void) {}
 static int fce_runtime_is_stable(void) {return stable;}
 static void append_loader_log(const char *message) {(void)message;++disabled;}
 #include "../../src/host/frontend_ui_owner.inc"

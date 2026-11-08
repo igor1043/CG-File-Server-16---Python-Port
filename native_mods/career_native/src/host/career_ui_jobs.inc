@@ -36,6 +36,7 @@ static void career_ui_jobs_tick(void)
     drain_market_read();
     drain_manager_read();
     drain_prepared_views();
+    drain_retirement_live();
     callback=(CareerJobUiCallback)InterlockedCompareExchangePointer(&g_career_job_ui_callback,NULL,NULL);
     __try {if(callback)callback();}
     __except(EXCEPTION_EXECUTE_HANDLER) {

@@ -1,5 +1,6 @@
 #include "../native_mods/first_person/game_framing.h"
 #include "../native_mods/first_person/career_camera.h"
+#include "../native_mods/first_person/career_target.h"
 #include "../native_mods/first_person/camera_bootstrap.h"
 #include "../native_mods/first_person/camera_subject.h"
 #include "../native_mods/first_person/camera_final_pose.h"
@@ -321,10 +322,29 @@ int main(){
     for(int frame=0;frame<120;++frame){
         const auto chasing=fasterPlay.update(head,{0,0,0},{-3000,10,-300},1.f/120,85,0,false,true,0,false);
         const float speed=std::fabs(fp::wrap(chasing.pose.heading-fastPrior))*120.f;
-        fastPeak=std::max(fastPeak,speed);assert(speed<=1.051f);
+        fastPeak=std::max(fastPeak,speed);assert(speed<=1.351f);
         fastPrior=chasing.pose.heading;
     }
     assert(fastPeak>.75f); // Off-ball orbit can now respond faster than the prior cap.
+    fp::CareerTargetReference targets;
+    assert(!targets.update(100,4,9,1,-1,5250).valid); // No invented side before the subject is observed.
+    auto homeGoal=targets.update(100,4,4,0,-1,5250);assert(homeGoal.valid&&homeGoal.goal.x==5250);
+    auto restartGoal=targets.update(100,4,30,1,1,5250);assert(restartGoal.valid&&restartGoal.goal.x==5250);
+    auto secondHalf=targets.update(100,4,30,1,-1,5250);assert(secondHalf.valid&&secondHalf.goal.x==-5250);
+    assert(!targets.update(200,4,30,1,-1,5250).valid); // Another match cannot inherit the team side.
+    assert(!targets.update(200,4,4,0,0,5250).valid);
+    assert(!targets.update(200,4,4,0,-1,std::numeric_limits<float>::quiet_NaN()).valid);
+    assert(!targets.update(200,4,4,0,-1,0).valid);
+    fp::CareerCamera goalAndBall;
+    head.heading=0;fp::axes(head);
+    auto goalView=goalAndBall.update(head,{0,0,500},{-1200,10,500},0,85,0,false,true,3.14159f,true,true,{5250,0,0});
+    for(int i=0;i<600;++i)goalView=goalAndBall.update(head,{0,0,500},{-1200,10,500},1.f/120,85,0,false,true,3.14159f,true,true,{5250,0,0});
+    assert(std::fabs(fp::wrap(goalView.pose.heading-std::atan2(500.f,5250.f)))<.04f); // Goal wins over backward dribble/head direction.
+    const fp::Vec targetBall{-1500,10,-800};float previous=goalView.pose.heading;
+    for(int i=0;i<720;++i){goalView=goalAndBall.update(head,{0,0,500},targetBall,1.f/120,85,0,false,true,0,false,true,{5250,0,0});assert(std::fabs(fp::wrap(goalView.pose.heading-previous))*120.f<=1.351f);previous=goalView.pose.heading;}
+    assert(std::fabs(fp::wrap(goalView.pose.heading-std::atan2(1300.f,-1500.f)))<.04f); // Teammate, opponent or loose ball uses the same target.
+    for(int i=0;i<720;++i)goalView=goalAndBall.update(head,{0,0,500},targetBall,1.f/120,85,0,false,true,0,true,true,{-5250,0,0});
+    assert(std::fabs(fp::wrap(goalView.pose.heading-std::atan2(500.f,-5250.f)))<.04f); // Attacked end changes dynamically.
     source[0]=std::numeric_limits<float>::quiet_NaN();assert(!fp::finiteCameraData(source));
     std::puts("PASS: body/trajectory orbit rejects head/root/dribble jitter; locked subject survives restart focus; final pose preserves clipping and disables native blur flags only");
     std::puts("PASS: ball/field balance, FOV/tilt personalization, hair clearance, immediate kickoff anchor and pose reacquisition");

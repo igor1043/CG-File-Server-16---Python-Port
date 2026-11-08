@@ -6,13 +6,15 @@ from .overlay_canvas import OverlayDraw, FOCUSED_PRIMARY, draw_focus_ring
 from .panel_navigation import move_focus
 from .cloth_motion_switch import ClothMotionSwitch, _atomic
 from .smoke_settings_panel import SmokeSettingsPanel
+from .native_feature_switch import UltrawideSwitch
+from .career_feedback import show_ultrawide_restart
 
 
 class MatchSettingsPanel:
-    WIDTH, HEIGHT = 600, 545
+    WIDTH, HEIGHT = 600, 597
     ROWS = ((24, 85, 576, 120), (24, 130, 576, 165),
-            (48, 175, 576, 210), (48, 220, 576, 255), (24, 265, 576, 300), (24, 310, 576, 345), (24,355,576,397))
-    BACK, APPLY = (24, 427, 292, 469), (308, 427, 576, 469)
+            (48, 175, 576, 210), (48, 220, 576, 255), (24, 265, 576, 300), (24, 310, 576, 345), (24,355,576,397), (24,407,576,449))
+    BACK, APPLY = (24, 479, 292, 521), (308, 479, 576, 521)
 
     def __init__(self, selector):
         self.selector = selector
@@ -23,6 +25,7 @@ class MatchSettingsPanel:
         self.store = MatchPresentation(getattr(selector.app, 'exedir', selector.app.base_dir))
         self.cloth = ClothMotionSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
         self.cloth_enabled = self.cloth_original = self.cloth.enabled()
+        self.ultrawide=UltrawideSwitch(getattr(selector.app, 'exedir', selector.app.base_dir))
         try:
             self.options = self.store.load()
         except Exception as exc:
@@ -35,11 +38,13 @@ class MatchSettingsPanel:
         pass
 
     def close_smoke(self):
-        self.child=None;self.HEIGHT=545;self.focus=6;self.selector.render()
+        self.child=None;self.HEIGHT=597;self.focus=6;self.selector.render()
 
     def enabled(self, focus):
         if focus == 5:
             return self.cloth.available()
+        if focus == 7:
+            return self.ultrawide.available()
         return focus not in (2, 3) or self.options.pyrotechnics
 
     def activate(self, focus):
@@ -70,6 +75,16 @@ class MatchSettingsPanel:
                 return
             self.selector.app.log(f'Match presentation applied: {self.options}')
             self.selector.show_menu()
+        elif focus==7 and self.enabled(focus):
+            try:
+                active=not self.ultrawide.enabled()
+                self.ultrawide.set_enabled(active)
+            except (OSError,ValueError) as exc:
+                self.message='Não foi possível aplicar o ultrawide.'
+                self.selector.app.log(self.message,exc)
+            else:
+                self.message=show_ultrawide_restart(self.selector.app, active)
+            self.selector.render()
         elif focus==6:
             self.child=SmokeSettingsPanel(self);self.HEIGHT=self.child.HEIGHT;self.selector.render()
         elif self.enabled(focus):
@@ -118,9 +133,9 @@ class MatchSettingsPanel:
         draw.rounded_rectangle((0, 0, self.WIDTH-1, self.HEIGHT-1), 18, fill='white', outline='#e0e6ee')
         draw.text((24, 22), 'Configurações da partida', font=self.selector.font(23, True), fill=ink)
         draw.text((24, 58), 'Apresentação, efeitos e física das roupas.', font=self.selector.font(15), fill=muted)
-        labels = ('Habilitar mascotes', 'Fumaça e pirotecnia', 'Na entrada da partida', 'Após o gol do mandante', 'Objetos de abertura da competição', 'Física de roupas · camisa e calção', 'Fumaça · duração e emissores')
+        labels = ('Habilitar mascotes', 'Fumaça e pirotecnia', 'Na entrada da partida', 'Após o gol do mandante', 'Objetos de abertura da competição', 'Física de roupas · camisa e calção', 'Fumaça · duração e emissores', 'Ultrawide · requer reinício do FIFA')
         for i, (label, rect) in enumerate(zip(labels, self.ROWS)):
-            active = self.cloth_enabled if i == 5 else getattr(self.options, self.store.KEYS[i]) if i<5 else False
+            active = self.cloth_enabled if i == 5 else self.ultrawide.enabled() if i==7 else getattr(self.options, self.store.KEYS[i]) if i<5 else False
             enabled = self.enabled(i)
             if self.focus == i:
                 draw_focus_ring(draw, rect, 8)

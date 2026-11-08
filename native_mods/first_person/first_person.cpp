@@ -8,6 +8,7 @@
 #include "camera_protocol.h"
 #include "game_framing.h"
 #include "career_camera.h"
+#include "career_target.h"
 #include "camera_channel.h"
 #include "camera_bootstrap.h"
 #include "camera_subject.h"
@@ -29,6 +30,7 @@ static LARGE_INTEGER timerFrequency{};
 static fp::Stabilizer stabilizer;
 static fp::PossessionFraming gameView;
 static fp::CareerCamera careerView;
+static fp::CareerTargetReference careerTarget;
 static fp::CameraSubject subject;
 static uintptr_t previousBehavior=0,previousTable=0;
 static int previousPlayer=-1;
@@ -73,6 +75,7 @@ static void __fastcall generatorHook(void* self,void* output){
     InterlockedExchange64(&lastCameraTick,static_cast<LONG64>(GetTickCount64()));
     State s{};s.serial=serial;s.behavior=reinterpret_cast<uintptr_t>(self);s.output=reinterpret_cast<uintptr_t>(output);
     s.selected=get<int>(s.behavior+0x9cc);s.gameState=get<int>(s.behavior+0xaa4);
+    const int nativeSelected=s.selected;
     const auto iface=get<uintptr_t>(s.behavior+8),data=get<uintptr_t>(iface+0x38);
     // +9C1 is populated by the native areUsersLockedToPlayers property.
     // Retain that match's subject instead of the professional camera's
@@ -97,7 +100,8 @@ static void __fastcall generatorHook(void* self,void* output){
             const bool possessing=get<int>(s.behavior+0xa30)==s.selected;
             float fov=baseFov*.01745329252f;
             if(mode==1){
-                const auto view=careerView.update(s.raw,s.head.root,get<fp::Vec>(s.behavior+0xa20),dt,baseFov,InterlockedCompareExchange(&cameraDistance,0,0),playerChanged,s.head.bodyValid,s.head.bodyHeading,possessing);
+                const auto goal=careerTarget.update(data,s.selected,nativeSelected,get<int>(s.behavior+0xa08),get<int>(s.behavior+0xa04),get<float>(s.behavior+0x6b0));
+                const auto view=careerView.update(s.raw,s.head.root,get<fp::Vec>(s.behavior+0xa20),dt,baseFov,InterlockedCompareExchange(&cameraDistance,0,0),playerChanged,s.head.bodyValid,s.head.bodyHeading,possessing,goal.valid,goal.goal);
                 s.pose=view.pose;fov=view.fov;
             }else{
               if(InterlockedCompareExchange(&framing,0,0)){
@@ -128,7 +132,7 @@ static void __fastcall generatorHook(void* self,void* output){
             s.modded=true;
         }
     }
-    if(!s.valid||!InterlockedCompareExchange(&enabled,0,0)||stopping){stabilizer.reset();gameView.reset();careerView.reset();previousTime.QuadPart=0;}
+    if(!s.valid||!InterlockedCompareExchange(&enabled,0,0)||stopping){stabilizer.reset();gameView.reset();careerView.reset();careerTarget.reset();previousTime.QuadPart=0;}
     AcquireSRWLockExclusive(&stateLock);state=s;ReleaseSRWLockExclusive(&stateLock);
 }
 static void __fastcall moduleUpdateHook(void* self,void* timing){

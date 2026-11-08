@@ -43,11 +43,11 @@ class CareerOptionsBridgeTest(unittest.TestCase):
   self.request('transfer','expired');self.assertFalse(self.calls);self.assertIn('expirado',self.bridge.message)
  def test_explicit_retirement_confirmation_reuses_existing_guarded_service(self):
   self.assertFalse(self.calls)
-  with patch('server16_py.career_options.require_saved_day') as guard:self.request('remove_and_rejuvenate');guard.assert_called_once_with(self.service,20260101)
+  with patch('server16_py.career_options.require_saved_day') as guard:self.request('remove_and_rejuvenate');guard.assert_not_called()
   self.assertEqual([(('remove_and_rejuvenate',),{})],self.calls)
- def test_older_save_blocks_retirement_without_enqueuing_an_edit(self):
+ def test_live_retirement_does_not_require_the_disk_save_to_have_the_current_day(self):
   with patch('server16_py.career_options.require_saved_day',side_effect=ValueError('Salve a carreira antes de confirmar')):self.request('remove_retirement')
-  self.assertFalse(self.calls);self.assertIn('Salve a carreira',self.bridge.message)
+  self.assertEqual([(('remove_retirement',),{})],self.calls)
  def test_rejected_transfer_does_not_open_a_native_offer_and_blocks_new_club_request(self):
   with patch('server16_py.career_options.secrets.randbelow',side_effect=lambda n:n-1):self.request('transfer')
   self.assertFalse(self.calls);self.assertEqual(20260131,self.bridge.next_date);self.assertIn('recusou',self.bridge.message)

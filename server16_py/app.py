@@ -31,6 +31,8 @@ from .match_string_patcher import patch_match_string
 from .assignment_runtime import AssignmentRuntime
 from .camera_runtime import CameraPreset, CameraRuntime
 from .cloth_motion_switch import ClothMotionSwitch
+from .native_feature_switch import UltrawideSwitch, LowDrivenShotSwitch
+from .career_feedback import show_ultrawide_restart
 from .competition_icons import CompetitionIconService
 from .shutdown import cleanup_step, bounded_cleanup, finish_frozen_process, close_owned_readers
 from .chants_runtime import ChantsRuntime, MciAudioPlayer
@@ -596,11 +598,15 @@ class Server16App(tk.Tk):
             "TeamEntrance": "module.team_entrance",
             "DiscordRPC": "module.discord_rpc",
             "ClothPhysics": "module.cloth_physics",
+            "Ultrawide": "module.ultrawide",
+            "LowDrivenShot": "module.low_driven_shot",
         }
         for name, check in self.module_checks.items():
             check.configure(text=self.tr(module_map.get(name, name)))
         if hasattr(self,"cloth_physics_note"):
             self.cloth_physics_note.configure(text=self.tr("module.cloth_physics_note"))
+        if hasattr(self, "ultrawide_restart_note"):
+            self.ultrawide_restart_note.configure(text=self.tr("module.ultrawide_restart_note"))
 
     def _apply_camera_localization(self) -> None:
         if self.camera_select_button is not None:
@@ -1006,6 +1012,22 @@ class Server16App(tk.Tk):
             anchor="w",
         )
         self.help_label.pack(side="left")
+        ultrawide_var = tk.BooleanVar(value=False)
+        self.module_vars["Ultrawide"] = ultrawide_var
+        ultrawide_switch = ttk.Checkbutton(
+            help_bar,
+            text=self.tr("module.ultrawide"),
+            style="Switch.TCheckbutton",
+            variable=ultrawide_var,
+            command=lambda: self._on_module_toggle("Ultrawide", ultrawide_var),
+        )
+        ultrawide_switch.pack(side="right")
+        self.module_checks["Ultrawide"] = ultrawide_switch
+        self.ultrawide_restart_note = tk.Label(
+            help_bar, text=self.tr("module.ultrawide_restart_note"),
+            bg=self.bg, fg=self.muted, font=("Bahnschrift", 9),
+        )
+        self.ultrawide_restart_note.pack(side="right", padx=(6, 10))
 
         self.tabview = ttk.Notebook(root, style="Server16.TNotebook")
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1770,7 +1792,7 @@ class Server16App(tk.Tk):
     def _build_modules_card(self, parent: tk.Misc, row: int) -> None:
         card = self._card(parent, "card.modules.title", "card.modules.subtitle")
         card.grid(row=row, column=0, sticky="ew")
-        card.configure(height=384)
+        card.configure(height=416)
         card.grid_propagate(False)
         modules = tk.Frame(card, bg=self.card)
         modules.pack(fill="x", padx=12, pady=(6, 12))
@@ -1788,6 +1810,7 @@ class Server16App(tk.Tk):
             "TeamEntrance",
             "DiscordRPC",
             "ClothPhysics",
+            "LowDrivenShot",
         ]
         for idx, name in enumerate(module_names):
             initial = self._discord_rpc_enabled if name == "DiscordRPC" else False
@@ -1805,7 +1828,7 @@ class Server16App(tk.Tk):
 
         self.cloth_physics_note=tk.Label(modules,text=self.tr("module.cloth_physics_note"),bg=self.card,fg=self.muted,font=("Segoe UI",8))
         self.cloth_physics_note.grid(
-            row=7,column=0,columnspan=2,padx=6,pady=(0,4),sticky="w")
+            row=8,column=0,columnspan=2,padx=6,pady=(0,4),sticky="w")
 
         notification_switch = ttk.Checkbutton(
             card,
@@ -2732,6 +2755,12 @@ class Server16App(tk.Tk):
                 self.settings_ini.save()
         self.module_states["DiscordRPC"] = self._discord_rpc_enabled
         self.module_states["ClothPhysics"] = ClothMotionSwitch(self.exedir).enabled()
+        self.module_states["Ultrawide"] = UltrawideSwitch(self.exedir).enabled()
+        try:
+            UltrawideSwitch(self.exedir).sync_background()
+        except (OSError, ValueError) as exc:
+            self.log("Ultrawide background could not be selected", exc)
+        self.module_states["LowDrivenShot"] = LowDrivenShotSwitch(self.exedir).enabled()
         loaded = ", ".join(
             f"{name}={'1' if enabled else '0'}"
             for name, enabled in self.module_states.items()
@@ -2749,6 +2778,8 @@ class Server16App(tk.Tk):
             discord_var.set(self._discord_rpc_enabled)
 
     def module_enabled(self, name: str) -> bool:
+        if name in ("Ultrawide", "LowDrivenShot"):
+            return (UltrawideSwitch if name=="Ultrawide" else LowDrivenShotSwitch)(self.exedir).enabled()
         if name == "ClothPhysics":
             return ClothMotionSwitch(self.exedir).enabled()
         if name == "DiscordRPC":
@@ -3585,6 +3616,22 @@ class Server16App(tk.Tk):
     def _on_module_toggle(self, name: str, var: tk.BooleanVar) -> None:
         """Called when user clicks a module toggle. Saves state to settings.ini."""
         enabled = var.get()
+        if name in ("Ultrawide", "LowDrivenShot"):
+            switch=(UltrawideSwitch if name=="Ultrawide" else LowDrivenShotSwitch)(self.exedir)
+            previous = switch.enabled()
+            try:
+                switch.set_enabled(enabled)
+            except (OSError,ValueError) as exc:
+                var.set(switch.enabled())
+                messagebox.showerror(self.tr("module.ultrawide" if name=="Ultrawide" else "module.low_driven_shot"),str(exc),parent=self)
+                return
+            self.module_states[name]=enabled
+            if name == "Ultrawide":
+                if enabled != previous:
+                    show_ultrawide_restart(self, enabled, translate=self.tr)
+            else:
+                self.log(f"{name} {'enabled' if enabled else 'disabled'}; native live configuration saved")
+            return
         if name == "ClothPhysics":
             switch=ClothMotionSwitch(self.exedir)
             try:
@@ -4393,6 +4440,9 @@ class Server16App(tk.Tk):
         selector, self._stadium_selector = self._stadium_selector, None
         if selector is not None:
             step('match panels and shared memory', selector.shutdown)
+        ultrawide_feedback = getattr(self, '_ultrawide_feedback', None)
+        if ultrawide_feedback is not None:
+            step('ultrawide notice', ultrawide_feedback.close)
         def audio_cleanup():
             substitution=getattr(self,'_substitution_audio',None)
             if substitution is not None:step('substitution audio',substitution.close)

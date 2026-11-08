@@ -18,6 +18,7 @@
 #include <wincodec.h>    // WIC
 #include <d3d11.h>
 #include "ui_pipeline_state.h"
+#include "ultrawide_bridge.h"
 static clubgfx::UiPipelineState g_uiPipeline;
 #include <dxgi.h>
 #include <dxgi1_2.h>
@@ -950,6 +951,7 @@ static void RenderSwapchain(IDXGISwapChain *sc) {
     DXGI_SWAP_CHAIN_DESC selectorDesc={};
     if (FAILED(sc->GetDesc(&selectorDesc)) || !IsGameRenderWindow(selectorDesc.OutputWindow)) return;
     g_insideOverlay=true;
+    ultrawide_present(sc);
     LONG n = InterlockedIncrement(&g_frameCount);
     if (n==1 || (n%600)==0)
         Log("[Present] frame=%ld visible=%d", n, g_data?(int)g_data->visible:-1);
@@ -967,13 +969,15 @@ static void RenderSwapchain(IDXGISwapChain *sc) {
                 EnterCriticalSection(&g_drawCs);
                 __try {
                     if (SUCCEEDED(dev->GetDeviceRemovedReason())) {
+                        ultrawide_overlay(true);
                         const bool isolated=g_uiPipeline.enter(ctx);
                         DrawOverlay11(sc,dev,ctx);
                         if(isolated)g_uiPipeline.leave();
+                        ultrawide_overlay(false);
                     }
                     else ReleaseOverlayResources();
                 }
-                __except(EXCEPTION_EXECUTE_HANDLER){ g_uiPipeline.leave(); Log("[Present] EXCEPTION DrawOverlay11"); }
+                __except(EXCEPTION_EXECUTE_HANDLER){ g_uiPipeline.leave(); ultrawide_overlay(false); Log("[Present] EXCEPTION DrawOverlay11"); }
                 LeaveCriticalSection(&g_drawCs);
                 ctx->Release();
             }
@@ -1111,6 +1115,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStart(const char*){
         reinterpret_cast<LPCWSTR>(&Fifa16ModStart),&pin)) return FALSE;
         InitializeCriticalSection(&g_drawCs);
         InitLog();
+        ultrawide_initialize(g_ownModule,SelectorLog);
         Log("[ModHost] START pid=%lu", GetCurrentProcessId());
 
         g_hMap=CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,
@@ -1128,6 +1133,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStart(const char*){
     return TRUE;
 }
 extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStop(){
+    ultrawide_stop();
     InterlockedExchange(&g_shutdown,1);return TRUE;
 }
 BOOL WINAPI DllMain(HINSTANCE hInst, DWORD reason, LPVOID reserved) {

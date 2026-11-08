@@ -47,7 +47,7 @@ class CareerNoticeRefreshTests(unittest.TestCase):
                 self.assertEqual(panel.page,'finances')
                 self.assertIn('Salve',panel.message)
                 with self.assertRaisesRegex(ValueError,'Salve'):
-                    svc.confirm('remove_retirement')
+                    svc.confirm('funds',amount=10)
             finally:selector.shutdown()
 
     def test_new_save_is_read_once_and_restores_new_club_budget(self):

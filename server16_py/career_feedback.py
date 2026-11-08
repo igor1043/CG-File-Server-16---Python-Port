@@ -2,8 +2,27 @@
 from __future__ import annotations
 import ctypes
 from ctypes import wintypes
+from time import monotonic_ns
 
 NOTICE_DURATION_MS = 5000
+ULTRAWIDE_RESTART = 'Reinicie o FIFA para concluir a alteração.'
+
+
+def show_ultrawide_restart(app, enabled, *, translate=None):
+    state = 'enabled' if enabled else 'disabled'
+    title = f'Ultrawide {"ativado" if enabled else "desativado"}.'
+    restart = ULTRAWIDE_RESTART
+    if translate is not None:
+        title = translate(f'message.ultrawide_{state}')
+        restart = translate('message.ultrawide_restart')
+
+    feedback = getattr(app, '_ultrawide_feedback', None)
+    if feedback is None:
+        feedback = app._ultrawide_feedback = CareerFeedback(
+            app, heading='FIFA FRIENDS  |  ULTRAWIDE', prefer_native=False,
+        )
+    feedback.show('done', f'{title}\n{restart}', monotonic_ns())
+    return f'{title} {restart}'
 
 
 def native_notice(pid, text, persistent=False, dismiss=False):
@@ -40,8 +59,10 @@ def play_sound(stage):
 
 
 class CareerFeedback:
-    def __init__(self, app):
+    def __init__(self, app, *, heading='FIFA FRIENDS  |  CARREIRA', prefer_native=True):
         self.app=app
+        self.heading=heading
+        self.prefer_native=prefer_native
         self.seen=set()
         self.window=None
         self.hide_job=None
@@ -56,19 +77,19 @@ class CareerFeedback:
         if len(self.seen)>128:self.seen={key}
         self._progress=(token,text) if persistent else None
         try:
-            pid=getattr(self.app.memory,'process_id',0)
-            self._native_active=native_notice(pid,text,persistent=persistent)
+            pid=getattr(self.app.memory,'process_id',0) if self.prefer_native else 0
+            self._native_active=self.prefer_native and native_notice(pid,text,persistent=persistent)
             self._native_pid=pid if self._native_active else 0
             if self._native_active:
                 self._cancel_hide()
                 if self.window is not None:self.window.withdraw()
             else:self._fallback(text,persistent=persistent)
         except Exception as exc:
-            self.app.log('Career visual feedback failed',exc)
+            self.app.log(f'{self.heading} visual feedback failed',exc)
         if stage in ('prepared','done','error','cancelled','waiting_exit'):
             try:play_sound(stage)
-            except Exception as exc:self.app.log('Career audio feedback failed',exc)
-        self.app.log('Career feedback '+stage+': '+text.replace('\n',' | '))
+            except Exception as exc:self.app.log(f'{self.heading} audio feedback failed',exc)
+        self.app.log(f'{self.heading} feedback {stage}: '+text.replace('\n',' | '))
 
     def _cancel_hide(self):
         if self.hide_job is not None:
@@ -111,7 +132,7 @@ class CareerFeedback:
             badge.create_oval(0,0,27,27,fill='#e7effc',outline='')
             badge.create_text(14,13,text='i',fill='#0968f8',font=('Segoe UI',12,'bold'))
             badge.pack(side='left',padx=(0,10))
-            tk.Label(header,text='FIFA FRIENDS  |  CARREIRA',bg='white',fg='#0968f8',
+            tk.Label(header,text=self.heading,bg='white',fg='#0968f8',
                      font=('Segoe UI',9,'bold')).pack(side='left')
             tk.Frame(card,bg='#e7edf5',height=1).pack(fill='x')
             self.label=tk.Label(card,bg='white',fg='#344651',font=('Segoe UI',13),
