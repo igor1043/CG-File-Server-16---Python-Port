@@ -10,8 +10,17 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
+#include <memory>
 
 SelectorShared *g_selector = nullptr;
+// g_selector is a render-thread alias used by the overlay. Input callbacks run
+// on other threads and must retain their own view until their last read ends.
+// Reconnection replaces the owner atomically; it never unmaps an active reader.
+static std::shared_ptr<SelectorShared> g_channel;
+static void detach_channel() {
+    g_selector=nullptr;
+    std::atomic_store(&g_channel,std::shared_ptr<SelectorShared>{});
+}
 LONG g_selector_draw_width=0,g_selector_draw_height=0;
 static HWND g_window;
 static WNDPROC g_original;
@@ -52,16 +61,18 @@ static bool release_hold_active(DWORD deadline,DWORD now) {
     return deadline && (LONG)(deadline-now)>0;
 }
 
-static bool alive() {
-    return g_selector && g_selector->owner_pid &&
-        (DWORD)(GetTickCount()-g_selector->heartbeat)<2000;
+static bool alive(const SelectorShared *channel) {
+    return channel && channel->owner_pid &&
+        (DWORD)(GetTickCount()-channel->heartbeat)<2000;
 }
+static bool alive() { return alive(g_selector); } // Render-thread use only.
 extern "C" BOOL selector_shortcut_enabled(void) {
-    return alive() && g_selector->enabled && g_selector->ready==7 && game_foreground(g_window);
+    const auto channel=std::atomic_load(&g_channel);
+    return alive(channel.get()) && channel->enabled && channel->ready==7 && game_foreground(g_window);
 }
 // Modes 2 (match) and 3 (career) share Select+Start and panel navigation.
 // The career panel is rendered and dispatched separately by Python.
-extern "C" BOOL selector_audio_mode(void) { return g_selector && (g_selector->enabled==2 || g_selector->enabled==3); }
+extern "C" BOOL selector_audio_mode(void) { const auto channel=std::atomic_load(&g_channel);return channel && (channel->enabled==2 || channel->enabled==3); }
 static bool audio_combo_edge(WORD buttons,WORD previous) {
     const WORD combo=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
     return (buttons&combo)==combo && (previous&combo)!=combo;
@@ -98,10 +109,11 @@ static int navigation_direction(const bool *keys,WORD buttons,SHORT lx,SHORT ly,
     else if (previous==4 || previous==5) horizontal=x*10>y*12;
     return horizontal ? (lx<0?2:3) : (ly>0?4:5);
 }
-bool selector_visible() { return alive() && g_selector->visible; }
+bool selector_visible() { const auto channel=std::atomic_load(&g_channel);return alive(channel.get()) && channel->visible; }
 extern "C" BOOL mod_screen_captures_input(void) {
-    return alive() && game_foreground(g_window) &&
-        (g_selector->visible || release_hold_active(g_release_until,GetTickCount()));
+    const auto channel=std::atomic_load(&g_channel);
+    return alive(channel.get()) && game_foreground(g_window) &&
+        (channel->visible || release_hold_active(g_release_until,GetTickCount()));
 }
 static void emit(LONG kind,LONG value=0) {
     if (!g_selector) return;
@@ -194,14 +206,23 @@ static void patch_keyboard_imports(HMODULE module) {
         }
     }
 }
+static bool map_channel_view() {
+    HANDLE map=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,CGFS16_SELECTOR_MAPPING_NAME);
+    if (map) {
+        auto view=(SelectorShared *)MapViewOfFile(map,FILE_MAP_ALL_ACCESS,0,0,sizeof(SelectorShared));CloseHandle(map);
+        if(view){
+            std::shared_ptr<SelectorShared> channel(view,[](SelectorShared *p){UnmapViewOfFile(p);});
+            std::atomic_store(&g_channel,std::move(channel));g_selector=view;
+        }
+    }
+    return g_selector!=nullptr;
+}
 static void attach_channel() {
     if (g_selector) return;
     DWORD now=GetTickCount();
     if (g_next_attach && (LONG)(now-g_next_attach)<0) return;
     g_next_attach=now+1000;
-    HANDLE map=OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,CGFS16_SELECTOR_MAPPING_NAME);
-    if (map) { g_selector=(SelectorShared *)MapViewOfFile(map,FILE_MAP_ALL_ACCESS,0,0,sizeof(SelectorShared)); CloseHandle(map); }
-    if (g_selector) {
+    if (map_channel_view()) {
         if (g_log) g_log("Shared selector channel connected");
         LoadLibraryExW(L"xinput1_4.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
         BOOL di=ranking_input_bootstrap();
@@ -226,9 +247,9 @@ void selector_tick(HWND window,float width,float height) {
     // removed the named handle. A restarted Server may create a new object
     // with the same name. Reopen it instead of retaining that stale view.
     if (g_selector && !alive()) {
-        UnmapViewOfFile(g_selector);
-        g_selector=nullptr;
-        g_next_attach=0;
+        detach_channel();
+        // Preserve the retry deadline: a stalled owner must not cause a
+        // map/unmap and input-hook initialization on every display frame.
         g_start_pending=0;
     }
     attach_channel();

@@ -1,9 +1,89 @@
 import tempfile,unittest,sys,os
 from pathlib import Path
 from unittest.mock import patch
-from server16_py.club_environment import prepare_runtime,worker,ENTRIES
+from server16_py.club_environment import prepare_runtime,worker,atomic_copy,ENTRIES
 
 class PortableRuntimeTest(unittest.TestCase):
+    def test_source_code_wins_over_old_seed_on_every_launch(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp);self.fixture(game)
+            source=game/'ModCarrerMode/source/club_environment/room'/ENTRIES['room']
+            seed=game/'ModCarrerMode/data/club_environment/room'/ENTRIES['room']
+            seed.parent.mkdir(parents=True);seed.write_text('obsolete seed')
+            for _ in range(3):
+                _,runtime=prepare_runtime(game)
+                self.assertEqual((runtime/'room'/ENTRIES['room']).read_bytes(),source.read_bytes())
+
+    def test_copy_retries_windows_lock_without_truncating_target(self):
+        import server16_py.club_environment as module
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp);source=folder/'source.py';target=folder/'target.py'
+            source.write_text('new helper');target.write_text('working old helper');replace=os.replace;calls=[]
+            def locked(src,dst):
+                calls.append(str(src));self.assertEqual(target.read_text(),'working old helper')
+                if len(calls)<3:raise PermissionError(5,'Access denied')
+                replace(src,dst)
+            with patch.object(module.os,'replace',side_effect=locked),patch.object(module.time,'sleep') as pause:
+                atomic_copy(source,target)
+            self.assertEqual(target.read_text(),'new helper');self.assertEqual(pause.call_count,2)
+            self.assertEqual(list(folder.glob('*.new')),[])
+
+    def test_completed_concurrent_copy_is_accepted_and_temp_removed(self):
+        import server16_py.club_environment as module
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp);source=folder/'source.py';target=folder/'target.py';source.write_text('new helper')
+            def other_writer(src,dst):target.write_bytes(source.read_bytes());raise PermissionError(5,'Access denied')
+            with patch.object(module.os,'replace',side_effect=other_writer),patch.object(module.time,'sleep') as pause:
+                atomic_copy(source,target)
+            pause.assert_not_called();self.assertEqual(target.read_text(),'new helper');self.assertEqual(list(folder.glob('*.new')),[])
+
+    def test_persistent_lock_is_bounded_and_keeps_old_target(self):
+        import server16_py.club_environment as module
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp);source=folder/'source.py';target=folder/'target.py';source.write_text('new');target.write_text('old')
+            with patch.object(module.os,'replace',side_effect=PermissionError(5,'Access denied')) as replace,patch.object(module.time,'sleep'):
+                with self.assertRaises(PermissionError):atomic_copy(source,target)
+            self.assertEqual(replace.call_count,8);self.assertEqual(target.read_text(),'old');self.assertEqual(list(folder.glob('*.new')),[])
+
+    def test_bootstrap_failure_is_logged_and_returns_failure_without_dialog(self):
+        import server16_py.club_environment as module
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp)
+            with patch.object(module,'prepare_runtime',side_effect=PermissionError(5,'locked helper')):
+                self.assertEqual(worker(game,'room',123),1)
+            log=game/'ModCarrerMode/runtime/club_environment/room/runtime/service.log'
+            self.assertIn('PermissionError',log.read_text());self.assertIn('locked helper',log.read_text())
+
+    def test_parallel_preparations_keep_one_current_runtime(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp);self.fixture(game)
+            with ThreadPoolExecutor(max_workers=4) as pool:list(pool.map(prepare_runtime,[game]*8))
+            for group,entry in ENTRIES.items():
+                self.assertEqual((game/'ModCarrerMode/runtime/club_environment'/group/entry).read_bytes(),
+                                 (game/'ModCarrerMode/source/club_environment'/group/entry).read_bytes())
+            self.assertFalse(list(game.rglob('*.new')))
+
+    @unittest.skipUnless(os.name=='nt','Windows sharing semantics')
+    def test_real_windows_reader_lock_is_retried_then_installed(self):
+        import ctypes,threading,time
+        from ctypes import wintypes as W
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp);source=folder/'source.py';target=folder/'target.py';source.write_text('new');target.write_text('old')
+            kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+            kernel.CreateFileW.argtypes=[W.LPCWSTR,W.DWORD,W.DWORD,ctypes.c_void_p,W.DWORD,W.DWORD,W.HANDLE];kernel.CreateFileW.restype=W.HANDLE
+            kernel.CloseHandle.argtypes=[W.HANDLE]
+            handle=kernel.CreateFileW(str(target),0x80000000,3,None,3,0x80,None)
+            self.assertNotEqual(handle,ctypes.c_void_p(-1).value)
+            failures=[]
+            def copy():
+                try:atomic_copy(source,target)
+                except Exception as error:failures.append(error)
+            task=threading.Thread(target=copy);task.start()
+            try:time.sleep(.15);self.assertEqual(target.read_text(),'old')
+            finally:kernel.CloseHandle(handle)
+            task.join(5);self.assertFalse(task.is_alive());self.assertEqual(failures,[])
+            self.assertEqual(target.read_text(),'new');self.assertFalse(list(folder.glob('*.new')))
     def test_manager_market_worker_logs_in_its_own_runtime(self):
         with tempfile.TemporaryDirectory(prefix='FIFA manager bootstrap ') as temp:
             game=Path(temp);self.fixture(game)

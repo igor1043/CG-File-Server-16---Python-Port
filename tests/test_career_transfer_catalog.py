@@ -4,7 +4,26 @@ import unittest
 from pathlib import Path
 
 import test_career_overlay as fixtures
-from server16_py.career_transfer_catalog import transfer_catalog
+from server16_py.career_transfer_catalog import transfer_catalog,country_name
+
+
+def with_regions(data):
+    data=copy.deepcopy(data)
+    for index,(country,name) in enumerate(((156,'Brasil Sudeste'),(217,'Brasil Sul'),
+            (220,'Brasil Norte-Centro'),(221,'Brasil Nordeste'),(223,'Brasil Nordeste 2'),
+            (224,'Brasil Norte-Centro 2'),(226,'Brasil Norte-Centro 3'),(255,'255'),(241,''))):
+        league=1000+index;team=2000+index
+        if name:data['nations'][str(country)]=name
+        data['leagues'].append(dict(id=league,name='Federação regional',country_id=country,level=1))
+        data['teams'].append(dict(id=team,name='Clube regional',asset_id=team))
+        data['links'].append((league,team))
+        # A real domestic member must remain available through its national league.
+        data['links'].append((league,101))
+    data['nations']['21']='Germany'
+    data['leagues'].append(dict(id=19,name='Bundesliga',country_id=21,level=1))
+    data['teams'].append(dict(id=3000,name='Clube alemão',asset_id=3000))
+    data['links'].append((19,3000))
+    return data
 
 
 def catalog():
@@ -21,6 +40,39 @@ def catalog():
 
 
 class TransferCatalogTests(unittest.TestCase):
+    def test_regional_and_unidentified_destinations_are_removed_without_losing_national_clubs(self):
+        data=with_regions(catalog());before=copy.deepcopy(data);result=transfer_catalog(data)
+        self.assertEqual({'54':'Brasil','14':'Inglaterra','21':'Alemanha'},result['nations'])
+        self.assertTrue(all(league<1000 for league,team in result['links']))
+        self.assertIn((7,101),result['links'])
+        self.assertTrue(all(team<2000 or team==3000 for team in (r['id'] for r in result['teams'])))
+        self.assertEqual(before,data)
+
+    def test_save_without_nation_table_uses_reference_only_for_country_identity(self):
+        base=with_regions(catalog());career=copy.deepcopy(base);career['nations']={}
+        career['links']=[(351,team) if league==354 else (league,team) for league,team in career['links']]
+        result=transfer_catalog(career,base)
+        self.assertEqual({'54','14','21'},set(result['nations']))
+        self.assertIn((351,105),result['links'])
+        self.assertNotIn((354,105),result['links'])
+
+    def test_internal_country_groups_are_not_domestic_career_destinations(self):
+        data=catalog()
+        for ident,name in ((0,'Generic'),(255,'Brasil'),(211,'Rest of World')):
+            with self.subTest(country=ident):
+                current=copy.deepcopy(data);current['nations'][str(ident)]=name
+                current['leagues'][0]['country_id']=ident
+                result=transfer_catalog(current)
+                self.assertNotIn(7,{r['id'] for r in result['leagues']})
+
+    def test_new_registered_countries_remain_expandable(self):
+        data=catalog();data['nations']['240']='Timor-Leste'
+        data['leagues'][0]['country_id']=240
+        self.assertIn((7,101),transfer_catalog(data)['links'])
+        self.assertEqual('Timor-Leste',transfer_catalog(data)['nations']['240'])
+        for value in ('Germany',' germany ','GERMANY','Alemanha'):
+            self.assertEqual('Alemanha',country_name(value))
+
     def test_retains_series_a_to_d_and_real_fifth_division_without_mutating_source(self):
         original=catalog();before=copy.deepcopy(original);result=transfer_catalog(original)
         self.assertEqual({r['id'] for r in result['leagues']},{7,83,350,351,62})
@@ -72,12 +124,23 @@ class TransferCatalogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             selector=fixtures.CareerOverlayTests().make_ready(Path(temp));svc=selector.career_service
             try:
-                svc.catalog=catalog();svc.inspection['catalog']=copy.deepcopy(svc.catalog)
-                for league,team in ((354,105),(78,1370),(382,111592)):
+                svc.catalog=with_regions(catalog());svc.inspection['catalog']=copy.deepcopy(svc.catalog)
+                for league,team in ((354,105),(78,1370),(382,111592),*[(1000+i,2000+i) for i in range(9)]):
                     with self.subTest(league=league),self.assertRaises(ValueError):
                         svc.confirm('transfer',team_id=team,league_id=league)
                     self.assertIsNone(svc.pending)
                 svc.jobs_runtime.request.assert_not_called()
                 svc.confirm('transfer',team_id=104,league_id=351)
                 self.assertEqual(svc.pending['team_id'],104)
+            finally:selector.shutdown()
+
+    def test_panel_labels_use_the_localized_safe_country_list(self):
+        with tempfile.TemporaryDirectory() as temp:
+            selector=fixtures.CareerOverlayTests().make_ready(Path(temp));svc=selector.career_service
+            try:
+                svc.catalog=with_regions(catalog());svc.inspection['catalog']=copy.deepcopy(svc.catalog)
+                selector.open(career=True);panel=selector.career_panel
+                self.assertEqual(dict(panel.countries()),{54:'Brasil',14:'Inglaterra',21:'Alemanha'})
+                panel.country=217;panel.reset_filters()
+                self.assertIn(panel.country,(54,14,21))
             finally:selector.shutdown()

@@ -18,5 +18,5 @@ usuário confirmou o funcionamento. A ordem de inicialização anterior permanec
 
 Testes: frontend owner, fila do fundo e preflight do núcleo; 30 testes Python
 de frontend/mascote, 13 do rodapé e quatro de CRC. Saves/SQL pessoais não são
-distribuídos. A causa do dump antigo de Robson em +0x3A41F43 não foi demonstrada
+distribuídos. A causa do dump antigo da instalação de referência em +0x3A41F43 não foi demonstrada
 como sendo a mesma da falha reproduzida da DB em +0x4B6CB75.

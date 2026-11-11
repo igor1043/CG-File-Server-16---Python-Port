@@ -36,7 +36,7 @@ class SmokeSettingsTests(unittest.TestCase):
                 panel.activate(7);panel.activate(8+18);panel.activate(2)
                 self.assertEqual(parent.options.smoke_entrance_emitters,1<<18)
                 self.assertEqual(parent.options.smoke_entrance_seconds,55)
-                panel.handle(7,0);self.assertIsNone(parent.child);self.assertEqual(parent.HEIGHT,545)
+                panel.handle(7,0);self.assertIsNone(parent.child);self.assertEqual(parent.HEIGHT,597)
                 selector.handle(16,2) # Cancel the entire draft.
                 self.assertFalse(parent.store.path.exists())
                 selector.handle(16,3);parent=selector.prematch_panel;parent.activate(6);panel=parent.child

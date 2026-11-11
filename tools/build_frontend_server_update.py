@@ -21,7 +21,7 @@ def module_source(name, kind):
     return path/'__init__.py' if kind==1 else path.with_suffix('.py')
 
 
-def build(server,output,modules=MODULES,allow_new=False):
+def build(server,output,modules=MODULES,allow_new=False,preserve_offsets=False):
     modules=tuple(modules)
     if not modules or any((name!='server16_py' and not name.startswith('server16_py.')) or
                           not all(part.isidentifier() for part in name.split('.')) for name in modules):
@@ -37,10 +37,17 @@ def build(server,output,modules=MODULES,allow_new=False):
     pyz=archive.open_embedded_archive('PYZ.pyz')
     previous=archive.extract('PYZ.pyz')
     if previous[4:8]!=importlib.util.MAGIC_NUMBER:raise ValueError('Python bytecode version changed')
-    payload=bytearray(previous[:17]);pyz_toc=[]
+    # An already-running frozen interpreter caches its PYZ offsets. Keep all
+    # old chunks, including replaced modules, when publishing a live update.
+    # New interpreters use the new TOC; old cached importers retain old code.
+    if preserve_offsets and archive.toc['PYZ.pyz'][3]:raise ValueError('Live update requires an uncompressed PYZ')
+    payload=bytearray(previous if preserve_offsets else previous[:17]);pyz_toc=[]
     sources={}
     for name,(kind,offset,length) in pyz.toc.items():
         chunk=previous[offset:offset+length]
+        if preserve_offsets and name not in modules:
+            pyz_toc.append((name,(kind,offset,length)))
+            continue
         if name in modules:
             source=module_source(name,kind)
             raw=source.read_bytes();sources[name]=hashlib.sha256(raw).hexdigest()
@@ -77,6 +84,11 @@ def build(server,output,modules=MODULES,allow_new=False):
     output.parent.mkdir(parents=True,exist_ok=True)
     output.write_bytes(original[:archive._start_offset]+packed+toc_data+cookie_data)
     updated=CArchiveReader(str(output));updated_pyz=updated.open_embedded_archive('PYZ.pyz')
+    if preserve_offsets:
+        assert archive._start_offset==updated._start_offset
+        assert archive.toc['PYZ.pyz'][0]==updated.toc['PYZ.pyz'][0]
+        assert payload[12:len(previous)]==previous[12:]
+        for name,(kind,offset,length) in pyz.toc.items():assert payload[offset:offset+length]==previous[offset:offset+length],name
     assert updated.options==archive.options and updated.toc.keys()==archive.toc.keys()
     assert set(updated_pyz.toc)==set(pyz.toc)|set(modules)
     for name in archive.toc:
@@ -97,6 +109,7 @@ def build(server,output,modules=MODULES,allow_new=False):
             'sha256':hashlib.sha256(output.read_bytes()).hexdigest(),
             'preserved_archive_members':len(archive.toc)-1,
             'preserved_python_modules':len(set(pyz.toc)-set(modules))}
+    report['live_import_offsets_preserved']=bool(preserve_offsets)
     output.with_suffix('.json').write_text(json.dumps(report,indent=2),encoding='utf8')
     print(json.dumps(report,indent=2))
     return report

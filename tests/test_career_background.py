@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from server16_py.frontend_stadium_selection import (
     BACKGROUND_MODES,background_mode,save_background_mode,save_enabled,enabled,
+    idle_background,save_idle_background,
 )
 from server16_py.frontend_stadium_panel import FrontendStadiumPanel
 
@@ -61,5 +62,28 @@ class CareerBackgroundTests(unittest.TestCase):
         for _ in range(6):
             p.shift_background()
             self.assertNotEqual(p.mode,'dressing_room')
+
+    def test_career_options_are_consecutive_and_ultrawide_is_in_screen_submenu(self):
+        p=FrontendStadiumPanel(self.selector());keys=list(dict(p.targets()))
+        self.assertEqual(keys[:2],[0,6]);self.assertNotIn(5,keys);self.assertIn(7,keys)
+        rectangles=[r for _,r in p.targets()]
+        self.assertTrue(all(a[3]<b[1] for a,b in zip(rectangles,rectangles[1:])))
+        p.activate(7);self.assertEqual(list(dict(p.targets())),[5,2]);p.handle(7,0)
+        self.assertFalse(p.screen_settings);p.selector.close.assert_not_called()
+        self.assertNotIn(6,dict(FrontendStadiumPanel(self.selector(False)).targets()))
+
+    def test_idle_choice_uses_separate_preference_and_survives_reopening(self):
+        save_background_mode(self.game,'image')
+        p=FrontendStadiumPanel(self.selector())
+        self.assertEqual(p.idle_mode,'stadium')
+        p.focus=6
+        p.handle(3,0)
+        self.assertEqual(idle_background(self.game),'dressing_room')
+        self.assertEqual(background_mode(self.game),'image')
+        self.assertEqual(FrontendStadiumPanel(self.selector()).idle_mode,'dressing_room')
+        self.assertNotIn(6,dict(FrontendStadiumPanel(self.selector(False)).targets()))
+        save_idle_background(self.game,'stadium')
+        self.assertEqual(idle_background(self.game),'stadium')
+        self.assertIn('reload_revision = 99',self.config.read_text())
 
 if __name__=='__main__':unittest.main()

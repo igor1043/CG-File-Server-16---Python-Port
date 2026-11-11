@@ -34,13 +34,14 @@ class VisualUltrawideTests(unittest.TestCase):
                     selector,switch=self.prepare(Path(tmp))
                     try:
                         selector._frontend_career=career;panel=FrontendStadiumPanel(selector);panel.enabled=stadium
+                        self.assertNotIn(5,dict(panel.targets()));panel.activate(7)
                         self.assertIn(5,dict(panel.targets()))
                         panel.focus=5;panel.handle(6,0)  # Controller confirm/A.
                         self.assertTrue(switch.enabled());self.assertIn('Reinicie o FIFA',panel.message)
                         self.assertEqual((selector.app.exedir/NATIVE).read_bytes(),(selector.app.exedir/VARIANTS/WIDE).read_bytes())
                         panel.handle(3,0)  # D-pad right also toggles immediately.
                         self.assertFalse(switch.enabled())
-                        panel.handle(16,4)  # F4.
+                        panel.handle(6,0)
                         self.assertTrue(switch.enabled())
                         r=dict(panel.targets())[5]
                         x=int((r[0]+r[2])/2*panel.SCALE);y=int((r[1]+r[3])/2*panel.SCALE)
@@ -63,6 +64,7 @@ class VisualUltrawideTests(unittest.TestCase):
             selector,switch=self.prepare(Path(tmp))
             try:
                 selector._frontend_career=True;panel=FrontendStadiumPanel(selector)
+                panel.activate(7)
                 (selector.app.exedir/VARIANTS/WIDE).write_bytes(b'DDS incomplete')
                 panel.activate(5)
                 self.assertFalse(switch.enabled());self.assertIn('Não foi possível',panel.message)

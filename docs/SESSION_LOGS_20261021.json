@@ -17,7 +17,7 @@
     "separate_mod_files": true,
     "finished_zip_preserved": true,
     "dump_association": "PID when available, otherwise session time",
-    "dump_metadata_real_robson_sample": "passed",
+    "dump_metadata_real_reference_sample": "passed",
     "dump_copy_max_bytes": 16777216
   },
   "camera_dll_unchanged": true,

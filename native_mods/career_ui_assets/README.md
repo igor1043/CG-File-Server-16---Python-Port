@@ -1,4 +1,4 @@
-# Career competition artwork — revision 7, Robson base
+# Career competition artwork — revision 7, referência base
 
 The editable images are `data/ui/imgAssets/careerCompetitionIcons/<INI_ID>.png`.
 Server16 prepares `calendar/c<ID>.dds` and `cards/c<ID>.dds` from each image.

@@ -1,8 +1,10 @@
+#define NOMINMAX
 #include <cassert>
 #include <map>
 #include <string>
 #include <windows.h>
 #include "../native_mods/frontend_stadium/background_provider.h"
+#include "../native_mods/frontend_stadium/room_cover.h"
 #include "../native_mods/frontend_stadium/frontend_visibility.h"
 #include "../native_mods/frontend_stadium/scene_context.h"
 #include "../native_mods/frontend_stadium/menu_page.h"
@@ -55,7 +57,55 @@ static void __fastcall setString(void* raw,const char* field,const char* value){
 }
 int main(){
     testCareerIdentity();
+    {BackgroundProvider p;
+     assert(frontend_stadium::routeRoomPhotograph(&p,setString,false));assert(p.writes==1&&p.fields["Id"]=="FIFA"&&p.fields["Param"]=="BOOTFLOW");
+     assert(frontend_stadium::routeRoomPhotograph(&p,setString,true));assert(p.writes==2&&p.fields["Param"]=="server16_frontend_clear");
+     assert(!frontend_stadium::routeRoomPhotograph(nullptr,setString,true)&&!frontend_stadium::routeRoomPhotograph(&p,nullptr,true));assert(p.writes==2);}
+    // Stadium readiness must not uncover a still-preparing dressing room.
+    scene_loading::Status room;
+    room.club=112893;room.visible=1;room.variant=4;
+    assert(!frontend_stadium::roomCoverReady(112893,true,&room));
+    room.ready=1;
+    assert(!frontend_stadium::roomCoverReady(112893,true,&room)); // no published resource set yet
+    room.total=256;room.loaded=255;
+    assert(!frontend_stadium::roomCoverReady(112893,true,&room)); // resident shell is not the full room
+    room.loaded=256;
+    assert(!frontend_stadium::roomCoverReady(112893,false,&room)); // stadium in flight
+    assert(frontend_stadium::roomCoverReady(112893,true,&room));
+    room.club=1043;assert(!frontend_stadium::roomCoverReady(112893,true,&room));room.club=112893;
+    room.visible=0;assert(!frontend_stadium::roomCoverReady(112893,true,&room));room.visible=1;
+    room.variant=0;assert(!frontend_stadium::roomCoverReady(112893,true,&room));room.variant=4;
+    room.error=9;assert(!frontend_stadium::roomCoverReady(112893,true,&room));room.error=0;
+    room.version=2;assert(!frontend_stadium::roomCoverReady(112893,true,&room));room.version=1;
+    room.size=0;assert(!frontend_stadium::roomCoverReady(112893,true,&room));room.size=sizeof room;
+    assert(!frontend_stadium::roomCoverReady(0,true,&room));
+    assert(!frontend_stadium::roomCoverReady(112893,true,nullptr));
+    assert(frontend_stadium::roomCoverStamp(1043,true)!=frontend_stadium::roomCoverStamp(112893,true));
+    assert(frontend_stadium::roomCoverStamp(112893,false)!=frontend_stadium::roomCoverStamp(112893,true));
+    // A loading room must not hide a fully loaded stadium panorama.
+    assert(frontend_stadium::roomPanoramaReady(1043,true,1043,true,true));
+    assert(!frontend_stadium::roomPanoramaReady(1043,false,1043,true,true));
+    assert(!frontend_stadium::roomPanoramaReady(1043,true,112893,true,true));
+    assert(!frontend_stadium::roomPanoramaReady(1043,true,1043,false,true));
+    assert(!frontend_stadium::roomPanoramaReady(1043,true,1043,true,false));
+    assert(!frontend_stadium::roomPanoramaReady(0,true,0,true,true));
     using Page=frontend_stadium::PageKind;
+    for(auto page:{Page::Hub,Page::IdlePanorama,Page::Menu,Page::Transition})assert(frontend_stadium::roomCoverPage(page));
+    for(auto page:{Page::ClubBrowser,Page::ManagerFace,Page::ManagerPreferences,Page::PlayerCareer,Page::Other})assert(!frontend_stadium::roomCoverPage(page));
+    assert(frontend_stadium::roomCoverSelected(Page::Hub,true,-1,true)); // before club publication
+    assert(frontend_stadium::roomCoverSelected(Page::Hub,true,1,true));
+    assert(!frontend_stadium::roomCoverSelected(Page::Hub,false,1,true));
+    assert(!frontend_stadium::roomCoverSelected(Page::Hub,true,0,true)); // player career
+    assert(!frontend_stadium::roomCoverSelected(Page::Hub,true,1,false)); // playing a match
+    assert(!frontend_stadium::roomCoverSelected(Page::Menu,true,-1,true)); // initial favourite-club stadium
+    assert(!frontend_stadium::roomCoverSelected(Page::ClubBrowser,true,1,true));
+    assert(frontend_stadium::roomCoverStamp(0,false)!=0);
+    assert(frontend_stadium::isBackgroundPage(Page::ManagerPreferences)&&frontend_stadium::isBackgroundPage(Page::ManagerFace));
+    assert(!frontend_stadium::forcesStadium(Page::ManagerPreferences)&&frontend_stadium::forcesStadium(Page::ManagerFace));
+    assert(frontend_stadium::preservesPhotograph(Page::ManagerPreferences));
+    assert(!frontend_stadium::preservesPhotograph(Page::ManagerFace)&&!frontend_stadium::preservesPhotograph(Page::Menu));
+    assert(frontend_stadium::refreshOnMenuReturn(Page::ManagerPreferences,Page::ManagerFace,true,true));
+    assert(frontend_stadium::refreshOnMenuReturn(Page::ManagerFace,Page::ManagerPreferences,true,true));
     assert(frontend_stadium::refreshOnMenuReturn(Page::Other,Page::Menu,true,true));
     assert(frontend_stadium::refreshOnMenuReturn(Page::Transition,Page::Menu,true,true));
     assert(!frontend_stadium::refreshOnMenuReturn(Page::Menu,Page::Menu,true,true));
@@ -147,10 +197,18 @@ int main(){
     assert(!frontend_stadium::reloadPage(0,pageRead));
     page="game/screens/fluxHub/FluxHub";
     assert(frontend_stadium::reloadPage(0,pageRead));
+    assert(frontend_stadium::pageKind(0,pageRead)==Page::Hub);
+    page="game/screens/misc/StadiumPan";
+    assert(frontend_stadium::pageKind(0,pageRead)==Page::IdlePanorama);
+    assert(frontend_stadium::refreshOnMenuReturn(Page::Hub,Page::IdlePanorama,true,true));
+    assert(frontend_stadium::refreshOnMenuReturn(Page::IdlePanorama,Page::Hub,true,true));
     page="game/screens/saveload_pc/profile";
     assert(frontend_stadium::reloadPage(0,pageRead));
     page="game/screens/career/server16/ClubBrowser";
     assert(frontend_stadium::pageKind(0,pageRead)==frontend_stadium::PageKind::ClubBrowser);
+    page="game/screens/career/ManagerPreferences";
+    assert(frontend_stadium::pageKind(0,pageRead)==Page::ManagerPreferences);
+    assert(frontend_stadium::preservesPhotograph(frontend_stadium::pageKind(0,pageRead)));
     page="game/screens/playNow/KickOffHub";
     assert(!frontend_stadium::reloadPage(0,pageRead));
     assert(frontend_stadium::pageKind(0,pageRead)==frontend_stadium::PageKind::Other);

@@ -57,5 +57,22 @@ class CareerOptionsBridgeTest(unittest.TestCase):
  def test_accepted_transfer_uses_native_proposal_flow(self):
   with patch('server16_py.career_options.secrets.randbelow',return_value=0):self.request('transfer')
   self.assertEqual([(('transfer',),dict(team_id=2,league_id=2))],self.calls)
+ def test_native_bridge_excludes_regions_and_localizes_cached_country_labels(self):
+  data=self.service.catalog
+  for league,country,name,team in ((19,21,'Germany',3),(101,156,'Brasil Sudeste',4),(999,255,'255',5)):
+   data['nations'][str(country)]=name
+   data['leagues'].append(dict(id=league,country_id=country,level=1,name='Divisão'))
+   data['teams'].append(dict(id=team,name='Destino '+str(team)));data['links'].append((league,team))
+  catalog=self.root/'ModCarrerMode/data/manager_market/catalog.sqlite3';catalog.parent.mkdir(parents=True)
+  with closing(sqlite3.connect(catalog)) as db,db:
+   db.executescript('CREATE TABLE country_catalog(nation_id INT,name TEXT);CREATE TABLE league_catalog(league_id INT,name TEXT);')
+   db.execute('INSERT INTO country_catalog VALUES(21,?)',('Germany',))
+  self.bridge.next_tick=0;self.bridge.tick()
+  rows=[line.split('\t') for line in (self.bridge.root/'view.tsv').read_text(encoding='utf8').splitlines()]
+  self.assertEqual({r[1]:r[2] for r in rows if r[0]=='N'},{'54':'Brasil','21':'Alemanha'})
+  self.assertEqual({int(r[1]) for r in rows if r[0]=='L'},{1,2,19})
+  self.assertNotIn('255',{r[1] for r in rows if r[0]=='N'})
+  self.assertNotIn('4',{r[1] for r in rows if r[0]=='T'})
+  self.assertNotIn('5',{r[1] for r in rows if r[0]=='T'})
 
 if __name__=='__main__':unittest.main()

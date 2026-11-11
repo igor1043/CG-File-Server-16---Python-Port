@@ -87,8 +87,6 @@ def main(exe):
         if source.is_file() and source.suffix.lower() in ('.h','.cpp','.cmd','.inc'):
             install(source,GAME/'ModCarrerMode/source/stadium_pyrotechnics'/source.name,GAME)
             install(source,ROOT/'native_mods/pyro'/source.name,ROOT)
-    for doc in ('PREVIA_FUMACA.md','OVERLAY_CARREIRA.md'):
-        for base in (GAME,DEV):install(ROOT/'docs'/doc,base/'ModCarrerMode/source'/doc,base)
     for relative in ('test_smoke_settings.py','test_match_presentation.py'):
         install(ROOT/'tests'/relative,DEV/'ModCarrerMode/source/tests'/relative,DEV)
     install(ROOT/'tools/install_prematch_smoke.py',DEV/'ModCarrerMode/source/tools/install_prematch_smoke.py',DEV)

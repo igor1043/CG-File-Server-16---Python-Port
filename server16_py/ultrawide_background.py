@@ -10,6 +10,7 @@ STANDARD = 'st_bootflow_standard.dds'
 WIDE = 'st_bootflow_ultrawide.dds'
 NOTFOUND = NATIVE.with_name('notfound.dds')
 PRESSSTART = Path('data/ui/game/screens/bootflow/pressstart.big')
+STADIUM_PAN = Path('data/ui/game/screens/misc/stadiumpan.big')
 
 
 def read_dds(path):
@@ -32,30 +33,30 @@ def _dds_size(data):
     return width, height
 
 
-def _validate_pressstart(data):
+def _validate_pressstart(data, package='pressstart.big'):
     # The image is packed into a square atlas in both versions. Validate the
     # archive and its DDS, rather than testing the aspect of the atlas itself.
     if len(data) < 16 or data[:4] not in (b'BIG4', b'BIGF'):
-        raise ValueError('Pacote pressstart.big inválido.')
+        raise ValueError(f'Pacote {package} inválido.')
     if len(data) not in (struct.unpack_from('<I', data, 4)[0], struct.unpack_from('>I', data, 4)[0]):
-        raise ValueError('Tamanho do pressstart.big inválido.')
+        raise ValueError(f'Tamanho do {package} inválido.')
     count, directory_end = struct.unpack_from('>II', data, 8)
     if not 16 <= directory_end <= len(data) or not 1 <= count <= (directory_end - 16) // 9:
-        raise ValueError('Diretório do pressstart.big inválido.')
+        raise ValueError(f'Diretório do {package} inválido.')
     position = 16
     entries = {}
     for _ in range(count):
         end = data.find(b'\0', position + 8, directory_end)
         if end == -1 or end == position + 8:
-            raise ValueError('Entrada do pressstart.big inválida.')
+            raise ValueError(f'Entrada do {package} inválida.')
         offset, size = struct.unpack_from('>II', data, position)
         name = data[position + 8:end]
         if name in entries or not directory_end <= offset <= offset + size <= len(data):
-            raise ValueError('Entrada do pressstart.big fora do pacote.')
+            raise ValueError(f'Entrada do {package} fora do pacote.')
         entries[name] = (offset, size)
         position = end + 1
     if not all(entries.get(name, (0, 0))[1] for name in (b'0', b'1', b'2')):
-        raise ValueError('Layout ou imagem ausente no pressstart.big.')
+        raise ValueError(f'Layout ou imagem ausente no {package}.')
     offset, size = entries[b'2']
     _dds_size(memoryview(data)[offset:offset + size])
 
@@ -83,6 +84,7 @@ def apply_background(game_directory, enabled, *, commit=None):
         (NATIVE, folder / (WIDE if enabled else STANDARD)),
         (NOTFOUND, folder / f'notfound_{suffix}.dds'),
         (PRESSSTART, folder / f'pressstart_{suffix}.big'),
+        (STADIUM_PAN, folder / f'stadiumpan_{suffix}.big'),
     )
     selected = False
     changes = []
@@ -97,8 +99,8 @@ def apply_background(game_directory, enabled, *, commit=None):
         if not source.is_file():
             continue
         data = source.read_bytes()
-        if relative == PRESSSTART:
-            _validate_pressstart(data)
+        if relative in (PRESSSTART, STADIUM_PAN):
+            _validate_pressstart(data, relative.name)
         else:
             width, height = _dds_size(data)
             if (width / height > 16 / 9 + .001) != bool(enabled):

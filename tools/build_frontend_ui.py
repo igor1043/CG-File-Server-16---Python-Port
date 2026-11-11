@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT),str(ROOT/'tools/apt_vendor')]
-from formats import AptFile,BigFile
+from formats import AptFile,BigFile,Placement
 from apt_actions import Actions
 
 
@@ -52,6 +52,11 @@ class Assembler:
 def panorama_tail(a):
     # Original Update preloads this/global in r1/r2 and takes its provider in r5.
     # Reuse its existing fourteen-register frame, after its own layout finishes.
+    a.field('mStadiumName','text');a.string('SERVER16_DRESSING_ROOM');a.op(73);a.branch('roomLabel',True)
+    a.branch('roomLabelDone');a.label('roomLabel')
+    for field in ('mStadiumName','mStadiumNameShadow'):
+        a.prop(['mcTextGroup',field],'text','Vestiário 3D')
+    a.label('roomLabelDone')
     a.op(89);a.reg(5);a.method('GetStadiumCapacity');a.number(0);a.op(103);a.save(3)
     a.op(89);a.reg(5);a.method('GetStadiumYearBuilt');a.save(4)
     a.reg(4);a.number(0);a.op(103);a.save(6)
@@ -81,10 +86,26 @@ def panorama_tail(a):
         a.prop(['mcTextGroup',name],'_visible',6)
     a.reg(3);a.reg(6);a.op(16);a.save(8)
     a.prop(['mcTextGroup','mcDivderBottomVertical'],'_visible',8)
+    # The native right-aligned field can clip a long stadium name and spill
+    # under the crest. Fit the measured title into a fixed leftward span.
+    for field in ('mStadiumName','mStadiumNameShadow'):
+        a.prop(['mcTextGroup',field],'autoSize','left')
+        a.target(field,'_xscale');a.number(100);a.op(79)
+    a.field('mStadiumName','textWidth');a.number(8);a.op(71);a.save(10)
+    a.number(100);a.save(11)
+    a.reg(10);a.number(900);a.op(103);a.op(18);a.branch('titleFit',True)
+    a.number(90000);a.reg(10);a.op(13);a.save(11)
+    a.number(900);a.save(10)
+    a.label('titleFit')
+    for field in ('mStadiumName','mStadiumNameShadow'):
+        a.prop(['mcTextGroup',field],'_xscale',11)
+        a.target(field,'_x');a.number(-34);a.reg(10);a.op(11);a.op(79)
+    a.target('mcHorizontalDivider','_width');a.reg(10);a.op(79)
+    a.target('mcHorizontalDivider','_x');a.number(-34);a.op(79)
     a.op(118);a.op(62)
 
 
-def build(source,out,kind):
+def build(source,out,kind,*,ultrawide=False):
     big=BigFile(source);apt=AptFile(big);actions=Actions(apt).read_all()
     if actions.errors:raise ValueError(actions.errors)
     if kind=='background':
@@ -97,6 +118,16 @@ def build(source,out,kind):
     fn=next(block[i+1] for i,ins in enumerate(block[:-1]) if ins.value=='Update' and block[i+1].op==142)
     assert fn.value['flags']==297 and fn.value['params'][0][0]==5 and fn.value['registers']==14
     original=apt.entry.original;data=apt.entry.data;a=Assembler(data);a.align();new_start=len(data)
+    if ultrawide:
+        # Suppress only the panorama fade in the ultrawide preset. Its native
+        # 16:9 clipping otherwise leaves visible vertical edges on wide views.
+        widget=next(p for clip in apt.characters.values() for frame in clip.frames
+                    for p in frame if isinstance(p,Placement) and p.name=='mcInfoWidget')
+        gradient=next(p for frame in apt.characters[widget.character].frames for p in frame
+                      if isinstance(p,Placement) and not p.name and apt.characters[p.character].texture==2)
+        assert gradient.matrix==(1.,0.,0.,1.,0.,0.)
+        struct.pack_into('<I',data,gradient.offset+8,gradient.flags|8)
+        struct.pack_into('<I',data,gradient.matrix_offset+24,0)
     data.extend(original[start:fn.end]);panorama_tail(a)
     # Native relocation must never see End padding inside a Function2. The
     # added bytes are a multiple of eight, preserving all later operand alignment.
@@ -143,3 +174,4 @@ if __name__=='__main__':
     src=ROOT/'native_mods/frontend_stadium/ui_templates'
     for name,kind in [('backgroundfifa','background'),('stadiumpan','panorama')]:
         build(src/(name+'.big'),args.output/(name+'.big'),kind)
+    build(src/'stadiumpan.big',args.output/'stadiumpan_ultrawide.big','panorama',ultrawide=True)

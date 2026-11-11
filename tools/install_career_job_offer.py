@@ -160,7 +160,6 @@ def main(feature='career_job_offer',career_tests=36):
         for base in (GAME,DEV):
             for relative in ('protocol.h','career_jobs_runtime.c','test_runtime.c','build.cmd','test.cmd'):
                 install(ROOT/'native_mods/career_jobs_runtime'/relative,base/'ModCarrerMode/source/career_jobs_runtime'/relative,base)
-        install(ROOT/'docs/OVERLAY_CARREIRA.md',DEV/'ModCarrerMode/source/OVERLAY_CARREIRA.md',DEV)
     if feature=='career_performance_retirement':
         for relative in ('career_read.py','career_service.py','career_save_worker.py','career_panel.py','career_feedback.py','career_context.py'):
             install(ROOT/'server16_py'/relative,DEV/'ModCarrerMode/source/server16_py'/relative,DEV)

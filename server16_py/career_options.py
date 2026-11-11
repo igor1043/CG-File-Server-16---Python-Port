@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from contextlib import contextmanager,closing
 from pathlib import Path
 import hashlib, json, secrets, sqlite3, time,math
-from .career_transfer_catalog import transfer_catalog
+from .career_transfer_catalog import transfer_catalog,country_name
 
 
 def add_days(day, count):
@@ -156,7 +156,7 @@ class CareerOptions:
         with self.connection() as db:
             db.execute('CREATE TABLE IF NOT EXISTS career_transfer_requests(scope TEXT,request_id TEXT,game_date INT,target INT,chance INT,accepted INT,next_date INT,PRIMARY KEY(scope,request_id))')
             self.next_date=db.execute('SELECT MAX(next_date) FROM career_transfer_requests WHERE scope=? AND accepted=0 AND game_date<=?',(scope,today)).fetchone()[0] or 0
-        nations=(svc.catalog or {}).get('nations',data['nations']);nations=[dict(id=k,name=v) for k,v in nations.items()] if isinstance(nations,dict) else nations
+        nations=[dict(id=k,name=v) for k,v in data['nations'].items()]
         self.publish(pid,epoch,today,context['club_id'],not svc.busy and not svc.pending,nations,list(leagues.values()),list(teams.values()),self.message or svc.message)
 
     def publish(self,pid,epoch,today,club,ready,nations,leagues,teams,message):
@@ -171,7 +171,7 @@ class CareerOptions:
         except (OSError,sqlite3.Error):pass
         from .career_service import retirement_age
         rows=[['O',1,pid,epoch,self.token,int(ready),today,self.next_date,club,message,retirement_age(self.game)]]
-        rows += [['N',r['id'],self.country_labels.get(int(r['id']),r.get('name',''))] for r in nations]
+        rows += [['N',r['id'],country_name(self.country_labels.get(int(r['id']),r.get('name',''))) or r.get('name','')] for r in nations]
         rows += [['L',r['id'],r['country_id'],r['level'],self.league_labels.get(r['id'],r['name'])] for r in leagues]
         rows += [['T',r['id'],r.get('league',0),r['reputation'],r['level'],r['name']] for r in teams]
         raw='\n'.join('\t'.join(map(self.clean,row)) for row in rows)+'\n'

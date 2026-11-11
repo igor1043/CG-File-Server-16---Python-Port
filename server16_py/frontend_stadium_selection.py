@@ -15,6 +15,8 @@ def enabled(game):
     return value.casefold() in ('1','true','yes','on')
 
 BACKGROUND_MODES=('image','stadium','dressing_room')
+IDLE_BACKGROUNDS=('stadium','dressing_room')
+IDLE_BACKGROUND_LABELS=('Estádio 3D','Vestiário 3D')
 
 def background_mode(game):
     """Keep the old enabled preference when this installation has no selector yet."""
@@ -29,6 +31,23 @@ def save_background_mode(game,value):
     parser.set('frontend_stadium','background_mode',value)
     # The room shares the existing native menu scene; no match assignment changes.
     parser.set('frontend_stadium','enabled','0' if value=='image' else '1')
+    _save(parser,config,reload=False)
+
+
+def idle_background(game):
+    config=SessionIniFile(Path(game)/'ModCarrerMode/config/frontend_stadium.ini')
+    value=config.read('idle_background','frontend_stadium').strip()
+    return value if value in IDLE_BACKGROUNDS else 'stadium'
+
+
+def save_idle_background(game,value):
+    if value not in IDLE_BACKGROUNDS:
+        raise ValueError('Invalid career idle background')
+    config=IniFile(Path(game)/'ModCarrerMode/config/frontend_stadium.ini')
+    parser=config._load()
+    if not parser.has_section('frontend_stadium'):
+        parser.add_section('frontend_stadium')
+    parser.set('frontend_stadium','idle_background',value)
     _save(parser,config,reload=False)
 
 

@@ -9,12 +9,41 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include "../common/scene_camera_lease.h"
+#include "../native_mods/extra_scenes/scene_memory.h"
 #include <cassert>
 #include <cstdio>
 using namespace extra;
+static uintptr_t bc=0x180000000;
+template<class T>static T get(uintptr_t address){T value{};sceneRead(address,&value,sizeof value);return value;}
+static bool read(uintptr_t address,void* target,size_t size){return sceneRead(address,target,size);}
+#include "../native_mods/extra_scenes/native_muse.h"
+static volatile LONG readExceptions=0;
+static LONG CALLBACK countReadException(EXCEPTION_POINTERS* e){
+ if(e->ExceptionRecord->ExceptionCode==EXCEPTION_ACCESS_VIOLATION)InterlockedIncrement(&readExceptions);
+ return EXCEPTION_CONTINUE_SEARCH;
+}
 static Input input(uint64_t now,Window w,bool preview=false){Input in;in.now=now;in.fixture=123;in.window=w;in.preview=preview;in.chance=100;in.cooldown=0;return in;}
 int main(int argc,char** argv){
  (void)argc;(void)argv;
+ {
+  auto handler=AddVectoredExceptionHandler(1,countReadException);assert(handler);
+  uint64_t value=42,result=0;assert(sceneRead(reinterpret_cast<uintptr_t>(&value),&result,sizeof result)&&result==42);
+  // Exact sentinel from extra_scenes+0x20dfd in the supplied minidump.
+  for(uintptr_t address:{uintptr_t(0),uintptr_t(0xffffffff),UINTPTR_MAX,uintptr_t(0xfffffff8)})
+   assert(!sceneRead(address,&result,sizeof result));
+  auto* region=VirtualAlloc(nullptr,8192,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);assert(region);
+  DWORD old=0;assert(VirtualProtect(static_cast<char*>(region)+4096,4096,PAGE_NOACCESS,&old));
+  assert(!sceneRead(reinterpret_cast<uintptr_t>(region)+4092,&result,sizeof result));
+  assert(VirtualFree(region,0,MEM_RELEASE));assert(!sceneRead(reinterpret_cast<uintptr_t>(region),&result,sizeof result));
+  uintptr_t engine[32]{},scene[16]{},services[16]{},adapter[16]{};
+  engine[0x68/8]=reinterpret_cast<uintptr_t>(scene);scene[0x10/8]=reinterpret_cast<uintptr_t>(services);
+  services[0]=bc+0x1165b0;services[0x50/8]=reinterpret_cast<uintptr_t>(adapter);
+  adapter[0]=bc+0x1166d0;adapter[0x58/8]=0xffffffff;
+  const auto missing=native_muse::current(reinterpret_cast<uintptr_t>(engine));
+  assert(!missing.graph&&missing.cue==CueKind::None&&readExceptions==0);
+  assert(RemoveVectoredExceptionHandler(handler));
+  std::puts("PASS: dump sentinel 0xffffffff, unmapped/guarded memory and torn MUSE adapter cause no first-chance AV");
+ }
  {
   // One continuous subject across a package -> emotion -> package handoff,
   // including an original cut longer than the retired five-second timer.

@@ -418,7 +418,7 @@ class CareerService:
         elif action == 'transfer':
             data=transfer_catalog(self.inspection['catalog'],self.catalog)
             if not any(league==values['league_id'] and team==values['team_id'] for league,team in data['links']):
-                raise ValueError('Escolha um clube de uma divisão disponível. Seleções, agentes livres e divisões de acesso não são destinos.')
+                raise ValueError('Escolha um clube de uma divisão disponível. Seleções, agentes livres, regiões, países sem identificação e divisões de acesso não são destinos.')
             if request['context']['player_id'] is None:
                 profile=self.context_reader.profile(fresh=True) or {}
                 request['team_name']=next((r['name'] for r in data['teams'] if r['id']==values['team_id']),str(values['team_id']))

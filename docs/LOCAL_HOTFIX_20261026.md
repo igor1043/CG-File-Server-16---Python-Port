@@ -14,7 +14,7 @@ os canais já carregados; não inicia o antigo carregador em outro processo.
 
 Nenhuma configuração do Defender foi alterada. Arquivos em quarentena não
 foram restaurados. Não há garantia de ausência de outros alertas: a classificação
-no computador do Robson ainda precisa ser conferida com a revisão completa.
+no computador da instalação de referência ainda precisa ser conferida com a revisão completa.
 Para análise oficial de um possível falso positivo:
 https://www.microsoft.com/en-us/wdsi/filesubmission
 

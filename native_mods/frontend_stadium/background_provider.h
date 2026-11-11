@@ -18,6 +18,12 @@ inline Photograph photographPolicy(bool menuPage,bool bootComplete,bool pending,
     return Photograph::Original;
 }
 using SetProviderString = void(__fastcall*)(void*,const char*,const char*);
+inline bool routeRoomPhotograph(void*provider,SetProviderString setter,bool ready){
+    if(!provider||!setter)return false;
+    // One writer per native factory. The dressing-room hook must not rewrite
+    // this same provider after its frontend owner has selected the cover.
+    setter(provider,"Param",ready?"server16_frontend_clear":"BOOTFLOW");return true;
+}
 
 inline bool routePhotograph(void* provider,SetProviderString setter,const char* imageParameter){
     // Id selects the background component (for example FIFA). Changing Id

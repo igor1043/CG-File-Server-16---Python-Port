@@ -65,7 +65,7 @@ identifica sozinho o culpado; o FIFA pode tratar a exceção antes de encerrar.
 Uma coleta interrompida ou sem referência é marcada como tal. Não existe
 remoção automática de arquivos nem tentativa automática de reparar o jogo.
 
-## Teste do Robson
+## Teste da instalação de referência
 
 O último dump fornecido caiu em `nvwgf2umx.dll + 0x157A799` (driver NVIDIA).
 Os três anteriores caíram em `fifa16.exe + 0x3A5E4F2`, na interface APT.

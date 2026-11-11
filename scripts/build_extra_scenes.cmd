@@ -9,6 +9,10 @@ cl /nologo /O2 /W4 /WX /EHsc /std:c++17 /MT "%~dp0..\tests\native_extra_scenes_t
 if errorlevel 1 exit /b 1
 native_extra_scenes_test.exe
 if errorlevel 1 exit /b 1
+cl /nologo /O2 /W4 /WX /EHsc /std:c++17 /MT "%~dp0..\tests\native_extra_scenes_teams_test.cpp" /Fe:native_extra_scenes_teams_test.exe /link user32.lib
+if errorlevel 1 exit /b 1
+native_extra_scenes_teams_test.exe
+if errorlevel 1 exit /b 1
 cl /nologo /O2 /W4 /WX /LD /EHsc /std:c++17 /MT "%~dp0..\native_mods\extra_scenes\extra_scenes.cpp" /Fe:extra_scenes.dll /link /INCREMENTAL:NO user32.lib
 set result=%errorlevel%
 popd

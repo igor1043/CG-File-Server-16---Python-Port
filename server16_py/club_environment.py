@@ -4,18 +4,65 @@ Worker mode is dispatched before splash/UI initialization. Only the bank
 worker processes budget changes, after its existing scoped UI validations.
 """
 from pathlib import Path
-import argparse,contextlib,ctypes,hashlib,json,os,runpy,shutil,subprocess,sys,time,traceback
+import argparse,contextlib,ctypes,hashlib,json,os,runpy,shutil,subprocess,sys,time,traceback,threading,uuid
 
 ENTRIES={'room':'prepare_native_room_components_r46_20261022.py','bank':'watch_r57.py','preview':'prepare.py'}
+RUNTIME_COPY_PROTOCOL=2
+_runtime_copy_lock=threading.RLock()
 
 def atomic_copy(source,target):
     data=source.read_bytes()
-    if target.exists() and target.read_bytes()==data:return
+    def installed():
+        try:return target.exists() and target.read_bytes()==data
+        except PermissionError:return False
+    if installed():return
     target.parent.mkdir(parents=True,exist_ok=True)
-    temporary=target.with_name(target.name+'.'+str(os.getpid())+'.new')
-    temporary.write_bytes(data);os.replace(temporary,target)
+    temporary=target.with_name(target.name+'.'+str(os.getpid())+'.'+uuid.uuid4().hex+'.new')
+    try:
+        temporary.write_bytes(data)
+        for attempt in range(8):
+            try:os.replace(temporary,target);return
+            except PermissionError:
+                # A second writer may already have completed this exact copy,
+                # or Python/Defender may briefly hold a reader without DELETE
+                # sharing. Never truncate a working helper in place.
+                if installed():return
+                if attempt==7:raise
+                time.sleep(min(.025*2**attempt,.4))
+    finally:
+        with contextlib.suppress(OSError):temporary.unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def runtime_update_lock(game):
+    # Native plugins and the supervisor start separate processes. A Python
+    # thread lock alone cannot serialize their shared runtime preparation.
+    with _runtime_copy_lock:
+        if os.name!='nt':yield;return
+        from ctypes import wintypes as W
+        kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+        kernel.CreateMutexW.argtypes=[ctypes.c_void_p,W.BOOL,W.LPCWSTR];kernel.CreateMutexW.restype=W.HANDLE
+        kernel.WaitForSingleObject.argtypes=[W.HANDLE,W.DWORD];kernel.WaitForSingleObject.restype=W.DWORD
+        kernel.ReleaseMutex.argtypes=[W.HANDLE];kernel.CloseHandle.argtypes=[W.HANDLE]
+        identity=hashlib.sha256(str(game.resolve()).casefold().encode('utf8')).hexdigest()[:24]
+        handle=kernel.CreateMutexW(None,False,'Local\\Server16RuntimeUpdate_'+identity)
+        if not handle:raise ctypes.WinError(ctypes.get_last_error())
+        acquired=False
+        try:
+            wait=kernel.WaitForSingleObject(handle,20000)
+            if wait not in (0,0x80):
+                if wait==258:raise TimeoutError('Outra inicialização ainda está preparando os auxiliares do jogo.')
+                raise ctypes.WinError(ctypes.get_last_error())
+            acquired=True;yield
+        finally:
+            if acquired:kernel.ReleaseMutex(handle)
+            kernel.CloseHandle(handle)
 
 def prepare_runtime(game):
+    with runtime_update_lock(game):return _prepare_runtime(game)
+
+
+def _prepare_runtime(game):
     source=game/'ModCarrerMode/source/club_environment'
     runtime=game/'ModCarrerMode/runtime/club_environment'
     for group,entry in ENTRIES.items():
@@ -27,7 +74,12 @@ def prepare_runtime(game):
     atomic_copy(Path(__file__).with_name('db_worker.py'),runtime/'preview/db_worker.py')
     seeds=game/'ModCarrerMode/data/club_environment'
     for file in seeds.rglob('*'):
-        if file.is_file():atomic_copy(file,runtime/file.relative_to(seeds))
+        if not file.is_file():continue
+        relative=file.relative_to(seeds)
+        # Source is authoritative for executable helpers/templates. An older
+        # seed must not undo the update made in the loop above on every launch.
+        if file.suffix in ('.py','.big') and (source/relative).is_file():continue
+        atomic_copy(file,runtime/relative)
     # Preserve already-contracted loans on machines upgraded from the prototype.
     previous=game/'ModCarrerMode/experiments/career_bank_20261021/runtime'
     for folder in previous.glob('*'):
@@ -38,11 +90,7 @@ def prepare_runtime(game):
 
 def worker(game,kind,pid):
     os.environ['SERVER16_GAME_ROOT']=str(game)
-    # A native plugin can start a worker before the supervisor, including on a
-    # clean installation. Never assume its generated runtime already exists.
-    source,runtime=prepare_runtime(game)
-    sys.path[:0]=[str(source),str(source/'vendor'),str(runtime/'room'),str(runtime/'preview'),str(runtime/'bank')]
-    sys.argv=[str(runtime/kind/ENTRIES[kind]),'--watch','--pid',str(pid)]
+    runtime=game/'ModCarrerMode/runtime/club_environment'
     # A windowed frozen process can expose an invalid inherited stdout handle.
     # Diagnostic prints must never abort a financial or asset operation.
     log=runtime/kind/'runtime/service.log'
@@ -52,9 +100,18 @@ def worker(game,kind,pid):
     log.parent.mkdir(parents=True,exist_ok=True)
     with log.open('a',encoding='utf8',buffering=1) as stream,contextlib.redirect_stdout(stream),contextlib.redirect_stderr(stream):
         print('WORKER_START',json.dumps(dict(kind=kind,game=str(game),game_pid=pid,helper_pid=os.getpid()),ensure_ascii=True))
-        try:runpy.run_path(sys.argv[0],run_name='__main__')
-        except BaseException:
-            traceback.print_exc();raise
+        try:
+            # Bootstrap failures must reach the worker log and exit status,
+            # rather than PyInstaller's unhandled-exception dialog over FIFA.
+            source,runtime=prepare_runtime(game)
+            sys.path[:0]=[str(source),str(source/'vendor'),str(runtime/'room'),str(runtime/'preview'),str(runtime/'bank')]
+            sys.argv=[str(runtime/kind/ENTRIES[kind]),'--watch','--pid',str(pid)]
+            runpy.run_path(sys.argv[0],run_name='__main__')
+        except Exception:
+            traceback.print_exc();return 1
+        except SystemExit as error:
+            return error.code if isinstance(error.code,int) else 1 if error.code else 0
+    return 0
 
 def supervise(game,pid):
     import psutil
@@ -127,6 +184,12 @@ def main(argv=None):
         (runtime/'check.json').write_text(json.dumps(result),encoding='utf8')
         print(json.dumps(result));return 0
     if args.pid<=0:parser.error('--pid is required')
-    if args.club_environment_worker:worker(game,args.club_environment_worker,args.pid)
-    else:supervise(game,args.pid)
+    if args.club_environment_worker:return worker(game,args.club_environment_worker,args.pid)
+    try:supervise(game,args.pid)
+    except (OSError,TimeoutError):
+        log=game/'ModCarrerMode/runtime/club_environment/supervisor.log'
+        with contextlib.suppress(OSError):
+            log.parent.mkdir(parents=True,exist_ok=True)
+            with log.open('a',encoding='utf8') as stream:traceback.print_exc(file=stream)
+        return 1
     return 0

@@ -71,7 +71,7 @@ Atualize a branch do FIFA Friends V12 e use **FIFA-Friends-Assets-Complementares
 
 O auxiliar da carreira agora mantém o bootstrap do mercado de técnicos em seu próprio log. O executável pronto publicado com o V12 foi atualizado com esse mesmo fonte, preservando o restante do pacote e a versão **0.2.19**.
 
-Atualize também o V12 para receber finanças revisadas, mercado de técnicos, minifaces, tema dourado e a nova organização dos cards. O **FIFA-Friends-Assets-Complementares-20261029.zip** é um complemento completo de assets, incluindo a integração visual do Robson; deve ser extraído depois do código na base FIFA Friends. Saves e bancos pessoais não acompanham a entrega. [Instalação e validação](docs/RELEASE_20261029.md).
+Atualize também o V12 para receber finanças revisadas, mercado de técnicos, minifaces, tema dourado e a nova organização dos cards. O **FIFA-Friends-Assets-Complementares-20261029.zip** é um complemento completo de assets, incluindo a integração visual da instalação de referência; deve ser extraído depois do código na base FIFA Friends. Saves e bancos pessoais não acompanham a entrega. [Instalação e validação](docs/RELEASE_20261029.md).
 
 ## Revisão do overlay — 28/10/2026
 
@@ -133,7 +133,7 @@ O executável pronto está em [FIFA Friends V12](https://github.com/igor1043/fif
 - **Estádio de fundo:** seleção para o menu inicial e a carreira, com preparação do pacote antes da recarga nativa. A escolha fica salva; o recurso começa desligado. No automático, a carreira usa o clube do save. A imagem do FIFA Friends é preservada quando não há estádio disponível ou o recurso está desligado.
 - **Panorâmica:** 39 tomadas. A órbita alta leva cerca de 99 segundos por volta, com rotação mais lenta e o tempo de parada preservado. Entraram uma órbita mais baixa para ver o perfil do estádio e uma travessia dos 68 m da linha central, de uma lateral à outra.
 - **Pênaltis:** o placar permanece ativo durante a disputa; a pirotecnia compatível bloqueia os disparos nessa fase.
-- **Logo nos hubs:** troca da faixa online pela logo desativada para isolar o crash recorrente do Robson. A interface anterior foi restaurada; os arquivos modificados e seus fontes foram preservados.
+- **Logo nos hubs:** troca da faixa online pela logo desativada para isolar o crash recorrente da instalação de referência. A interface anterior foi restaurada; os arquivos modificados e seus fontes foram preservados.
 - **Recursos em desenvolvimento:** cenas extras de técnicos/mascotes desativadas. Seleção automática/manual de narrador, progresso e aviso de narração aplicada ficam ocultos; o código permanece preservado.
 
 As DLLs compiladas para o jogo ficam no [pacote FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12). Este repositório mantém os fontes, scripts e testes. Consulte o [índice dos módulos nativos](native_mods/README.md) para localizar cada componente.
@@ -153,7 +153,7 @@ no [guia de público por competição](docs/PUBLICO_COMPETICOES.md).
 
 ## Aberturas — 18/10/2026
 
-- **Base Robson 12.12:** cada modelo usa a pasta com o ID atual da competição ou fase. A fase com pacote próprio tem prioridade; sem esse pacote, herda o da competição principal. Os módulos traduzem identidades de carreiras antigas para o CompData instalado.
+- **Base referência 12.12:** cada modelo usa a pasta com o ID atual da competição ou fase. A fase com pacote próprio tem prioridade; sem esse pacote, herda o da competição principal. Os módulos traduzem identidades de carreiras antigas para o CompData instalado.
 
 Os ícones da carreira usam uma imagem por ID do INI. A DLL prepara os BIGs e os
 nomes nativos de DDS do calendário e dos cards, com cabeçalhos DXT5 corrigidos.

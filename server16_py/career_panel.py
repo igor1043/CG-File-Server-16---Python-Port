@@ -82,8 +82,8 @@ class CareerPanel:
         data = self.data()
         active = {league for league, team in data['links']}
         ids = {r['country_id'] for r in data['leagues'] if r['id'] in active}
-        nations = (self.service.catalog or {}).get('nations', {})
-        return sorted([(ident, nations.get(str(ident), f'Região {ident}')) for ident in ids], key=lambda r:r[1].casefold())
+        nations = data['nations']
+        return sorted([(ident, nations[str(ident)]) for ident in ids], key=lambda r:r[1].casefold())
 
     def leagues(self):
         active = {league for league, team in self.data()['links']}

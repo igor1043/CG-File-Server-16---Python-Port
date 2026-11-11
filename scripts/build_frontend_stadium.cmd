@@ -5,6 +5,10 @@ if errorlevel 1 exit /b 1
 if not defined FRONTEND_STADIUM_OUTPUT set "FRONTEND_STADIUM_OUTPUT=%TEMP%\server16_frontend_stadium_build"
 if not exist "%FRONTEND_STADIUM_OUTPUT%" mkdir "%FRONTEND_STADIUM_OUTPUT%"
 pushd "%FRONTEND_STADIUM_OUTPUT%"
+cl /nologo /O2 /W4 /WX /EHsc /std:c++17 /MT "%~dp0..\tests\native_frontend_reload_test.cpp" /Fe:native_frontend_reload_test.exe
+if errorlevel 1 exit /b 1
+native_frontend_reload_test.exe
+if errorlevel 1 exit /b 1
 cl /nologo /O2 /W4 /WX /EHsc /std:c++17 /MT "%~dp0..\tests\native_frontend_background_test.cpp" /Fe:native_frontend_background_test.exe
 if errorlevel 1 exit /b 1
 native_frontend_background_test.exe

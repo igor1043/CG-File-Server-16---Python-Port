@@ -13,7 +13,9 @@ PANORAMA_TARGETS={
  'data/ui/nav/careermode/mainmenuhubflow.nav',
 }
 TARGETS=PANORAMA_TARGETS|{'data/ui/layout/careermanagerhubcfg.xml',
-                       'data/ui/game/screens/fluxhub/fluxhub.big'}
+                       'data/ui/game/screens/fluxhub/fluxhub.big',
+                       'data/ui/game/screens/career/managerpreferences.big',
+                       'data/ui/game/background/backgroundbootflow.big'}
 
 def plans(game,targets=None):
     game=Path(game);result=[];targets=TARGETS if targets is None else frozenset(targets)

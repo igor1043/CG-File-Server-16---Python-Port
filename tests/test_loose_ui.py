@@ -10,8 +10,18 @@ class LooseUITest(unittest.TestCase):
         self.assertNotIn('data/ui/layout/careermanagerhubcfg.xml',PANORAMA_TARGETS)
         self.assertIn('data/ui/layout/careermanagerhubcfg.xml',TARGETS)
         self.assertIn('data/ui/game/screens/fluxhub/fluxhub.big',TARGETS)
-    def fixture(self,game):
-        name='data/ui/game/screens/misc/stadiumpan.big';payload=game/name;payload.parent.mkdir(parents=True);payload.write_bytes(b'APT')
+        self.assertIn('data/ui/game/screens/career/managerpreferences.big',TARGETS)
+        self.assertIn('data/ui/game/background/backgroundbootflow.big',TARGETS)
+    def test_creation_background_activation_preserves_the_startup_archive(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp);index,before=self.fixture(game,'data/ui/game/background/backgroundbootflow.big')
+            index.rename(game/'data_startup.bh');(game/'data_front_end.big').rename(game/'data_startup.big')
+            archive=(game/'data_startup.big').read_bytes()
+            self.assertEqual(activate(game)['changed'],1)
+            self.assertEqual((game/'data_startup.bh').read_bytes(),before[:48]+bytes(8)+before[56:])
+            self.assertEqual((game/'data_startup.big').read_bytes(),archive)
+    def fixture(self,game,name='data/ui/game/screens/misc/stadiumpan.big'):
+        payload=game/name;payload.parent.mkdir(parents=True);payload.write_bytes(b'APT')
         names=['unrelated',name,'also/unrelated'];directory=b'';records=b''
         for i,value in enumerate(names):
             directory+=struct.pack('>II',512+i*16,16)+value.encode()+b'\0'
@@ -34,6 +44,15 @@ class LooseUITest(unittest.TestCase):
             game=Path(temp);index,before=self.fixture(game);bad=bytearray(before);struct.pack_into('>I',bad,16,999);index.write_bytes(bad)
             with self.assertRaises(ValueError):activate(game)
             self.assertEqual(index.read_bytes(),bad)
+    def test_manager_preferences_loose_payload_takes_priority_without_replacing_archive(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp);index,before=self.fixture(game,'data/ui/game/screens/career/managerpreferences.big')
+            archive=(game/'data_front_end.big').read_bytes()
+            self.assertEqual(activate(game,True)['status'],'activation_required')
+            self.assertEqual(activate(game)['changed'],1)
+            self.assertEqual(index.read_bytes(),before[:48]+bytes(8)+before[56:])
+            self.assertEqual((game/'data_front_end.big').read_bytes(),archive)
+            self.assertEqual(activate(game)['changed'],0)
     def test_write_failure_restores_the_original_index(self):
         with tempfile.TemporaryDirectory() as temp:
             game=Path(temp);index,before=self.fixture(game)

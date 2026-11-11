@@ -21,6 +21,6 @@ Headers ReShade v6.5.1/API 17 em `server16_py/d3d_overlay/third_party/reshade`, 
 
 Validação: 254 testes Python, com três opcionais ignorados; renderer D3D11 por software; processo independente com a DLL exata do ReShade 6.5.1, 210 frames, três ciclos de dispositivo e redimensionamento; checagem do executável congelado e dos arquivos embutidos.
 
-Esses testes não reproduzem o driver, os overlays e o hardware do Robson. A estabilidade no computador dele e o mapeamento de um controle genérico físico ainda precisam do teste de uso. ReShade e suas configurações não são alterados por esta versão.
+Esses testes não reproduzem o driver, os overlays e o hardware da instalação de referência. A estabilidade no computador dele e o mapeamento de um controle genérico físico ainda precisam do teste de uso. ReShade e suas configurações não são alterados por esta versão.
 
 Diagnóstico de build: `Server16Python.exe --server16-selftest caminho-do-relatorio.json` gera um relatório sem abrir a interface, conectar ao jogo ou instalar drivers.

@@ -59,8 +59,8 @@
     },
     {
       "path": "ModCarrerMode/mods/frontend_stadium/frontend_stadium_native_v11.dll",
-      "bytes": 203264,
-      "sha256": "b68990f93c933f988acbd0067e9d5f7c4bc84618673bda87a058db3e9df47512",
+      "bytes": 205312,
+      "sha256": "45ac80ce7290b3deea3ca223ef7626d5a7310b699b9c1e5344c688fab51b594e",
       "role": "release"
     },
     {
@@ -4423,7 +4423,7 @@
     "crowd_plugin.dll": "9f5f76a7bb48e185ad6e3158b4793f3a80d44cd857e052a7a96baee1ec248284",
     "crowd_ultra_kits.dll": "ed15c407dda4d5cec79442156c2545bf5cd77584dee51d7fa4960109564dccc2",
     "entrance_props.dll": "06c88b46534d8e14d82262e6495ecf7c2e9407ec1efba8a454c59f1218a785b5",
-    "frontend_stadium_native_v11.dll": "b4301386ef30095434de24085b84fb0b8dc8a2b6c809f7a2daa01110195bd97a",
+    "frontend_stadium_native_v11.dll": "45ac80ce7290b3deea3ca223ef7626d5a7310b699b9c1e5344c688fab51b594e",
     "goal_kick_short_pass.dll": "c41f163c77f645bcef3a2ec3fb7569f471e1075e63f43d43138697da35c1062f",
     "kickoff_modern.dll": "ae124bf1b6a82fd90eb0c929e9b26ed0eb4bee6c3d1678648d74a853f44bb004",
     "mascot_goal_line.dll": "c6c41f1c433a154e651aebe3f061e480f84c29ec561506b23f14c55f3492b9c4",

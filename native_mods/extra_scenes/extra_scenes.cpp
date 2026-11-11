@@ -7,6 +7,7 @@
 #include <cwchar>
 #include <cstring>
 #include "scene_actor_api.h"
+#include "scene_memory.h"
 #include "scene_math.h"
 #include "scene_tracking.h"
 #include "reaction_policy.h"
@@ -14,6 +15,7 @@
 #include "frame_camera.h"
 #include "shot_variants.h"
 #include "../../common/scene_camera_lease.h"
+#include "../../common/scene_team_policy.h"
 using namespace extra;
 static uintptr_t image=0,bc=0;
 extern "C" { __declspec(dllexport) uintptr_t ExtraScenesEngine=0; }
@@ -24,7 +26,7 @@ using ReadActors=BOOL(WINAPI*)(SceneActorSnapshot*);
 static Publish original=nullptr;
 static ReadActors readActors=nullptr;
 static SRWLOCK gate=SRWLOCK_INIT;
-struct Config {bool enabled=true,test=false;int views[2]{3,3};unsigned weights[2]{1,1};unsigned cooldown=10000,chance=40;uint32_t preview=0;int previewActor=0;Lens lens[4]{{600,26,120,0},{600,12,170,0},{850,24,120,0},{850,12,170,0}};};
+struct Config {bool enabled=true,test=false;int views[2]{3,3};int coachTeam=0;unsigned weights[2]{1,1};unsigned cooldown=10000,chance=40;uint32_t preview=0;int previewActor=0;Lens lens[4]{{600,26,120,0},{600,12,170,0},{850,24,120,0},{850,12,170,0}};};
 static Config options;
 static SceneRandom randomizer(1);
 static SceneCameraClaim cameraClaim(0x45585452);
@@ -33,7 +35,7 @@ static uint32_t lastPreview=0;
 static bool pendingPreview=false;
 static int currentShot=0,nextView[2]{0,0},nextTestActor=0;
 static Tripod tripod;
-static ActorReadiness readiness[2];
+static ActorReadiness readiness[3]; // home coach, away coach, selected mascot
 static int coachTeam=-1;
 extern "C" {__declspec(dllexport) uint64_t ExtraScenesNativeCameraWrites=0;}
 static int coachPalette[2]{-1,-1};
@@ -45,8 +47,7 @@ extern "C" {__declspec(dllexport) struct PublicStatus {
  int32_t cue=0,coachReady=0,mascotReady=0,waiting=0;
 } ExtraScenesStatus{};}
 static bool read(uintptr_t at,void* out,size_t n){
- if(at<0x10000||at>UINTPTR_MAX-n)return false;
- __try{std::memcpy(out,reinterpret_cast<void*>(at),n);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
+ return sceneRead(at,out,n);
 }
 template<class T>static T get(uintptr_t at){T v{};read(at,&v,sizeof v);return v;}
 static bool swapAt(uintptr_t offset,uintptr_t expected,uintptr_t value){
@@ -67,6 +68,7 @@ static Config loadConfig(){
  Config c;c.enabled=setting(L"scenes",L"enabled",1,0,1)!=0;
  c.test=setting(L"scenes",L"test_mode",0,0,1)!=0;
  c.views[0]=static_cast<int>(setting(L"scenes",L"coach_view",3,0,3));c.views[1]=static_cast<int>(setting(L"scenes",L"mascot_view",3,0,3));
+ c.coachTeam=static_cast<int>(setting(L"scenes",L"coach_team",0,0,2));
  c.weights[0]=setting(L"scenes",L"coach_weight",1,0,100);c.weights[1]=setting(L"scenes",L"mascot_weight",1,0,100);
  c.cooldown=1000*setting(L"scenes",L"cooldown_seconds",10,5,300);c.chance=setting(L"scenes",L"chance_percent",40,0,100);
  c.preview=setting(L"scenes",L"preview_serial",0,0,0x7fffffff);c.previewActor=static_cast<int>(setting(L"scenes",L"preview_actor",0,0,1));
@@ -87,13 +89,9 @@ static bool onMatchPage(){
  return !_stricmp(name,"game/screens/match/match");
 }
 static bool snapshot(SceneActorSnapshot& s){return readActors&&readActors(&s)&&s.version==1&&s.size==sizeof s&&s.renderer&&GetTickCount64()-s.tick<400;}
-static bool coach(const SceneActorSnapshot& s,Actor& result){
+static bool coach(const SceneActorSnapshot& s,int team,Actor& result){
  const auto game=get<uintptr_t>(get<uintptr_t>(image+0x3517420)+16);const int seq=get<int>(game+0xda840);
- if(!game||seq<0)return false;const auto frame=game+static_cast<uintptr_t>(seq%10)*0x15da0;
- const auto control=get<uintptr_t>(get<uintptr_t>(frame+0xb90));const int selected=get<int>(control+0x10);
- if(!control||selected<0||selected>=46)return false;
- const auto player=get<uintptr_t>(get<uintptr_t>(frame+0xca0)+static_cast<uintptr_t>(selected)*8);const int team=get<int>(player+4);
- if(team<0||team>1)return false;
+ if(!game||seq<0||team<0||team>1)return false;const auto frame=game+static_cast<uintptr_t>(seq%10)*0x15da0;
  const auto native=get<uintptr_t>(get<uintptr_t>(frame+0xe30)+static_cast<uintptr_t>(team)*8);Vec feet{};
  if(!native||get<int>(native)!=team||!read(native+0x10,&feet,sizeof feet))return false;feet=feet*30.48f;
  if(!finite(feet)||std::fabs(feet.z)<2800||std::fabs(feet.z)>6000)return false;
@@ -108,9 +106,9 @@ static bool coach(const SceneActorSnapshot& s,Actor& result){
  if(!read(s.renderer+static_cast<uintptr_t>(found)*0xe00+0xe7e0+14*64,head,sizeof head))return false;
  const Vec position{head[12],head[13],head[14]};Vec front{head[4],0,head[6]};
  if(!finite(position)||position.y<110||position.y>250||length(position-feet)>270||!unit(front))return false;
- // The simulation chooses the correct coach; the visible mesh positions the
- // shot. Animation/root motion can offset it from the simulation's anchor.
- coachPalette[team]=found;coachTeam=team;result={renderedRoot,position,front,std::max(185.f,position.y-renderedRoot.y+28.f)};return true;
+ // Match the requested team's simulation anchor to its rendered coach.
+ // Animation/root motion can offset it from the simulation's anchor.
+ coachPalette[team]=found;result={renderedRoot,position,front,std::max(185.f,position.y-renderedRoot.y+28.f)};return true;
 }
 static bool mascot(const SceneActorSnapshot& s,Actor& out){
  if(s.mascotValid!=1)return false;
@@ -124,18 +122,26 @@ static bool choose(const Config& cfg,const SceneActorSnapshot& s,Camera& camera,
  if(first<0)return false;
  for(int attempt=0;attempt<2;++attempt){
   const int actor=pendingPreview?cfg.previewActor:(first+attempt)%2;const int view=cfg.views[actor];
-  if(!readiness[actor].ready(GetTickCount64()))continue;
+  const auto now=GetTickCount64();
+  if(actor==1&&!readiness[2].ready(now))continue;
   if(!pendingPreview&&!cfg.weights[actor])continue;
   if(!view)continue;const int index=actor*2+(view==3?nextView[actor]:view-1);
-  Actor candidate;
-  if(index<2?coach(s,candidate):mascot(s,candidate)){
-   const unsigned start=randomizer.below(shotVariants);
-   for(unsigned pass=0;pass<shotVariants;++pass){
-    const auto variant=(start+pass)%shotVariants;
-    if(static_cast<int>(variant)==lastVariant[actor])continue;
-    if(!build(candidate,shotLens(cfg.lens[index],variant,index%2==1),index%2==1,camera)||!frontal(candidate,camera))continue;
-    currentShot=index;currentVariant=static_cast<int>(variant);lastVariant[actor]=currentVariant;
-    outActor=candidate;nextView[actor]=1-index%2;if(cfg.test)nextTestActor=1-actor;return true;
+  // Roll a side once, then try the other ready coach if no safe angle fits.
+  // coachTeam is pinned only after selecting a shot, never while observing.
+  const int firstTeam=actor==0?static_cast<int>(randomizer.below(2)):0;
+  for(int teamAttempt=0;teamAttempt<(actor==0?2:1);++teamAttempt){
+   const int side=(firstTeam+teamAttempt)%2;
+   if(actor==0&&(!scene_team_allowed(cfg.coachTeam,side)||!readiness[side].ready(now)))continue;
+   Actor candidate;
+   if(index<2?coach(s,side,candidate):mascot(s,candidate)){
+    const unsigned start=randomizer.below(shotVariants);
+    for(unsigned pass=0;pass<shotVariants;++pass){
+     const auto variant=(start+pass)%shotVariants;
+     if(static_cast<int>(variant)==lastVariant[actor])continue;
+     if(!build(candidate,shotLens(cfg.lens[index],variant,index%2==1),index%2==1,camera)||!frontal(candidate,camera))continue;
+     currentShot=index;coachTeam=actor==0?side:-1;currentVariant=static_cast<int>(variant);lastVariant[actor]=currentVariant;
+     outActor=candidate;nextView[actor]=1-index%2;if(cfg.test)nextTestActor=1-actor;return true;
+    }
    }
   }
   if(pendingPreview)break;
@@ -162,6 +168,14 @@ static void __fastcall producerHook(void* self,double dt,void* output){
  original(self,dt,output);
  AcquireSRWLockExclusive(&gate);
  ExtraScenesEngine=(uintptr_t)self;ExtraScenesStatus.frames++;
+ const bool match=onMatchPage();
+ if(stopping||!options.enabled||!match){
+  endScene(2);identity=0;stoppage.reset();for(auto& ready:readiness)ready.reset();
+  coachPalette[0]=coachPalette[1]=-1;coachTeam=-1;
+  ExtraScenesStatus.enabled=options.enabled?1:0;ExtraScenesStatus.cue=0;
+  ExtraScenesStatus.coachReady=ExtraScenesStatus.mascotReady=0;
+  ReleaseSRWLockExclusive(&gate);return;
+ }
  const auto now=GetTickCount64(),scene=get<uintptr_t>(image+0x3517c10);
  const int phase=get<int>(scene+0x3c);const bool replay=get<unsigned char>(scene+0x39)!=0;
  const auto pool=get<uintptr_t>(get<uintptr_t>((uintptr_t)self+0x128));
@@ -170,20 +184,25 @@ static void __fastcall producerHook(void* self,double dt,void* output){
  if(char* timer=std::strrchr(name,' ')){if(timer[1]>='0'&&timer[1]<='9')*timer=0;}
  ExtraScenesStatus.phase=phase;strncpy_s(ExtraScenesStatus.camera,name,_TRUNCATE);
  ExtraScenesStatus.enabled=options.enabled?1:0;ExtraScenesStatus.reason=reserved?0:6;
- const bool match=onMatchPage();SceneActorSnapshot actors{};const bool valid=snapshot(actors);
+ SceneActorSnapshot actors{};const bool valid=snapshot(actors);
  if(valid&&match){
   const auto fresh=actorSceneIdentity(actors.renderer,actors.generation,actors.home);
-  if(identity!=fresh){endScene(6);identity=fresh;stoppage.reset();readiness[0].reset();readiness[1].reset();coachPalette[0]=coachPalette[1]=-1;}
-  Actor observed{};const bool managerValid=coach(actors,observed);
-  readiness[0].observe((identity<<1)^static_cast<uint64_t>(coachTeam+1),actors.tick,now,managerValid?&observed:nullptr);
+  if(identity!=fresh){endScene(6);identity=fresh;stoppage.reset();for(auto& ready:readiness)ready.reset();coachPalette[0]=coachPalette[1]=-1;}
+  Actor observed{};
+  for(int side=0;side<2;++side){const bool managerValid=coach(actors,side,observed);
+   readiness[side].observe((identity<<1)^static_cast<uint64_t>(side+1),actors.tick,now,managerValid?&observed:nullptr);}
   const bool mascotValid=mascot(actors,observed);
-  readiness[1].observe(identity,actors.tick,now,mascotValid?&observed:nullptr);
- }else{readiness[0].reset();readiness[1].reset();}
- ExtraScenesStatus.coachReady=readiness[0].ready(now)?1:0;
- ExtraScenesStatus.mascotReady=readiness[1].ready(now)?1:0;
+  readiness[2].observe(identity,actors.tick,now,mascotValid?&observed:nullptr);
+ }else{for(auto& ready:readiness)ready.reset();}
+ ExtraScenesStatus.coachReady=(scene_team_allowed(options.coachTeam,0)&&readiness[0].ready(now))||(scene_team_allowed(options.coachTeam,1)&&readiness[1].ready(now))?1:0;
+ ExtraScenesStatus.mascotReady=readiness[2].ready(now)?1:0;
  stoppage.observe(identity,phase==15&&!replay&&match,false,now);
  if(options.preview!=lastPreview){lastPreview=options.preview;pendingPreview=options.preview!=0;}
- const auto presentation=native_muse::current((uintptr_t)self);
+ // MUSE tears down its adapter between stadiums and after a match. Only
+ // inspect it for a validated cinematic producer frame, never live play,
+ // replays, menu frames or an actor snapshot from the previous scene.
+ const auto presentation=(valid&&reserved&&!replay&&stoppedScenePhase(phase)&&nativeCutCamera(name))
+  ?native_muse::current((uintptr_t)self):native_muse::Presentation{};
  const bool safe=!stopping&&options.enabled&&valid&&
   nativeCutAllowed(phase,name,presentation.cue,reserved,match,replay);
  ExtraScenesStatus.cue=static_cast<int>(presentation.cue);
@@ -205,12 +224,13 @@ static void __fastcall producerHook(void* self,double dt,void* output){
     sceneActive=true;graphLease=presentation.graph;shotStart=now;pendingPreview=false;
     ExtraScenesStatus.inserted++;log("NATIVE_CUT_REFRAMED",currentShot);
     log("FRONTAL_VARIANT",currentVariant);
+    log("SUBJECT_TEAM",currentShot<2?coachTeam:0); // Mascot remains home only.
    }
   }
  }
  if(sceneActive){
   Camera view{};Actor subject{};
-  if(!(currentShot<2?coach(actors,subject):mascot(actors,subject))||!tripod.update(subject,now,view)||
+  if(!(currentShot<2?coach(actors,coachTeam,subject):mascot(actors,subject))||!tripod.update(subject,now,view)||
      !frontal(subject,view,.35f)||!cameraClaim.take((uintptr_t)self^graphLease,now))endScene(1);
   else{
    unsigned char frame[0xc4]{};
@@ -252,7 +272,7 @@ static DWORD WINAPI worker(void*){
    if(status.inserted!=lastInserted){lastInserted=status.inserted;log("EXTRA_INSERTED",status.shot);}
    wchar_t temp[MAX_PATH]{};_snwprintf_s(temp,MAX_PATH,_TRUNCATE,L"%ls.tmp",statusPath);FILE* f=nullptr;
    if(!_wfopen_s(&f,temp,L"wb")){
-   std::fprintf(f,"[runtime]\r\nmode=native_cut_producer\r\nrevision=12\r\npid=%lu\r\nready=%d\r\nenabled=%d\r\nactive=%d\r\nshot=%d\r\ninserted=%llu\r\nreason=%d\r\nphase=%d\r\ncue=%d\r\ncoach_ready=%d\r\nmascot_ready=%d\r\nwaiting=%d\r\n",GetCurrentProcessId(),status.running,status.enabled,status.active,status.shot,status.inserted,status.reason,status.phase,status.cue,status.coachReady,status.mascotReady,status.waiting);
+   std::fprintf(f,"[runtime]\r\nmode=native_cut_producer\r\nrevision=13\r\npid=%lu\r\nready=%d\r\nenabled=%d\r\nactive=%d\r\nshot=%d\r\ninserted=%llu\r\nreason=%d\r\nphase=%d\r\ncue=%d\r\ncoach_ready=%d\r\nmascot_ready=%d\r\nwaiting=%d\r\n",GetCurrentProcessId(),status.running,status.enabled,status.active,status.shot,status.inserted,status.reason,status.phase,status.cue,status.coachReady,status.mascotReady,status.waiting);
     std::fclose(f);MoveFileExW(temp,statusPath,MOVEFILE_REPLACE_EXISTING);
    }
   }

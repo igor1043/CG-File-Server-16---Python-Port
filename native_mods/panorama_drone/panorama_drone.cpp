@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include "../../common/club_stadium_scope.h"
 #include <tlhelp32.h>
 #include <cstdio>
 #include <cstring>
@@ -79,7 +80,7 @@ static void* __fastcall sceneHook(){
  const auto scene=get<uintptr_t>(image+0x3517c10),now=GetTickCount64();
  char name[96]{};Pose native{};float aspect=0;
  const auto nativeFade=get<uint32_t>(scene+0x225c);
- const bool valid=!stopping&&eligible(scene,name)&&nativePose(scene,native,aspect)&&nativeFade<=255;
+ const bool valid=!stopping&&!club_stadium_scope::selected()&&eligible(scene,name)&&nativePose(scene,native,aspect)&&nativeFade<=255;
  const double dt=lastTick&&now>=lastTick?static_cast<double>(now-lastTick)*.001:0;lastTick=now;
  const auto decision=director.tick(dt,valid,settings);
  std::memcpy(status.nativeCamera,name,sizeof name);status.shot=decision.active?static_cast<int>(decision.motion):-1;

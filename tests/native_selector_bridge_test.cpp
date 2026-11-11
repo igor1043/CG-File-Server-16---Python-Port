@@ -2,8 +2,15 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <thread>
+#include <atomic>
 static HWND simulated_foreground;
-static HWND test_foreground_window() { return simulated_foreground; }
+static std::atomic<bool> pause_input{false};
+static HANDLE input_reading=nullptr,input_resume=nullptr;
+static HWND test_foreground_window() {
+    if(pause_input.exchange(false)){SetEvent(input_reading);WaitForSingleObject(input_resume,5000);}
+    return simulated_foreground;
+}
 #define GetForegroundWindow test_foreground_window
 static wchar_t test_mapping_name[100];
 #define CGFS16_SELECTOR_MAPPING_NAME test_mapping_name
@@ -153,12 +160,46 @@ int main() {
     assert(shared->ready==7);
     assert(!shared->visible && !selector_shortcut_enabled());
     shared->owner_pid=0; // Dead Server: reconnect the named channel.
+    g_next_attach=0;
     selector_tick(child,1280,720);
     assert(g_selector && shared->ready==7);
     shared->owner_pid=GetCurrentProcessId();
     shared->heartbeat=GetTickCount();
+    // Reproduce the dump's ordering: input has checked the old channel and is
+    // paused before its next field read; render disconnects and reattaches.
+    // A read must retain the old mapping without blocking the render thread.
+    simulated_foreground=root;shared->visible=1;
+    input_reading=CreateEventW(nullptr,TRUE,FALSE,nullptr);input_resume=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    assert(input_reading&&input_resume);
+    auto old_view=g_selector;pause_input=true;
+    std::thread input_reader([]{mod_screen_captures_input();});
+    assert(WaitForSingleObject(input_reading,3000)==WAIT_OBJECT_0);
+    shared->owner_pid=0;g_next_attach=0;selector_tick(child,1280,720);
+    assert(g_selector&&g_selector!=old_view);
+    MEMORY_BASIC_INFORMATION view_info{};
+    assert(VirtualQuery(old_view,&view_info,sizeof(view_info))&&view_info.State==MEM_COMMIT);
+    SetEvent(input_resume);input_reader.join();
+    assert(VirtualQuery(old_view,&view_info,sizeof(view_info))&&view_info.State==MEM_FREE);
+    CloseHandle(input_reading);CloseHandle(input_resume);
+    // Frequent owner loss while keyboard/joystick callbacks continue polling.
+    // Exercise view retirement/publication without reinstalling OS input hooks
+    // a thousand times in this isolated test host.
+    simulated_foreground=nullptr;
+    std::atomic<bool> stop_readers{false};std::atomic<unsigned> reads{0};std::thread readers[4];
+    for(auto& reader:readers)reader=std::thread([&]{while(!stop_readers.load()){
+        mod_screen_captures_input();selector_shortcut_enabled();selector_audio_mode();selector_visible();++reads;
+    }});
+    shared->owner_pid=GetCurrentProcessId();shared->heartbeat=GetTickCount();
+    for(unsigned i=0;i<1000;++i){detach_channel();assert(map_channel_view());}
+    stop_readers=true;for(auto& reader:readers)reader.join();assert(reads>0);
+    shared->owner_pid=0;g_next_attach=GetTickCount()+1000;const auto retry_at=g_next_attach;
+    for(unsigned i=0;i<1000;++i)selector_tick(child,1,1);
+    assert(!g_selector&&g_next_attach==retry_at);
+    shared->owner_pid=GetCurrentProcessId();shared->heartbeat=GetTickCount();
+    g_next_attach=0;selector_tick(child,1,1);assert(g_selector);
+    puts("Selector mapping lifetime: paused input reader retained through reconnect, old view released afterward, 1000 reconnects with four polling threads passed");
     DestroyWindow(child); DestroyWindow(root); DestroyWindow(other);
-    UnmapViewOfFile(g_selector); g_selector=nullptr;
+    detach_channel();
     UnmapViewOfFile(shared); CloseHandle(map);
     puts("F12/Start/Select+Start dispatch, late channel, child/root, restart and timer tests passed");
     return 0;

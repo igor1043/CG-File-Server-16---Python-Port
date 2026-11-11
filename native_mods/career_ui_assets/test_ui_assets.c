@@ -44,7 +44,7 @@ int main(int argc,char **argv) {
     CHECK(!resolve_image_path("artAssets/cmCalendar/cmcalendar_8.swf",out,sizeof(out)));
     CHECK(!resolve_image_path("imgAssets/crest/light/l1043.dds",out,sizeof(out)));
     CHECK(!resolve_image_path("artAssets/stadium/stadium_cmphoto_0123456789abcdef.big",out,sizeof(out)));
-    /* Deleting the generated movie reproduces Robson's report. It must be
+    /* Deleting the generated movie reproduces reference's report. It must be
        rebuilt from the selected DDS with its APT and texture members intact. */
     snprintf(name,sizeof(name),"%s/data/ui/artAssets/cmCalendarCompetitions/cmcomp_1001761.big",game_dir);
     CHECK(DeleteFileA(name));CHECK(prepare_calendar_movie(1761));

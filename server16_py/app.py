@@ -69,6 +69,7 @@ from .settings_editor import SettingsAreaEditor, asset_specs, audio_specs, stadi
 from .settings_store import SettingsStore
 from .stadium_runtime import StadiumRuntime
 from .stadium_selector import StadiumSelector
+from .frontend_stadium_selection import IDLE_BACKGROUNDS, IDLE_BACKGROUND_LABELS, idle_background, save_idle_background
 from .first_person_runtime import first_person_runtime
 from .startup_diagnostics import StartupDiagnostics
 from .session_logs import SessionLogs, FILE_LIMIT, TAIL_BYTES, UI_LINES, Result as LogCleanupResult, trim as trim_log
@@ -2172,7 +2173,34 @@ class Server16App(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _refresh_career_idle_background(self, _event=None) -> None:
+        picker = getattr(self, "career_idle_background", None)
+        if picker is not None:
+            picker.current(IDLE_BACKGROUNDS.index(idle_background(self.exedir)))
+
+    def _save_career_idle_background(self, _event=None) -> None:
+        index = self.career_idle_background.current()
+        if index < 0:
+            return
+        try:
+            save_idle_background(self.exedir, IDLE_BACKGROUNDS[index])
+        except OSError as error:
+            self.log("Falha ao salvar o fundo de espera da carreira", error)
+            self._refresh_career_idle_background()
+            messagebox.showerror("Fundo de espera da carreira", str(error), parent=self)
+
     def _build_camera_tab(self) -> None:
+        background = tk.Frame(self.camera_tab, bg=self.card)
+        background.pack(fill="x", padx=10, pady=(10, 0))
+        tk.Label(background, text="Fundo de espera da carreira", bg=self.card, fg=self.fg,
+                 font=("Bahnschrift", 11, "bold")).pack(side="left", padx=12, pady=10)
+        self.career_idle_background = ttk.Combobox(background, values=IDLE_BACKGROUND_LABELS,
+                                                   state="readonly", width=17)
+        self.career_idle_background.pack(side="right", padx=12, pady=10)
+        self.career_idle_background.current(IDLE_BACKGROUNDS.index(idle_background(self.base_dir)))
+        self.career_idle_background.bind("<<ComboboxSelected>>", self._save_career_idle_background)
+        self.career_idle_background.bind("<FocusIn>", self._refresh_career_idle_background)
+
         card_host = tk.Frame(self.camera_tab, bg=self.bg)
         card_host.pack(fill="both", expand=True, padx=10, pady=10)
         card_host.grid_columnconfigure(0, weight=2)
@@ -2741,6 +2769,7 @@ class Server16App(tk.Tk):
         return paths[0]
 
     def _load_module_states(self) -> None:
+        self._refresh_career_idle_background()
         module_names = ["Stadium", "TvLogo", "ScoreBoard", "Movies", "Autorun", "StadiumNet", "Chants", "StadiumName", "AwayChants", "AwayClubSong", "TeamEntrance"]
         ensure_audio_module_defaults(self.settings_ini)
         self.module_states = {name: module_setting_enabled(self.settings_ini, name) for name in module_names}

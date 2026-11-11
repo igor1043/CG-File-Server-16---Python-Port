@@ -46,7 +46,7 @@ static void build_catalog(void) {
         }
     }fclose(file);}
     calendar_count=count;InterlockedExchange(&catalog_ready,1);
-    log_line("CATALOG Robson base native DDS headers and direct calendar/card views",(int)count,7);
+    log_line("CATALOG reference base native DDS headers and direct calendar/card views",(int)count,7);
 }
 __declspec(dllexport) int WINAPI Fifa16UiAssetsHasCompetition(int asset) {
     int id=asset>1000000 && asset<=1065535?asset-1000000:asset>0 && asset<65536?visual_competition[asset]:0;

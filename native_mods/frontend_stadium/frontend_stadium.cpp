@@ -6,16 +6,20 @@
 #include <cstring>
 #include <cwchar>
 #include <array>
+#include <atomic>
 #include "background_provider.h"
+#include "room_cover.h"
 #include "frontend_visibility.h"
 #include "career_profile.h"
 #include "scene_context.h"
 #include "player_scene.h"
 #include "menu_page.h"
 #include "profile_reload.h"
+#include "reload_scope.h"
 #include "stadium_metadata.h"
 #include "../../common/club_stadium_scope.h"
 #include "../../common/career_background.h"
+#include "../../common/scene_loading.h"
 
 // Verified call sites on the installed 577DE45C FIFA build. Scene requests
 // pass through FIFA's existing FE event queue and preparation/loading pair.
@@ -44,16 +48,21 @@ static int observedTeam=0,observedCareer=0;
 static int observedRevision=0,stageRevision=0;
 static wchar_t observedSelection[512]{};
 static bool awaitingReload=false;
-static bool sceneReady=false,photoDirty=false,careerWasActive=false;
+static bool sceneReady=false,careerWasActive=false;
+static std::atomic_bool photoDirty{false};
 static int careerSession=0,careerSessionTeam=0,observedEnabled=-1;
-static uintptr_t backgroundViewModel=0,backgroundVtable=0;
+static std::atomic<uintptr_t> backgroundViewModel{0};
 static uint32_t observedEpoch=0,stageEpoch=0;
 static uint64_t lastRouteComplete=0;
 static bool uiRegistered=false;
-static DWORD backgroundOwnerThread=0;
+static std::atomic<DWORD> backgroundOwnerThread{0};
+static std::atomic<uint64_t> routedRoomCover{0};
+static uint64_t lastRoomCoverRefresh=0;
 static void frontendUiTick();
 static uint32_t drawnRequest=0;
 static frontend_stadium::ProfileReloadProgress reloadProgress;
+static frontend_stadium::ReloadScopeGuard reloadScopeGuard;
+static thread_local bool frontendDispatch=false;
 static frontend_stadium::PlayerScene playerScene;
 static bool bootComplete=false;
 static frontend_stadium::PageKind previousPage=frontend_stadium::PageKind::Transition;
@@ -84,8 +93,19 @@ static void log(const char* event,int team=0,int detail=0){
 }
 static int setting(const wchar_t* key,int fallback){return static_cast<int>(GetPrivateProfileIntW(L"frontend_stadium",key,fallback,config));}
 static uintptr_t nativeCommands(int* state);
-static frontend_stadium::PageKind currentPage(){return frontend_stadium::pageKind(image,read);}
-static bool stadiumEnabled(){return frontend_stadium::enabledForPage(setting(L"enabled",0)!=0,currentPage());}
+static frontend_stadium::PageKind currentPage(){
+ const auto page=frontend_stadium::pageKind(image,read);
+ if(page==frontend_stadium::PageKind::ManagerPreferences){
+  typedef BOOL (WINAPI* Active)(void);auto module=GetModuleHandleW(L"club_browser.dll");auto active=module?reinterpret_cast<Active>(GetProcAddress(module,"Fifa16ManagerFaceVisible")):nullptr;
+  if(active&&active())return frontend_stadium::PageKind::ManagerFace;
+ }
+ return page;
+}
+static bool stadiumEnabled(frontend_stadium::PageKind page){
+    if(page==frontend_stadium::PageKind::IdlePanorama&&activeCareerClub(image,read)>0)return true;
+    return frontend_stadium::enabledForPage(setting(L"enabled",0)!=0,page);
+}
+static bool stadiumEnabled(){return stadiumEnabled(currentPage());}
 static void selection(int team,wchar_t* output,DWORD size){
     if(careerWasActive){
         if(static_cast<int>(GetPrivateProfileIntW(L"frontend_stadium_career",L"session",0,config))==careerSession&&
@@ -150,7 +170,9 @@ static int activeCareerRole(){
     const auto context=get<uintptr_t>(scope.service+0x18)+uintptr_t(selected)*0x318;
     int role=-1;return read(context+0x18c,&role,sizeof role)?role:-1;
 }
-static bool careerCommandOwner(){bool career=false;club(&career);return !career||uiContext().thread==GetCurrentThreadId();}
+static bool backgroundCommandOwner(){
+    return frontendDispatch&&backgroundOwnerThread.load()==GetCurrentThreadId();
+}
 static bool customActive(){return !stopping&&activeMode==1&&stadiumEnabled()&&activeSlot()==static_cast<int>(FrontendStadiumStatus.slot);}
 static bool menuScene(){
     // The same predicate used by StadiumPanDP::IsScreenTriggeredInMenus.
@@ -158,6 +180,36 @@ static bool menuScene(){
     if(!owner)return false;
     const int mode=reinterpret_cast<int(__fastcall*)(void*)>(image+0x470ce20)(owner);
     return mode<4||mode>7;
+}
+static DWORD selectedRoomClub(frontend_stadium::PageKind page){
+    if(stopping||!installed)return 0;
+    wchar_t value[32]{};
+    GetPrivateProfileStringW(L"frontend_stadium",page==frontend_stadium::PageKind::IdlePanorama?L"idle_background":L"background_mode",
+        L"stadium",value,_countof(value),config);
+    if(std::wcscmp(value,L"dressing_room"))return 0;
+    bool resolved=false;const int team=activeCareerClub(image,read,&resolved);
+    return career_background::wantsRoom(career_background::Mode::DressingRoom,true,resolved,
+        team>0?static_cast<unsigned>(team):0,activeCareerRole(),menuScene())?static_cast<DWORD>(team):0;
+}
+static DWORD roomBackgroundClub(frontend_stadium::PageKind page){
+    using Page=frontend_stadium::PageKind;
+    return page==Page::Hub||page==Page::IdlePanorama?selectedRoomClub(page):0;
+}
+static bool roomCoverSelected(frontend_stadium::PageKind page){
+    if(stopping||!installed||!frontend_stadium::roomCoverPage(page))return false;
+    wchar_t value[32]{};
+    GetPrivateProfileStringW(L"frontend_stadium",page==frontend_stadium::PageKind::IdlePanorama?L"idle_background":L"background_mode",
+        L"stadium",value,_countof(value),config);
+    return frontend_stadium::roomCoverSelected(page,!std::wcscmp(value,L"dressing_room"),activeCareerRole(),menuScene());
+}
+static DWORD roomCoverClub(frontend_stadium::PageKind page){
+    return frontend_stadium::roomCoverPage(page)?selectedRoomClub(page):0;
+}
+static bool roomPanoramaReady(DWORD team){
+    int nativeState=-1;nativeCommands(&nativeState);
+    const bool settled=!awaitingReload&&!stageRequest&&(nativeState==0||nativeState==12)&&GetTickCount64()-lastRouteComplete>=750;
+    const bool validRoute=activeMode&&stadiumEnabled(currentPage())&&activeSlot()==static_cast<int>(FrontendStadiumStatus.slot);
+    return frontend_stadium::roomPanoramaReady(team,settled,FrontendStadiumStatus.team,sceneReady,validRoute);
 }
 static int __fastcall drawHook(void* state,void* draw,int bucket,int pass,bool force,bool animated,bool generic){
     using Dispatch=int(__fastcall*)(void*,void*,int,int,bool,bool,bool);
@@ -173,7 +225,19 @@ static int __fastcall drawHook(void* state,void* draw,int bucket,int pass,bool f
 }
 static void __fastcall panHook(void* self,int stadium,void* output){
     reinterpret_cast<void(__fastcall*)(void*,int,void*)>(image+0x40d2c60)(self,stadium,output);
-    if(!output||!customActive()||!menuScene())return;
+    if(!output||!menuScene())return;
+    const auto page=currentPage();
+    const auto roomClub=page==frontend_stadium::PageKind::IdlePanorama?roomBackgroundClub(page):0;
+    if(roomClub){
+        // Native provider strings are localized by FIFA. Use an ASCII marker;
+        // the panorama APT supplies the accented label in its UTF-8 text path.
+        const char label[]="SERVER16_DRESSING_ROOM";
+        std::memset(output,0,256);std::memcpy(output,label,sizeof label);
+        const int values[]={-1,0,static_cast<int>(roomClub),-1,-1};
+        std::memcpy(static_cast<unsigned char*>(output)+0x100,values,sizeof values);
+        return;
+    }
+    if(!customActive())return;
     wchar_t name[256]{};char utf8[256]{};
     wcsncpy_s(name,activeName,_TRUNCATE);
     if(!name[0]||!WideCharToMultiByte(CP_UTF8,0,name,-1,utf8,sizeof utf8,nullptr,nullptr))return;
@@ -185,25 +249,36 @@ static void __fastcall panHook(void* self,int stadium,void* output){
     log("PAN_CUSTOM_INFO",static_cast<int>(FrontendStadiumStatus.team),stadium);
 }
 static void* __fastcall backgroundHook(void* self){
-    auto* provider=reinterpret_cast<void*(__fastcall*)(void*)>(image+0x40893e0)(self);
-    backgroundViewModel=reinterpret_cast<uintptr_t>(self);backgroundVtable=get<uintptr_t>(backgroundViewModel);
-    backgroundOwnerThread=GetCurrentThreadId();
+    const auto thread=GetCurrentThreadId();
     using RegisterFrontend=BOOL(WINAPI*)(void(*)());
     const auto host=GetModuleHandleW(L"dinput8.dll");
     const auto registerFrontend=reinterpret_cast<RegisterFrontend>(host?GetProcAddress(host,"Fifa16FrontendRegisterUiCallback"):nullptr);
     if(registerFrontend&&registerFrontend(frontendUiTick)){
-        static DWORD reported=0;if(reported!=backgroundOwnerThread){reported=backgroundOwnerThread;log("FRONTEND_UI_OWNER",0,static_cast<int>(reported));}
+        if(backgroundOwnerThread.exchange(thread)!=thread)log("FRONTEND_UI_OWNER",0,static_cast<int>(thread));
     }
+    auto* provider=reinterpret_cast<void*(__fastcall*)(void*)>(image+0x40893e0)(self);
+    backgroundViewModel=reinterpret_cast<uintptr_t>(self);
+    const auto coverPage=currentPage();
+    const auto roomClub=roomCoverClub(coverPage);
+    if(provider&&roomCoverSelected(coverPage)){
+        const bool ready=roomPanoramaReady(roomClub);
+        frontend_stadium::routeRoomPhotograph(provider,reinterpret_cast<frontend_stadium::SetProviderString>(image+0x4c174d0),ready);
+        const auto stamp=frontend_stadium::roomCoverStamp(roomClub,ready);
+        if(routedRoomCover.exchange(stamp)!=stamp)log(ready?"ROOM_PANORAMA_VISIBLE":"ROOM_STADIUM_COVER_HELD",static_cast<int>(roomClub),0);
+        photoDirty=false;
+        return provider;
+    }
+    if(provider)routedRoomCover=0;
     const auto slot=FrontendStadiumStatus.slot;
-    const auto page=frontend_stadium::pageKind(image,read);
+    const auto page=currentPage();
     const bool menuPage=frontend_stadium::isBackgroundPage(page);
     int nativeState=-1;const auto nativeService=nativeCommands(&nativeState);
     const bool nativeBusy=nativeService&&nativeState!=0&&nativeState!=12;
     const bool pending=awaitingReload||stageRequest!=0||nativeBusy;
     const bool stadiumSettled=frontend_stadium::photographRefreshReady(pending,sceneReady,nativeState,GetTickCount64()-lastRouteComplete);
-    const bool validRoute=stadiumSettled&&activeMode&&frontend_stadium::enabledForPage(setting(L"enabled",0)!=0,page)&&activeSlot()==static_cast<int>(slot);
+    const bool validRoute=stadiumSettled&&activeMode&&stadiumEnabled(page)&&activeSlot()==static_cast<int>(slot);
     const bool transition=page==frontend_stadium::PageKind::Transition;
-    const auto photograph=frontend_stadium::photographPolicy(menuPage,bootComplete,pending,sceneReady,validRoute,transition);
+    const auto photograph=frontend_stadium::preservesPhotograph(page)?frontend_stadium::Photograph::Friends:frontend_stadium::photographPolicy(menuPage,bootComplete,pending,sceneReady,validRoute,transition);
     if(provider&&!stopping&&photograph!=frontend_stadium::Photograph::Original){
         const auto text=get<uintptr_t>(reinterpret_cast<uintptr_t>(self)+0x168);
         char previous[64]{};
@@ -215,6 +290,7 @@ static void* __fastcall backgroundHook(void* self){
         if(photograph==frontend_stadium::Photograph::Stadium&&frontend_stadium::routePhotograph(provider,
             reinterpret_cast<frontend_stadium::SetProviderString>(image+0x4c174d0),
             reinterpret_cast<const char*>(image+0x21c3fe8))){
+            photoDirty=false;
             FrontendStadiumStatus.photoHidden++;
             log("PHOTO_PARAM_REQUEST",static_cast<int>(FrontendStadiumStatus.team),static_cast<int>(slot));
         }else{
@@ -225,15 +301,27 @@ static void* __fastcall backgroundHook(void* self){
     return provider;
 }
 static void refreshPhotograph(){
-    if(!photoDirty||!frontend_stadium::reloadPage(image,read))return;
-    // A save reload may still have a native background factory in flight.
-    // Never manufacture another provider while its stadium command is active.
+    const auto page=currentPage();
+    if(GetCurrentThreadId()!=backgroundOwnerThread.load())return;
+    const auto roomClub=roomCoverClub(page);
+    const bool roomSelected=roomCoverSelected(page);
+    const bool roomChanged=roomSelected&&routedRoomCover.load()!=frontend_stadium::roomCoverStamp(roomClub,roomPanoramaReady(roomClub));
+    if(!photoDirty&&!roomChanged)return;
+    if(!frontend_stadium::isBackgroundPage(page))return;
+    // Never manufacture another provider while native stadium loading is active.
     int state=-1;nativeCommands(&state);
-    if(!frontend_stadium::photographRefreshReady(awaitingReload||stageRequest,sceneReady,state,GetTickCount64()-lastRouteComplete))return;
-    const auto self=backgroundViewModel;
+    if(roomSelected){
+        // Keep the normal panorama visible while the room worker prepares.
+        // Only a native stadium reload needs the BOOTFLOW photograph.
+        if(!roomChanged){photoDirty=false;return;}
+        if(awaitingReload||stageRequest||(state!=0&&state!=12)||GetTickCount64()-lastRouteComplete<750)return;
+        if(lastRoomCoverRefresh&&GetTickCount64()-lastRoomCoverRefresh<500)return;
+    }else if(!frontend_stadium::photographRefreshReady(awaitingReload||stageRequest,sceneReady,state,GetTickCount64()-lastRouteComplete))return;
+    const auto self=backgroundViewModel.load();
+    const auto vtable=get<uintptr_t>(self);
     // Publish through the current native view model, without retaining a DP.
     // Its factory and owning service must still match the live registration.
-    if(!self||get<uintptr_t>(self)!=backgroundVtable||get<uintptr_t>(backgroundVtable+0x38)!=image+0x408d1d0||!get<uintptr_t>(self+8))return;
+    if(!self||get<uintptr_t>(vtable+0x38)!=image+0x408d1d0||!get<uintptr_t>(self+8))return;
     // GameFlow::Render is not the UI provider owner thread. A synchronous
     // 4c15b20 call here raced StatisticsData in the native string pool
     // (captured 3a69c96 -> 4c15c40 -> refreshPhotograph crash). Only enqueue;
@@ -241,7 +329,8 @@ static void refreshPhotograph(){
     using Queue=BOOL(WINAPI*)(void*,void*);
     const auto host=GetModuleHandleW(L"dinput8.dll");
     const auto queue=reinterpret_cast<Queue>(host?GetProcAddress(host,"Fifa16CareerQueueBackgroundRefresh"):nullptr);
-    if(!queue||!queue(reinterpret_cast<void*>(self),reinterpret_cast<void*>(backgroundVtable)))return;
+    if(!queue||!queue(reinterpret_cast<void*>(self),reinterpret_cast<void*>(vtable)))return;
+    if(roomSelected)lastRoomCoverRefresh=GetTickCount64();
     photoDirty=false;
     log("PHOTO_REFRESH_QUEUED",static_cast<int>(FrontendStadiumStatus.team),static_cast<int>(GetCurrentThreadId()));
 }
@@ -320,26 +409,67 @@ static uintptr_t nativeCommands(int* state=nullptr){
     }
     return 0;
 }
-static bool startNativeReload(){
-    if(!careerCommandOwner())return false;
+static frontend_stadium::ReloadScope reloadScope(int* nativeState=nullptr){
+    frontend_stadium::ReloadScope scope;
+    if(!backgroundCommandOwner())return scope;
+    scope.frontendCallback=true;scope.ownerThread=GetCurrentThreadId();
+    scope.page=currentPage();scope.view=frontend_stadium::pageView(image,read);
+    if(!frontend_stadium::isBackgroundPage(scope.page)||!scope.view)return {};
+    scope.background=backgroundViewModel.load();
+    const auto vtable=get<uintptr_t>(scope.background);
+    if(!scope.background||get<uintptr_t>(vtable+0x38)!=image+0x408d1d0)return {};
+    scope.backgroundRegistry=get<uintptr_t>(scope.background+8);
+    scope.commands=nativeCommands(nativeState);
+    const auto before=uiContext();
+    bool resolved=false;const auto team=activeCareerClub(image,read,&resolved);
+    if(!resolved)return {}; // A loading/retiring career is not the favourite club.
+    scope.resolved=true;scope.career=team>0;
+    if(scope.career){
+        const auto after=uiContext();
+        if(std::memcmp(&before,&after,sizeof before))return {};
+        scope.epoch=after.epoch;scope.careerService=after.service;
+        scope.careerRegistry=after.registry;scope.careerThread=after.thread;
+        scope.team=static_cast<uint32_t>(team);
+    }else{
+        bool career=false;const auto favourite=club(&career);
+        if(career||favourite<=0)return {};
+        scope.team=static_cast<uint32_t>(favourite);
+    }
+    if(scope.background!=backgroundViewModel.load()||get<uintptr_t>(scope.background)!=vtable
+        ||get<uintptr_t>(scope.background+8)!=scope.backgroundRegistry
+        ||!backgroundCommandOwner())return {};
+    return scope;
+}
+static void logReloadScope(const char* event,const frontend_stadium::ReloadScope& scope,int state){
+    FILE* file=nullptr;if(_wfopen_s(&file,logPath,L"ab")||!file)return;
+    std::fprintf(file,"tick=%llu pid=%lu %s team=%u epoch=%u thread=%lu frontend_owner=%u career_owner=%u view=%llx registry=%llx state=%d\r\n",
+        GetTickCount64(),GetCurrentProcessId(),event,scope.team,scope.epoch,GetCurrentThreadId(),
+        scope.ownerThread,scope.careerThread,static_cast<unsigned long long>(scope.view),
+        static_cast<unsigned long long>(scope.backgroundRegistry),state);
+    std::fclose(file);
+}
+static bool startNativeReload(const frontend_stadium::ReloadScope& expected){
+    int state=-1;const auto current=reloadScope(&state);
+    if(!frontend_stadium::canDispatchReload(expected,current,state))return false;
     // ReloadFEStadiumViewModel::evt_start_stadium_change (action 0x2787)
     // delegates to this native service command (40fac8a..40faca9).
-    // Run it once on the verified UI owner. Do not additionally post a profile
-    // change event: that can start the same request before this call runs.
-    const auto commands=nativeCommands();
-    if(!commands)return false;
+    // Revalidate after releasing the staging lock. BackgroundDP's genuine
+    // frontend callback may differ from the StatisticsData owner thread.
+    const auto commands=current.commands;
     const unsigned char signature[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10};
     unsigned char actual[sizeof signature]{};
     if(!read(image+0x3d8b8a0,actual,sizeof actual)||std::memcmp(actual,signature,sizeof actual))return false;
+    logReloadScope("NATIVE_RELOAD_DISPATCH",current,state);
     const bool accepted=frontend_stadium::requestProfileReload([&](int command,void* request){
         reinterpret_cast<void(__fastcall*)(void*,int,void*)>(image+0x3d8b8a0)(reinterpret_cast<void*>(commands),command,request);
     });
     log(accepted?"NATIVE_STADIUM_CHANGE_STARTED":"NATIVE_STADIUM_CHANGE_BUSY",static_cast<int>(FrontendStadiumStatus.team),accepted?1:0);
     return accepted;
 }
-static bool acknowledgeBackground(){
-    if(!careerCommandOwner())return false;
-    int state=-1;const auto commands=nativeCommands(&state);
+static bool acknowledgeBackground(const frontend_stadium::ReloadScope& expected){
+    int state=-1;const auto current=reloadScope(&state);
+    if(!frontend_stadium::canDispatchReload(expected,current,state,true))return false;
+    const auto commands=current.commands;
     // Command 0x1a -> FreeRoam::3d92c70 -> 3ddf8f0, the normal native
     // background-loaded callback. State 11 is BOOT and must never be bypassed.
     if(!commands||state!=14)return false;
@@ -364,12 +494,15 @@ static void failReload(int error){
 }
 static void pollReload(){
     const auto now=GetTickCount64();
-    if(!installed||stopping||now-lastProbe<250||!menuScene())return;
+    if(!installed||stopping||!backgroundCommandOwner()||now-lastProbe<250)return;
     lastProbe=now;
     if(!TryAcquireSRWLockExclusive(&gate))return;
-    const auto page=frontend_stadium::pageKind(image,read);
+    if(!menuScene()){reloadScopeGuard.reset();ReleaseSRWLockExclusive(&gate);return;}
+    const auto page=currentPage();
+    const auto commandScope=reloadScope();
+    const bool commandReady=reloadScopeGuard.observe(commandScope,now);
     const bool allowedPage=frontend_stadium::isBackgroundPage(page);
-    const bool enabled=frontend_stadium::enabledForPage(setting(L"enabled",0)!=0,page);
+    const bool enabled=stadiumEnabled(page);
     if(frontend_stadium::refreshOnMenuReturn(previousPage,page,sceneReady,enabled))photoDirty=true;
     previousPage=page;
     if(allowedPage)bootComplete=true;
@@ -386,7 +519,9 @@ static void pollReload(){
         awaitingReload=false;observedTeam=0;
         InterlockedExchange(&stageRequest,0);InterlockedExchange(&stageComplete,0);
         sceneReady=false;photoDirty=true;
-        if(career)backgroundViewModel=backgroundVtable=0;observedEpoch=career?epoch:0;
+        // Background ViewModels can survive a save reload. Keep a weak address;
+        // reloadScope validates its live factory/registry before every command.
+        observedEpoch=career?epoch:0;
         if(!playerScene.matches(actualTeam,epoch,activeCareerRole()))playerScene.clear();
         if(newCareer){careerSession=static_cast<int>(now&0x7fffffff);log("CAREER_EPOCH_RESET",team,static_cast<int>(epoch));}
     }
@@ -408,17 +543,25 @@ static void pollReload(){
         }else if(now-waitSince>60000){
             failReload(20);
         }else if(FrontendStadiumStatus.requests==requestsAtPost){
+            if(!commandReady){
+                static LONG reported=0;
+                if(reported!=stageRequest){reported=stageRequest;logReloadScope("NATIVE_RELOAD_WAIT_CONTEXT",commandScope,-1);}
+                ReleaseSRWLockExclusive(&gate);return;
+            }
             int nativeState=-1;nativeCommands(&nativeState);
             const auto step=reloadProgress.next(nativeState,stageRequest&&stageComplete==stageRequest,now);
             if(step==frontend_stadium::ReloadStep::Failed){failReload(22);}
             else if(step==frontend_stadium::ReloadStep::Start){
-                ReleaseSRWLockExclusive(&gate);reloadProgress.started=startNativeReload();return;
+                ReleaseSRWLockExclusive(&gate);reloadProgress.started=startNativeReload(commandScope);return;
             }else if(step==frontend_stadium::ReloadStep::BackgroundReady){
                 // The FIFA Friends cover was already requested before staging.
                 // A cached/hidden image need not fire another UI callback.
                 // Resume the standard native loader, outside our staging lock.
                 ReleaseSRWLockExclusive(&gate);
-                if(!acknowledgeBackground())log("NATIVE_BACKGROUND_READY_SKIPPED",team);
+                if(!acknowledgeBackground(commandScope)){
+                    reloadProgress.backgroundSent=false;
+                    log("NATIVE_BACKGROUND_READY_SKIPPED",team);
+                }
                 return;
             }
         }
@@ -450,15 +593,16 @@ static void pollReload(){
     ReleaseSRWLockExclusive(&gate);
 }
 static void frontendUiTick(){
-    if(stopping||GetCurrentThreadId()!=backgroundOwnerThread)return;
-    bool career=false;club(&career);
-    if(career||!frontend_stadium::isBackgroundPage(currentPage()))return;
-    pollReload();refreshPhotograph();
+    if(stopping||frontendDispatch||GetCurrentThreadId()!=backgroundOwnerThread.load())return;
+    struct DispatchScope {DispatchScope(){frontendDispatch=true;}~DispatchScope(){frontendDispatch=false;}} dispatch;
+    // Observe gaps as well: the same FluxHub address may belong to a new save.
+    pollReload();
+    refreshPhotograph();
 }
 static void stadiumUiTick(){
-    if(stopping||!careerCommandOwner())return;
-    static DWORD reported=0;if(reported!=GetCurrentThreadId()){reported=GetCurrentThreadId();log("STADIUM_UI_OWNER",0,static_cast<int>(reported));}
-    pollReload();refreshPhotograph();
+    // Compatible with the host registration, but StatisticsData callbacks do
+    // not allocate background UI values. frontendUiTick owns those commands.
+    if(stopping)return;
 }
 static void renderPoll(){
     bool career=false;club(&career);
@@ -466,12 +610,12 @@ static void renderPoll(){
         using Register=BOOL(WINAPI*)(void(*)());
         const auto host=GetModuleHandleW(L"dinput8.dll");
         const auto fn=reinterpret_cast<Register>(host?GetProcAddress(host,"Fifa16CareerRegisterStadiumUiCallback"):nullptr);
-        // Fail closed with an older host, rather than calling the UI allocator
-        // on Render. Native loading and its existing stadium remain intact.
+        // Registration only. backgroundHook separately registers the actual
+        // frontend owner, for menus and career alike.
         if(fn)uiRegistered=fn(stadiumUiTick)!=FALSE;
         return;
     }
-    pollReload();refreshPhotograph();
+    // Never enter the native UI allocator from the render branch, even boot.
 }
 static void __fastcall frameHook(void* self,void* a,void* b,void* c){
     reinterpret_cast<void(__fastcall*)(void*,void*,void*,void*)>(image+0x4361d70)(self,a,b,c);
@@ -490,7 +634,7 @@ static void __fastcall hook(void* self,const void* context){
     const auto original=reinterpret_cast<Prepare>(image+kPrepare);
     const auto page=currentPage();
     const bool forced=frontend_stadium::forcesStadium(page);
-    if(stopping||!frontend_stadium::enabledForPage(setting(L"enabled",0)!=0,page)){activeMode=0;sceneReady=false;photoDirty=true;original(self,context);return;}
+    if(stopping||!stadiumEnabled(page)){activeMode=0;sceneReady=false;photoDirty=true;original(self,context);return;}
     bool career=false;const int actualTeam=club(&career);
     updateCareerContext(career,actualTeam);
     const int team=club_stadium_scope::target(actualTeam,page==frontend_stadium::PageKind::ClubBrowser?club_stadium_scope::selected():0);
@@ -710,19 +854,7 @@ extern "C" __declspec(dllexport) BOOL WINAPI Fifa16FrontendStadiumView(DWORD* te
     *team=publishedTeam;*phase=publishedPhase;ReleaseSRWLockShared(&gate);return TRUE;
 }
 extern "C" __declspec(dllexport) DWORD WINAPI Fifa16FrontendRoomBackgroundClub(){
-    if(stopping||!installed)return 0;
-    wchar_t value[32]{};GetPrivateProfileStringW(L"frontend_stadium",L"background_mode",L"",value,_countof(value),config);
-    const auto mode=career_background::parse(!std::wcscmp(value,L"dressing_room")?"dressing_room":
-        !std::wcscmp(value,L"image")?"image":!std::wcscmp(value,L"stadium")?"stadium":"",setting(L"enabled",0)!=0);
-    if(mode!=career_background::Mode::DressingRoom)return 0;
-    auto p=get<uintptr_t>(image+0x3809030);
-    for(unsigned offset:{232u,192u,136u,472u})p=get<uintptr_t>(p+offset);
-    char name[128]{};if(!read(p,name,sizeof name-1))return 0;
-    for(auto& c:name)if(c>='A'&&c<='Z')c+='a'-'A';
-    const auto leaf=std::strrchr(name,'/');
-    bool resolved=false;const int team=activeCareerClub(image,read,&resolved);
-    return career_background::wantsRoom(mode,leaf&&!std::strcmp(leaf,"/fluxhub"),resolved,
-        team>0?static_cast<unsigned>(team):0,activeCareerRole(),menuScene())?static_cast<DWORD>(team):0;
+    return roomBackgroundClub(currentPage());
 }
 extern "C" __declspec(dllexport) BOOL WINAPI Fifa16FrontendStadiumName(DWORD team,wchar_t* text,DWORD capacity){
     if(!text||capacity<2||capacity>1024||stopping||!installed||!TryAcquireSRWLockShared(&gate))return FALSE;

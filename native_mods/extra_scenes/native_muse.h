@@ -26,6 +26,13 @@ static Presentation current(uintptr_t engine){
  if(!member)return out;
  out.graph=get<uintptr_t>(selected+8);out.category=get<int>(selected+0x18);
  if(get<uintptr_t>(out.graph)!=bc+0x12eff0||!read(out.graph+0x18,out.name,sizeof out.name-1))return Presentation{};
+ // The adapter/selection can be released between individual reads during a
+ // stadium transition. Reject a torn snapshot even when its old memory was
+ // still readable; do not reframe a camera using a different graph owner.
+ if(get<uintptr_t>(engine+0x68)!=scene||get<uintptr_t>(scene+0x10)!=services||
+    get<uintptr_t>(services+0x50)!=adapter||get<uintptr_t>(adapter+0x58)!=impl||
+    get<uintptr_t>(manager+0xb0)!=processor||get<uintptr_t>(processor+0x60)!=selected||
+    get<uintptr_t>(processor+0x28)!=first||get<uintptr_t>(processor+0x30)!=end)return Presentation{};
  out.cue=nativeCueKind(out.name,goalKick,corner);return out;
 }
 }

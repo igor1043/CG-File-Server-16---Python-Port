@@ -52,7 +52,8 @@ def main(root):
             template=Path(__file__).resolve().parents[1]/'native_mods/frontend_stadium/ui_templates/backgroundfifa.big'
             assert (root/file).read_bytes()==template.read_bytes(), 'Background must use the original native ImageLoader'
         else:
-            fields=('mCapacityName','mCapacityValue','mYearName','mYearValue','mcDivderBottomVertical')
+            fields=('mCapacityName','mCapacityValue','mYearName','mYearValue','mcDivderBottomVertical',
+                    'mStadiumName','mStadiumNameShadow','mcHorizontalDivider')
             vm.global_.set('ION_Localization',Object({'native_localization':True,'LocalizeInteger':Native('LocalizeInteger')}))
             text=Object({name:Object({'textWidth':70}) for name in fields});owner=Object({'mcTextGroup':text})
             for capacity,year,cap_visible,year_visible in [(-1,0,False,False),(25000,1960,True,True),(0,1960,False,True),(0,10000000,False,False),(50000,10000000,True,False),(50000,10040001,True,True),(0,10000001,False,True)]:
@@ -64,6 +65,13 @@ def main(root):
                 if year>10000000:
                     assert text.get('mYearName').get('text').encode('latin1').decode('utf8')=='PÚBLICO'
                     assert text.get('mYearValue').get('text')==format(year-10000001,',')
+            title=text.get('mStadiumName')
+            for measured in (180,1300):
+                title.set('textWidth',measured)
+                vm.invoke(fn,owner,[Object({'capacity':25000,'year':1960})])
+                assert title.get('_x')+min(900,measured+8)==-34
+                assert title.get('_xscale')==min(100,90000/(measured+8))
+                assert text.get('mStadiumNameShadow').get('_x')==title.get('_x')
         print(file+': native headers, custom and native fallback behavior passed')
 
 if __name__=='__main__':main(Path(sys.argv[1]))

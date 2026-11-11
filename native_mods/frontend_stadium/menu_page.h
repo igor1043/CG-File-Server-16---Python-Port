@@ -3,10 +3,27 @@
 #include <cstring>
 
 namespace frontend_stadium {
-enum class PageKind { Transition, Menu, ClubBrowser, PlayerCareer, Other };
-inline bool isBackgroundPage(PageKind page){return page==PageKind::Menu||page==PageKind::ClubBrowser||page==PageKind::PlayerCareer;}
-inline bool forcesStadium(PageKind page){return page==PageKind::ClubBrowser;}
+enum class PageKind { Transition, Menu, Hub, IdlePanorama, ClubBrowser, PlayerCareer, Other, ManagerFace, ManagerPreferences };
+inline bool isBackgroundPage(PageKind page){
+    return page==PageKind::Menu||page==PageKind::Hub||page==PageKind::IdlePanorama
+        ||page==PageKind::ClubBrowser||page==PageKind::PlayerCareer||page==PageKind::ManagerFace||page==PageKind::ManagerPreferences;
+}
+inline bool forcesStadium(PageKind page){return page==PageKind::ClubBrowser||page==PageKind::ManagerFace;}
+inline bool preservesPhotograph(PageKind page){return page==PageKind::ManagerPreferences;}
 inline bool enabledForPage(bool configured,PageKind page){return configured||forcesStadium(page);}
+template<class Read> uintptr_t pageView(uintptr_t image,Read read){
+    auto pointer=[&](uintptr_t at){uintptr_t value=0;if(at>=0x10000)read(at,&value,sizeof value);return value;};
+    auto view=pointer(image+0x3809030);
+    for(const uintptr_t offset:{0xe8,0xc0,0x88}){
+        if(!view)return 0;
+        view=pointer(view+offset);
+    }
+    const auto asset=pointer(view+0x1d8);
+    char name[128]{};
+    if(!view||!asset||!read(asset,name,sizeof name)||!name[0]||!std::memchr(name,0,sizeof name))return 0;
+    return pointer(view+0x1d8)==asset?view:0;
+}
+
 template<class Read> PageKind pageKind(uintptr_t image,Read read){
     auto pointer=[&](uintptr_t at){uintptr_t value=0;if(at>=0x10000)read(at,&value,sizeof value);return value;};
     auto page=pointer(image+0x3809030);
@@ -27,8 +44,10 @@ template<class Read> PageKind pageKind(uintptr_t image,Read read){
        std::strstr(name,"becomeaplayer")||std::strstr(name,"player-career"))return PageKind::PlayerCareer;
     if(std::strstr(name,"mainmenuwithstadium")||std::strstr(name,"mainmenuhub"))return PageKind::Menu;
     if(!leaf)return PageKind::Other;
-    return !std::strcmp(leaf,"/fluxhub")||!std::strcmp(leaf,"/profile")||
-           !std::strcmp(leaf,"/selectfavoriteteam")||!std::strcmp(leaf,"/stadiumpan")
+    if(!std::strcmp(leaf,"/managerpreferences"))return PageKind::ManagerPreferences;
+    if(!std::strcmp(leaf,"/fluxhub"))return PageKind::Hub;
+    if(!std::strcmp(leaf,"/stadiumpan"))return PageKind::IdlePanorama;
+    return !std::strcmp(leaf,"/profile")||!std::strcmp(leaf,"/selectfavoriteteam")
            ?PageKind::Menu:PageKind::Other;
 }
 template<class Read> bool reloadPage(uintptr_t image,Read read){
