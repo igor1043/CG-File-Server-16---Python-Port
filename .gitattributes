@@ -7,17 +7,14 @@ server16_py/d3d_overlay/ui_pipeline_state.h -text whitespace=cr-at-eol
 # Exact shared worker bytes for the joint 29/10 release.
 server16_py/club_environment.py -text
 tests/test_club_environment.py -text whitespace=cr-at-eol
-docs/RELEASE_20261029.md -text whitespace=cr-at-eol
 server16_py/app.py -text whitespace=cr-at-eol
 server16_py/asset_runtime.py -text whitespace=cr-at-eol
 server16_py/file_tools.py -text whitespace=cr-at-eol
 server16_py/stadium_runtime.py -text whitespace=cr-at-eol
 tests/test_file_tools_permissions.py -text whitespace=cr-at-eol
-docs/RELEASE_20261029_R2.md -text whitespace=cr-at-eol
 
 # Preserve the exact validated inputs of the joint 30/10 release.
 README.md -text whitespace=cr-at-eol
-docs/RELEASE_20261030.md -text whitespace=cr-at-eol
 server16_py/__init__.py -text whitespace=cr-at-eol
 server16_py/d3d_injector.py -text whitespace=cr-at-eol
 server16_py/first_person_runtime.py -text whitespace=cr-at-eol
@@ -32,7 +29,6 @@ tests/test_overlay_reattach.py -text whitespace=cr-at-eol
 tests/test_release_features.py -text whitespace=cr-at-eol
 
 # Preserve the exact validated inputs of the 02/11 joint release.
-docs/RELEASE_20261102.md -text whitespace=cr-at-eol
 server16_py/build_check.py -text whitespace=cr-at-eol
 server16_py/career_options.py -text whitespace=cr-at-eol
 server16_py/native_asset_cleanup.py -text whitespace=cr-at-eol
@@ -45,14 +41,12 @@ tests/test_narration_panel.py -text whitespace=cr-at-eol
 tests/test_native_asset_cleanup.py -text whitespace=cr-at-eol
 tests/test_substitution_audio.py -text whitespace=cr-at-eol
 
-# Preserve validated native source and documentation bytes.
+# Preserve validated native source bytes.
 native_mods/career_native/** -text whitespace=cr-at-eol
 native_mods/common/competition_identity.h text eol=lf whitespace=cr-at-eol
 native_mods/frontend_stadium/** -text whitespace=cr-at-eol
 native_mods/frontend_stadium/**/*.cpp text eol=lf whitespace=cr-at-eol
 native_mods/frontend_stadium/**/*.h text eol=lf whitespace=cr-at-eol
-docs/NATIVE_SOURCE_SYNC_20261106.md -text whitespace=cr-at-eol
-docs/RELEASE_20261106.md -text whitespace=cr-at-eol
 
 # Match the Server repository's existing LF source convention; binary code stays raw.
 native_mods/career_native/**/*.c text eol=lf whitespace=cr-at-eol

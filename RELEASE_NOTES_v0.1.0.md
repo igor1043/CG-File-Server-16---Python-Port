@@ -18,5 +18,4 @@ Initial public release of the Python port of CGFS 16 Server 16 for FIFA 16.
 ## Notes
 
 - This is intended as the first public community release.
-- Screenshots can be added later under `docs/images/`.
 - Contributions and issue reports are welcome.

@@ -25,7 +25,6 @@ compilado. A aparência da nova opção deve ser conferida na instalação do jo
 ## Entrega — 04/11/2026
 
 Vestiário V3 oficial, mercado de técnicos com acompanhamento diário e navegação revisados, clubes/seleções e Server16 0.2.20. O ZIP incremental de assets é `FIFA-Friends-Assets-Delta-20261104-sobre-20261102-R2.zip`, sobre a entrega de 02/11 R2. V1/V2 ficam em backup e não acompanham o pacote.
-[Instalação, mudanças e validação](docs/RELEASE_20261104.md).
 
 Seu painel para preparar a partida e personalizar o FIFA 16.
 
@@ -39,7 +38,6 @@ Logs do Server16 e dos mods são limpos em segundo plano a cada abertura. A aba
 Logs agora tem **Limpar logs**, que também limpa os arquivos dos mods. Há limites
 por arquivo, por conjunto e por diagnósticos antigos, além de um limite de linhas
 no painel. Saves, bancos, preferências e assets são preservados.
-[Escopo, limites e validação](docs/LOGS_20261104.md).
 
 A combinação Git + ZIP é agora verificada em uma pasta vazia, sem caches do desenvolvedor, incluindo igualdade entre o módulo embutido no EXE e o fonte publicado.
 
@@ -53,31 +51,31 @@ e módulos atuais presentes no executável distribuído pelo FIFA Friends V12.
 Atualize também a branch `fifa-friends-v12` e aplique somente o novo
 **FIFA-Friends-Assets-Delta-20261102-sobre-20261030.zip** sobre o complemento de
 30/10 já instalado. Ele acrescenta técnicos, imagens, vestiário e recursos externos
-alterados. [Instalação e validação](docs/RELEASE_20261102.md).
+alterados.
 
 ## Entrega conjunta — 30/10/2026
 
 Fontes sincronizados com o Server16 funcional instalado no FIFA Friends V12. O executável distribuído no V12 foi conferido contra 82 módulos embarcados. Esta revisão reúne recuperação do overlay após recarga, avisos/retentativa de carregamento e primeira pessoa com padrão **130°/extra-alta**. O experimento de gramado de alta qualidade permanece oculto e desligado.
 
-Atualize também a branch `fifa-friends-v12` do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) e use **FIFA-Friends-Assets-Complementares-20261030.zip**, completo e substituto do R2. Ela contém as telas, DLLs e correções de finanças, crédito, rankings, público por partida, mascotes e mercado de técnicos. [Detalhes desta entrega](docs/RELEASE_20261030.md).
+Atualize também a branch `fifa-friends-v12` do [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12) e use **FIFA-Friends-Assets-Complementares-20261030.zip**, completo e substituto do R2. Ela contém as telas, DLLs e correções de finanças, crédito, rankings, público por partida, mascotes e mercado de técnicos.
 
 ## Correção R2 — 29/10/2026
 
 Novo executável do Server16 0.2.19 com correções de acesso às pastas de modelos de estádio, cadeiras/público e redes durante aplicação e restauração. Os quatro módulos alterados correspondem à instalação do jogo; os demais módulos e recursos embarcados foram preservados.
 
-Atualize a branch do FIFA Friends V12 e use **FIFA-Friends-Assets-Complementares-20261029-R2.zip**, refeito com o catálogo/fotos atuais e todos os assets necessários da entrega anterior. [Detalhes da R2 e testes](docs/RELEASE_20261029_R2.md).
+Atualize a branch do FIFA Friends V12 e use **FIFA-Friends-Assets-Complementares-20261029-R2.zip**, refeito com o catálogo/fotos atuais e todos os assets necessários da entrega anterior.
 
 ## Entrega conjunta — 29/10/2026
 
 O auxiliar da carreira agora mantém o bootstrap do mercado de técnicos em seu próprio log. O executável pronto publicado com o V12 foi atualizado com esse mesmo fonte, preservando o restante do pacote e a versão **0.2.19**.
 
-Atualize também o V12 para receber finanças revisadas, mercado de técnicos, minifaces, tema dourado e a nova organização dos cards. O **FIFA-Friends-Assets-Complementares-20261029.zip** é um complemento completo de assets, incluindo a integração visual da instalação de referência; deve ser extraído depois do código na base FIFA Friends. Saves e bancos pessoais não acompanham a entrega. [Instalação e validação](docs/RELEASE_20261029.md).
+Atualize também o V12 para receber finanças revisadas, mercado de técnicos, minifaces, tema dourado e a nova organização dos cards. O **FIFA-Friends-Assets-Complementares-20261029.zip** é um complemento completo de assets, incluindo a integração visual da instalação de referência; deve ser extraído depois do código na base FIFA Friends. Saves e bancos pessoais não acompanham a entrega.
 
 ## Revisão do overlay — 28/10/2026
 
 O overlay nativo desenha com estado gráfico independente e restaura o estado do FIFA, preservando os vínculos de materiais dos jogadores animados. Limpa também suas referências ao backbuffer antes de redimensionar a janela. Fonte, cabeçalho e `bin/cgfs16_overlay.dll` correspondem aos instalados no FIFA Friends V12.
 
-O executável permanece em **0.2.19**. Esta atualização altera o overlay carregado pelo host do mod; atualize também a branch do V12 para receber competições, copas, perfil do técnico, elenco no vestiário e recuperação de empréstimos. [Detalhes e validação](docs/OVERLAY_20261028.md). Não é necessário reenviar o complemento de assets anterior.
+O executável permanece em **0.2.19**. Esta atualização altera o overlay carregado pelo host do mod; atualize também a branch do V12 para receber competições, copas, perfil do técnico, elenco no vestiário e recuperação de empréstimos. Não é necessário reenviar o complemento de assets anterior.
 
 ## Entrega — 26/10/2026 (0.2.19)
 
@@ -85,7 +83,7 @@ O host nativo do FIFA carrega overlay, câmera e propostas. O Server se conecta 
 
 O V12 recebe comandos diretos do vestiário, prontidão sem recargas repetidas, melhorias de quadro/iluminação e da prévia da partida, além da pose autoral dos onze. Os fontes do Server e seus módulos embutidos no EXE foram conferidos. Código desta branch e executável pronto na branch `fifa-friends-v12` do [V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
 
-Use o complemento completo de **25/10/2026** já distribuído e aplique somente **FIFA-Friends-Assets-Delta-20261026.zip** para a pose, junto do código novo. Os 650 assets anteriores continuam iguais e não precisam ser enviados novamente. Não copie runtimes, SQL financeiro ou saves do desenvolvedor. A bancada de cenas/IA é um ZIP opcional separado, executado fora do FIFA. [Notas detalhadas](docs/LOCAL_HOTFIX_20261026.md).
+Use o complemento completo de **25/10/2026** já distribuído e aplique somente **FIFA-Friends-Assets-Delta-20261026.zip** para a pose, junto do código novo. Os 650 assets anteriores continuam iguais e não precisam ser enviados novamente. Não copie runtimes, SQL financeiro ou saves do desenvolvedor. A bancada de cenas/IA é um ZIP opcional separado, executado fora do FIFA.
 
 ### Revisão do carregador — 25/10/2026
 
@@ -95,7 +93,7 @@ O erro `Failed to extract ...: failed to open archive file!` indica falha ao rea
 
 Para reproduzir, execute `python scripts/build_archive_bootloader.py` numa sessão MSVC x64 e depois `build_exe.bat`. O script obtém a versão oficial fixada por SHA-256, aplica `tools/server16_archive_retry.h` e compila sob `build/`; a licença original fica em `tools/pyinstaller-COPYING.txt`. `Server16Python.spec` exige o carregador corrigido. `scripts/repack_bootloader.py` atualiza somente carregador e arquivos de desenvolvimento de um EXE existente, conferindo a igualdade de todo o restante. Os testes ficam em `tests/native_archive_retry_test.cpp` e `tests/test_frozen_payload.py`.
 
-O V12 inclui o módulo nativo de placares de jogos paralelos, confirmado visualmente em 25/10/2026. Ele pertence ao mod e preserva a narração selecionada no Server. A entrega conjunta usa a branch `fifa-friends-v12` do V12 e seu complemento de assets; o executável atualizado é publicado nessa branch. A suíte pública isolada e os limites de cobertura estão documentados em `ModCarrerMode/docs/RELEASE_20261025.md` no repositório do V12.
+O V12 inclui o módulo nativo de placares de jogos paralelos, confirmado visualmente em 25/10/2026. Ele pertence ao mod e preserva a narração selecionada no Server. A entrega conjunta usa a branch `fifa-friends-v12` do V12 e seu complemento de assets; o executável atualizado é publicado nessa branch.
 
 ### Auxiliares sem console — 25/10/2026
 
@@ -124,7 +122,7 @@ O executável pronto está em [FIFA Friends V12](https://github.com/igor1043/fif
 ## Atualização — 21/10/2026
 
 - **Câmeras — revisão 14:** bordas sem arrasto e escala central preservada, confirmadas pelo usuário em RAM. A busca da bola fica mais suave na primeira pessoa, com olhadas breves para os pés em condução. A terceira pessoa gira mais rápido sem a posse. Os movimentos novos aguardam validação visual da DLL final.
-- **Diagnóstico por sessão:** ao abrir FIFA pelo Server, os logs ativos são zerados. Cada mod tem seu próprio arquivo, e o encerramento gera um ZIP com última tela, comparação de 729 arquivos, DLLs e dados do dump da tentativa, quando disponível. Os ZIPs ficam em `runtime/diagnostics/`. [Uso e limites da coleta](docs/DIAGNOSTICO_INICIALIZACAO.md).
+- **Diagnóstico por sessão:** ao abrir FIFA pelo Server, os logs ativos são zerados. Cada mod tem seu próprio arquivo, e o encerramento gera um ZIP com última tela, comparação de 729 arquivos, DLLs e dados do dump da tentativa, quando disponível. Os ZIPs ficam em `runtime/diagnostics/`.
 - **Câmeras — revisão 13:** primeira pessoa usa compensação de lente mais leve e sem ampliação adicional, com a nitidez confirmada em teste de RAM. As viradas fortes limitam o atraso para evitar a cabeça no enquadramento. A terceira pessoa acompanha mais a bola sem a posse, mantendo a órbita suave. Testes isolados aprovados; os ajustes finais aguardam validação no jogo.
 - **Câmeras — revisão 12:** acompanhamento nas cobranças e reinícios, correção da pose após a transição nativa e flags de desfoque desligadas nos quadros modificados. A terceira pessoa reduz oscilações e limita as viradas; no modo de um jogador, o vínculo do atleta permanece fixo. Testes isolados aprovados; usuário relatou melhora significativa. Casos específicos ainda aguardam validação.
 - **Física de roupas:** começa desligada e mantém a escolha salva, inclusive ao atualizar a instalação.
@@ -145,11 +143,9 @@ No hub da carreira, **Select + Start** ou **F12** abre um painel próprio com
 é reconhecida automaticamente. Revise o pedido e saia da carreira sem salvar novamente. Aguarde a confirmação
 no menu principal e carregue o mesmo save. O Server guarda um backup antes de aplicar.
 Clubes e divisões acompanham os dados do save; verba está disponível para treinador.
-Veja o [guia da overlay da carreira](docs/OVERLAY_CARREIRA.md) para uso, limites e validação.
 
 O público automático também dá mais peso à Libertadores e às competições
-brasileiras, usando a próxima partida real do clube. Veja os valores e ajustes
-no [guia de público por competição](docs/PUBLICO_COMPETICOES.md).
+brasileiras, usando a próxima partida real do clube.
 
 ## Aberturas — 18/10/2026
 
@@ -254,8 +250,6 @@ Use o Server com o **FIFA Friends V12 e seus módulos compatíveis**. Estádios,
 
 ## Mais informações
 
-- [Roteiro de uso](docs/ROTEIRO_FIFA_FRIENDS.md).
-- [Guia técnico: arquivos, execução pelos fontes e testes](docs/GUIA_TECNICO.md).
 - [Todas as melhorias do FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
 
 ## Atualização 0.2.18
@@ -263,5 +257,4 @@ Use o Server com o **FIFA Friends V12 e seus módulos compatíveis**. Estádios,
 Cenas de técnico e mascote com cinco ângulos frontais, chance de 40% por parada
 e intervalo mínimo de 10 segundos. Revisão do hino/replay, padrão da torcida
 visitante, texturas entre partidas e auxiliares portáteis.
-Consulte o [changelog de 25/10/2026](docs/RELEASE_20261025.md).
 A sala interna experimental do VAR foi retirada; a cabine de campo permanece.

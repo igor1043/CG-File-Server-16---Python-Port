@@ -97,3 +97,6 @@ bin/server16_first_person_v[2-4].dll
 # Rejected camera experiments; v14 is the current runtime.
 bin/server16_first_person_v[8-9].dll
 bin/server16_first_person_v10.dll
+
+# Local study notes are archived outside the published projects.
+/[Dd][Oo][Cc][Ss]/
