@@ -224,5 +224,11 @@
   "module.cloth_physics_note": "Física de la ropa: se aplica en directo y a los siguientes partidos.",
   "button.clear_logs": "Limpiar logs",
   "message.logs_cleared": "Logs limpiados: {count} archivos, {size} MB liberados.",
-  "message.logs_busy": "{count} archivo(s) en uso; los otros logs fueron limpiados."
+  "message.logs_busy": "{count} archivo(s) en uso; los otros logs fueron limpiados.",
+  "button.empty_cache_logs": "Vaciar cach\u00e9 y logs",
+  "storage.title": "Limpieza de cach\u00e9 y logs",
+  "storage.confirm": "\u00bfVaciar las cach\u00e9s generadas y los logs antiguos?\n\nSe conservar\u00e1n los dos \u00faltimos diagn\u00f3sticos. Se preservan partidas, historial, ajustes e im\u00e1genes originales. Los recursos pueden tardar m\u00e1s en abrirse la pr\u00f3xima vez.",
+  "storage.queued": "Limpieza solicitada.\n\nCon FIFA abierto, los recursos 3D se limpiar\u00e1n al cerrarlo. La solicitud permanece programada aunque cierres Server16.",
+  "storage.done": "Limpieza completada: {size} MB liberados en {count} archivos de cach\u00e9.\n\nSe conservaron los datos de las carreras y los dos \u00faltimos diagn\u00f3sticos.",
+  "storage.busy": "{count} archivo(s) siguen en uso o sin acceso. Se reintentar\u00e1 la limpieza; no se contaron como espacio liberado."
 }

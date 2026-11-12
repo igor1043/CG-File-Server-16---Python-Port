@@ -108,9 +108,18 @@ class CacheMaintenanceTests(unittest.TestCase):
         def unlink(path,*a,**kw):
             if path==p:raise PermissionError('in use')
             return original(path,*a,**kw)
-        with patch.object(Path,'unlink',unlink):report=self.clean()
+        with patch.object(Path,'unlink',unlink):report=self.clean(quarantine=True)
         target=self.root.parent/('FIFA16-cache-descartavel-'+self.root.name)/p.relative_to(self.root)
         self.assertTrue(target.exists());self.assertFalse(p.exists());self.assertEqual(report.moved_bytes,3);self.assertEqual(report.released_bytes,0)
+    def test_locked_path_stays_in_place_without_explicit_quarantine(self):
+        p=self.file(cache.MARKET+'packages/managers_'+'b'*64+'.big',b'tmp')
+        original=Path.unlink
+        def unlink(path,*args,**kwargs):
+            if path==p:raise PermissionError('in use')
+            return original(path,*args,**kwargs)
+        with patch.object(Path,'unlink',unlink):report=self.clean()
+        self.assertEqual(p.read_bytes(),b'tmp');self.assertEqual(report.moved_bytes,0)
+        self.assertEqual(report.released_bytes,0);self.assertEqual(len(report.failed),1)
     def test_dry_run_and_second_sweep_are_idempotent(self):
         p=self.file(cache.MARKET+'packages/managers_'+'a'*64+'.big')
         report=self.clean(dry_run=True);self.assertEqual(report.files,1);self.assertTrue(p.exists())

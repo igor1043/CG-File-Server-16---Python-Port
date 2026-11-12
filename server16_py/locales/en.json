@@ -334,5 +334,11 @@
   "module.cloth_physics_note": "Cloth physics: applies live and to future matches.",
   "button.clear_logs": "Clear logs",
   "message.logs_cleared": "Logs cleared: {count} files, {size} MB freed.",
-  "message.logs_busy": "{count} file(s) are busy; the other logs were cleared."
+  "message.logs_busy": "{count} file(s) are busy; the other logs were cleared.",
+  "button.empty_cache_logs": "Empty cache and logs",
+  "storage.title": "Cache and log cleanup",
+  "storage.confirm": "Empty generated mod caches and old session logs?\n\nThe last two diagnostic records will remain. Saves, history, settings and original artwork are preserved. Resources may take longer to open next time.",
+  "storage.queued": "Cleanup requested.\n\nWhile FIFA is running, 3D resources will be cleaned after it exits. The request remains scheduled even if you close Server16.",
+  "storage.done": "Cleanup completed: {size} MB released in {count} cache files.\n\nCareer data and the last two diagnostic records were preserved.",
+  "storage.busy": "{count} file(s) remain locked or inaccessible. Cleanup will retry; they were not counted as released space."
 }

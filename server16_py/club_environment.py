@@ -7,7 +7,7 @@ from pathlib import Path
 import argparse,contextlib,ctypes,hashlib,json,os,runpy,shutil,subprocess,sys,time,traceback,threading,uuid
 
 ENTRIES={'room':'prepare_native_room_components_r46_20261022.py','bank':'watch_r57.py','preview':'prepare.py'}
-RUNTIME_COPY_PROTOCOL=2
+RUNTIME_COPY_PROTOCOL=3
 _runtime_copy_lock=threading.RLock()
 
 def atomic_copy(source,target):
@@ -68,7 +68,7 @@ def _prepare_runtime(game):
     for group,entry in ENTRIES.items():
         if not (source/group/entry).is_file():raise FileNotFoundError(source/group/entry)
         for file in (source/group).glob('*'):
-            if file.is_file() and file.suffix in ('.py','.big'):atomic_copy(file,runtime/group/file.name)
+            if file.is_file() and file.suffix in ('.py','.big') and not file.name.startswith('test_'):atomic_copy(file,runtime/group/file.name)
         (runtime/group/'runtime').mkdir(parents=True,exist_ok=True)
     # The separate 32-bit DB bridge also uses the shipped helper source.
     atomic_copy(Path(__file__).with_name('db_worker.py'),runtime/'preview/db_worker.py')
@@ -76,6 +76,9 @@ def _prepare_runtime(game):
     for file in seeds.rglob('*'):
         if not file.is_file():continue
         relative=file.relative_to(seeds)
+        # Club artwork is read directly from ModCarrerMode/data. Mirroring all
+        # custom PNGs here duplicated hundreds of MB on every installation.
+        if relative.parts[0]=='current_dressing_room' or relative.parts[:2]==('room','clubs'):continue
         # Source is authoritative for executable helpers/templates. An older
         # seed must not undo the update made in the loop above on every launch.
         if file.suffix in ('.py','.big') and (source/relative).is_file():continue
@@ -126,8 +129,11 @@ def supervise(game,pid):
     lock=kernel.CreateMutexW(None,False,'Local\\Server16ClubEnvironment_'+str(pid))
     if not lock:raise ctypes.WinError(ctypes.get_last_error())
     if ctypes.get_last_error()==183:kernel.CloseHandle(lock);return
-    children={};streams={};next_start={}
+    children={};streams={};next_start={};maintenance=None
     try:
+        from .session_logs import SessionLogs
+        maintenance=SessionLogs(startup_clear=False,exclude=(game/'runtime/server16.log',))
+        maintenance.bind(game)
         source,runtime=prepare_runtime(game)
         log=runtime/'supervisor.log'
         with log.open('a',encoding='utf8') as stream:stream.write(f'game_pid={pid} portable workers enabled\n')
@@ -152,6 +158,18 @@ def supervise(game,pid):
             try:child.wait(timeout=5)
             except subprocess.TimeoutExpired:child.kill()
         for stream in streams.values():stream.close()
+        if maintenance is not None:maintenance.close()
+        # This supervisor outlives the GUI when the user closes Server16 first.
+        # It provides a safe end-of-game sweep as well as next-start recovery.
+        with contextlib.suppress(Exception):
+            from .cache_maintenance import maintain,safe
+            from .session_storage import sweep_extractions
+            pending=game/'runtime/cache_maintenance/pending.json';purge=False
+            if safe(game,pending) and pending.is_file():
+                value=json.loads(pending.read_bytes());purge=isinstance(value,dict) and value.get('purge') is True
+            report=maintain(game,purge=purge)
+            if not report.deferred and not report.failed and safe(game,pending):pending.unlink(missing_ok=True)
+            if getattr(sys,'frozen',False):sweep_extractions()
         kernel.CloseHandle(lock)
 
 def main(argv=None):

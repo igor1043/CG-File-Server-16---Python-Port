@@ -17,16 +17,17 @@ static wchar_t test_mapping_name[100];
 #include "../server16_py/d3d_overlay/stadium_selector_bridge.cpp"
 #include <cassert>
 static void print_log(const char *message) { puts(message); }
+void ultrawide_cursor_position(POINT*) {} // The renderer has its own independent tests.
 int main() {
     setvbuf(stdout,nullptr,_IONBF,0);
     static_assert(sizeof(SelectorShared)==1576,"Python/native protocol size mismatch");
     const WORD combo=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
-    assert(audio_combo_edge(combo,0));
-    assert(audio_combo_edge(combo,XINPUT_GAMEPAD_START));
-    assert(audio_combo_edge(combo,XINPUT_GAMEPAD_BACK));
-    assert(!audio_combo_edge(combo,combo));
-    assert(!audio_combo_edge(XINPUT_GAMEPAD_START,0));
-    assert(!audio_combo_edge(XINPUT_GAMEPAD_BACK,0));
+    assert(selector_combo_edge(combo,0));
+    assert(selector_combo_edge(combo,XINPUT_GAMEPAD_START));
+    assert(selector_combo_edge(combo,XINPUT_GAMEPAD_BACK));
+    assert(!selector_combo_edge(combo,combo));
+    assert(!selector_combo_edge(XINPUT_GAMEPAD_START,0));
+    assert(!selector_combo_edge(XINPUT_GAMEPAD_BACK,0));
     assert(audio_pad_action(true,XINPUT_GAMEPAD_X)==1);
     assert(audio_pad_action(true,XINPUT_GAMEPAD_Y)==2);
     assert(audio_pad_action(true,0)==0);
@@ -126,7 +127,7 @@ int main() {
     // synthetic keyboard/gamepad snapshots (no real key or pad events).
     auto reset_events=[&](LONG mode) {
         shared->enabled=mode; shared->visible=0;
-        shared->read_index=shared->write_index=0; g_start_pending=0;
+        shared->read_index=shared->write_index=0;
     };
     for (LONG mode : {1L,2L,3L}) {
         reset_events(mode);
@@ -135,16 +136,11 @@ int main() {
         assert(handle_shortcut(true,true,true,0,0,0,200)); // F12 closes without applying.
         assert(shared->events[1].kind==11);
     }
-    reset_events(1);
-    assert(!handle_shortcut(true,false,false,XINPUT_GAMEPAD_START,XINPUT_GAMEPAD_START,0,100));
-    assert(!handle_shortcut(true,false,false,XINPUT_GAMEPAD_START,0,XINPUT_GAMEPAD_START,449));
-    assert(handle_shortcut(true,false,false,XINPUT_GAMEPAD_START,0,XINPUT_GAMEPAD_START,450));
-    assert(shared->events[0].kind==1);
-    assert(!handle_shortcut(true,true,false,XINPUT_GAMEPAD_START,0,XINPUT_GAMEPAD_START,500));
-    for (LONG mode : {2L,3L})
+    for (LONG mode : {1L,2L,3L})
     for (WORD first : {WORD(0),WORD(XINPUT_GAMEPAD_START),WORD(XINPUT_GAMEPAD_BACK)}) {
         reset_events(mode);
         if (first) assert(!handle_shortcut(true,false,false,first,first,0,100));
+        if (first) assert(!handle_shortcut(true,false,false,first,0,first,1100)); // A long solo press never opens.
         assert(handle_shortcut(true,false,false,combo,combo&~first,first,200));
         assert(shared->events[0].kind==1);
         assert(!handle_shortcut(true,true,false,combo,0,combo,300)); // Holding never repeats.
@@ -201,6 +197,6 @@ int main() {
     DestroyWindow(child); DestroyWindow(root); DestroyWindow(other);
     detach_channel();
     UnmapViewOfFile(shared); CloseHandle(map);
-    puts("F12/Start/Select+Start dispatch, late channel, child/root, restart and timer tests passed");
+    puts("F12/Select+Start dispatch, solo-button pass-through, late channel, child/root, restart and timer tests passed");
     return 0;
 }

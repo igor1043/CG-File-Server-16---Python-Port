@@ -80,11 +80,10 @@ static DWORD filter_state(XInputEntry &entry, DWORD index, XINPUT_STATE *state)
         state->dwPacketNumber = (DWORD)InterlockedIncrement(&g_packet);
     } else {
         if (selector_shortcut_enabled()) {
-            if (selector_audio_mode()) {
-                const WORD combo=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
-                if ((pad.wButtons & combo)==combo) pad.wButtons &= (WORD)~combo;
-            } else if (!(pad.wButtons & XINPUT_GAMEPAD_BACK))
-                pad.wButtons &= (WORD)~XINPUT_GAMEPAD_START;
+            const WORD combo=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
+            // Consume both buttons through release, including when only one
+            // remains held before the panel captures the next input sample.
+            if ((pad.wButtons & combo)==combo) held.buttons |= combo;
         }
         WORD previous_buttons = held.buttons;
         held.buttons &= pad.wButtons;

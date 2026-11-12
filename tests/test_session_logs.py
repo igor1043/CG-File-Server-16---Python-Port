@@ -77,11 +77,14 @@ class SessionLogTests(unittest.TestCase):
             root=Path(folder);name='20260101_120000_000001_pid18'
             old=self.file(root,'runtime/diagnostics/'+name+'/logs/native.log')
             archive=self.file(root,'runtime/diagnostics/'+name+'.zip')
+            previous=self.file(root,'runtime/diagnostics/20260101_180000_000001_pid20/summary.json')
+            os.utime(old.parent.parent,(1,1));os.utime(archive,(1,1))
             active=root/'runtime/diagnostics/20260102_120000_000001_pid19'
             active_log=self.file(root,str(active.relative_to(root))+'/timeline.jsonl')
             user=self.file(root,'runtime/diagnostics/my-notes.txt')
             logs.maintain(root,reset=True,protected=(active,))
             self.assertFalse(old.exists());self.assertFalse(archive.exists())
+            self.assertTrue(previous.exists())
             self.assertTrue(active_log.exists());self.assertEqual(user.read_bytes(),b'old evidence\n')
 
     def test_new_diagnostic_created_after_startup_is_not_deleted(self):

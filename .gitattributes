@@ -56,3 +56,36 @@ native_mods/career_native/**/*.def text eol=lf whitespace=cr-at-eol
 native_mods/career_native/**/*.cmd text eol=lf whitespace=cr-at-eol
 .gitattributes text eol=lf
 native_mods/career_native/src/catalogs/global_brazil_league.inc whitespace=cr-at-eol,-blank-at-eol
+
+# Preserve validated shared source bytes.
+"server16_py/cache_maintenance.py" -text whitespace=cr-at-eol
+"server16_py/d3d_overlay/mod_overlay_screens.h" -text whitespace=cr-at-eol
+"server16_py/d3d_overlay/mod_xinput_gate.cpp" -text whitespace=cr-at-eol
+"server16_py/d3d_overlay/stadium_selector_bridge.cpp" -text whitespace=cr-at-eol
+"server16_py/financial_incorporation_ui.py" -text whitespace=cr-at-eol
+"server16_py/locales/en.json" -text whitespace=cr-at-eol
+"server16_py/locales/es.json" -text whitespace=cr-at-eol
+"server16_py/locales/pt.json" -text whitespace=cr-at-eol
+"server16_py/locales_data.py" -text whitespace=cr-at-eol
+"server16_py/loose_ui.py" -text whitespace=cr-at-eol
+"server16_py/movie_options.py" -text whitespace=cr-at-eol
+"server16_py/presentation_options_catalog.py" -text whitespace=cr-at-eol
+"server16_py/scoreboard_options.py" -text whitespace=cr-at-eol
+"server16_py/scoreboard_options_ui.py" -text whitespace=cr-at-eol
+"server16_py/session_logs.py" -text whitespace=cr-at-eol
+"server16_py/stadium_options.py" -text whitespace=cr-at-eol
+"server16_py/stadium_options_nav.py" -text whitespace=cr-at-eol
+"server16_py/stadium_options_ui.py" -text whitespace=cr-at-eol
+"server16_py/startup_diagnostics.py" -text whitespace=cr-at-eol
+"tests/native_input_gate_test.cpp" -text whitespace=cr-at-eol
+"tests/native_selector_bridge_test.cpp" -text whitespace=cr-at-eol
+"tests/test_financial_incorporation_ui.py" -text whitespace=cr-at-eol
+"tests/test_match_presentation_options.py" -text whitespace=cr-at-eol
+
+"tests/test_scoreboard_options.py" -text whitespace=cr-at-eol
+
+"scripts/build_career_overlay.cmd" -text whitespace=cr-at-eol
+
+"tests/test_cache_maintenance.py" -text whitespace=cr-at-eol
+
+"tests/test_session_logs.py" -text whitespace=cr-at-eol

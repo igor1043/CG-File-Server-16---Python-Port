@@ -26,6 +26,7 @@ from .file_tools import (
 from .dialogs import StadiumChoiceDialog
 from .match_string_patcher import patch_match_string
 from .stadium_catalog import prematch_page
+from .stadium_options import owns_settings
 from .stadium_transaction import StadiumAssetTransaction
 from .stadium_match_assets import stage_match_assets
 
@@ -61,7 +62,8 @@ class StadiumRuntime:
         # FIFA is already loading the selected stadium's textures.
         return bool(((manual and manual[0][:3] == self._context()) or automatic or pending) and
                     not getattr(app, '_stadium_fixture_entered', False) and
-                    (prematch_page(previous_page) or 'stadiumpan' in (previous_page or '').lower()))
+                    (prematch_page(previous_page) or 'stadiumpan' in (previous_page or '').lower() or
+                     (previous_page or '').casefold()=='game/screens/settings/gamesettings'))
 
     def _active_injection_slot(self) -> str | None:
         app = self.app
@@ -100,7 +102,7 @@ class StadiumRuntime:
         if context != self._context() or not app.memory.is_open() or getattr(app, '_closing', False) or getattr(app, '_match_audio_ended', False):
             raise RuntimeError('The match context changed while preparing stadium assets')
         preview = 'stadiumpan' in (app.lastpagename or '').lower() and not getattr(app, '_stadium_fixture_entered', False)
-        if getattr(app, '_stadium_fixture_entered', False) or not (prematch_page(app.lastpagename) or preview):
+        if getattr(app, '_stadium_fixture_entered', False) or not (prematch_page(app.lastpagename) or preview or owns_settings(app)):
             raise RuntimeError('The match left the stadium selection screen before application finished')
         if self._active_injection_slot() == str(injid):
             raise RuntimeError('The destination stadium ID became active; previous stadium preserved')
@@ -672,6 +674,10 @@ class StadiumRuntime:
             app._last_stadium_applied_signature = app._stadium_task_signature
             app._update_audio_overview()
             app.log(f"Applied stadium {stad_name} from [{payload['section_name']}] {payload['section_id']} using injID={payload['injid']}")
+            options=getattr(app,'scoreboard_options',None)
+            if options is not None:
+                try:options.stadium_applied(stad_name,payload['injid'])
+                except Exception as error:app.log('Stadium applied; native options preview refresh failed',error)
         finally:
             try:
                 if not activated:

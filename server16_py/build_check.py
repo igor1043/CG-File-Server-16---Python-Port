@@ -13,7 +13,8 @@ def run(output):
              'server16_py.career_context','server16_py.career_options','server16_py.career_retirement_runtime','server16_py.frontend_stadium','server16_py.gamepad_panel',
              'server16_py.stadium_match_assets','server16_py.match_state','server16_py.native_asset_cleanup',
              'server16_py.extra_scenes_panel','server16_py.substitution_audio','server16_py.substitution_events',
-             'server16_py.substitution_audio_settings','server16_py.session_logs','server16_py.cache_maintenance','server16_py.session_storage')
+             'server16_py.substitution_audio_settings','server16_py.session_logs','server16_py.cache_maintenance','server16_py.session_storage',
+             'server16_py.scoreboard_options','server16_py.scoreboard_options_ui')
     result={'version':__version__,'frozen':bool(getattr(sys,'frozen',False)),'modules':{},'binaries':{},'ok':True}
     for name in modules:
         try:importlib.import_module(name);result['modules'][name]='ok'
@@ -24,6 +25,34 @@ def run(output):
     result['external_overlay_injector_absent']=not (root/'bin/cgfs16_inject.exe').exists()
     from .cache_maintenance import policy_assets
     result['cache_protected_asset_policy_valid']=policy_assets() is not None
+    from .cache_maintenance import LIMITS_MIB,maintain
+    from .locales_data import LOCALE_CATALOGS
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='Server16-storage-selftest-') as directory:
+        fixture=Path(directory)
+        for relative in ('ModCarrerMode/data','data/sceneassets','runtime'):(fixture/relative).mkdir(parents=True)
+        cache=fixture/('ModCarrerMode/runtime/manager_market/texture_cache/'+'a'*64+'.dds')
+        cache.parent.mkdir(parents=True);cache.write_bytes(b'rebuildable')
+        original=fixture/'ModCarrerMode/data/original.png';original.write_bytes(b'original')
+        history=fixture/'ModCarrerMode/data/history.sqlite3';history.write_bytes(b'history')
+        report=maintain(fixture,guard=lambda:False,purge=True,record=False)
+        result['storage_purge_preserves_originals_and_history']=report.files==1 and not cache.exists() and original.read_bytes()==b'original' and history.read_bytes()==b'history'
+    result['storage_button_localized']=all('button.empty_cache_logs' in LOCALE_CATALOGS[key] for key in ('pt','en','es'))
+    result['storage_warm_cache_limit_mib']=sum(LIMITS_MIB.values())
+    result['ok']=result['ok'] and result['storage_purge_preserves_originals_and_history'] and result['storage_button_localized']
+    # Optional installed-asset check. Build only in a temporary directory,
+    # including under the frozen interpreter; never replace the game's UI.
+    import os
+    asset_root=os.environ.get('SERVER16_SELFTEST_ASSET_ROOT')
+    if asset_root:
+        try:
+            from .scoreboard_options_ui import build
+            with tempfile.TemporaryDirectory(prefix='Server16-scoreboard-selftest-') as directory:
+                fixture=Path(directory);asset_root=Path(asset_root)
+                record=build(asset_root,asset_root/'ModCarrerMode/source/native_mods/scoreboard_settings/gamesettings.original.big',fixture/'gamesettings.big',fixture/'catalog.json')
+                result['scoreboard_native_ui']=record['original_rows_preserved'] and len(record['labels'])>=2
+        except Exception as error:result['scoreboard_native_ui']=str(error)
+        result['ok']=result['ok'] and result['scoreboard_native_ui'] is True
     result['ok']=result['ok'] and result['cache_protected_asset_policy_valid']
     result['ok']=result['ok'] and result['external_overlay_injector_absent']
     result['gamepad_package_present']=importlib.util.find_spec('vgamepad') is not None

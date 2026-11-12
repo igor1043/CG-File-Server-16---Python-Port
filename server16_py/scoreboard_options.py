@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import struct
 import threading
+from .presentation_options_catalog import packages,available
 
 PAGE='game/screens/settings/GameSettings'
 UI_PATH='data/ui/game/screens/settings/gamesettings.big'
@@ -37,10 +38,9 @@ class Catalog:
 
 
 def discover(game):
-    base=Path(game)/'ScoreBoardGBD'
-    packages=tuple(sorted((p.name for p in base.iterdir() if p.is_dir() and valid_name(p.name)),key=str.casefold)) if base.is_dir() else ()
-    if len(packages)>MAX_OPTIONS-2:raise ValueError('Há mais placares que o seletor suporta')
-    return Catalog(packages)
+    names=packages(game,'ScoreBoardGBD','scoreboard',{'scoreboard','hometeamscoreboard','scoreboardcatalog'})
+    if len(names)>MAX_OPTIONS-2:raise ValueError('Há mais placares que o seletor suporta')
+    return Catalog(names)
 
 
 def load_choice(game):
@@ -54,11 +54,11 @@ def load_choice(game):
     name=ini.get('Scoreboard','Package',fallback='')
     if mode!='manual' or not valid_name(name):raise ValueError('Placar manual inválido')
     # A removed package cannot block future matches or name another path.
-    return name if (Path(game)/'ScoreBoardGBD'/name).is_dir() else None
+    return name if available(game,'ScoreBoardGBD','scoreboard',name) else None
 
 
 def save_choice(game,choice):
-    if choice is not None and choice!='' and (not valid_name(choice) or not (Path(game)/'ScoreBoardGBD'/choice).is_dir()):raise ValueError('Placar não instalado')
+    if choice is not None and choice!='' and not available(game,'ScoreBoardGBD','scoreboard',choice):raise ValueError('Placar não instalado')
     mode='automatic' if choice is None else 'native' if choice=='' else 'manual'
     text='[Scoreboard]\nMode='+mode+'\n'
     if mode=='manual':text+='Package='+choice+'\n'
@@ -83,7 +83,10 @@ def verified_ui(game,record):
     if record.get('schema')!=1:raise ValueError('Catálogo do seletor inválido')
     data=bytearray((game/UI_PATH).read_bytes());offset=record['initial_value_offset']
     if not isinstance(offset,int) or not 1<=offset<=len(data)-4 or data[offset-1]!=183:raise ValueError('Posição do seletor inválida')
-    stable=bytes(data[:offset])+bytes(4)+bytes(data[offset+4:])
+    stable=bytearray(data)
+    for mutable in record.get('mutable_value_offsets',[offset]):
+        if not isinstance(mutable,int) or not 1<=mutable<=len(data)-4 or data[mutable-1]!=183:raise ValueError('Posição do seletor inválida')
+        stable[mutable:mutable+4]=bytes(4)
     if hashlib.sha256(stable).hexdigest()!=record['ui_stable_sha256']:raise ValueError('A tela foi alterada por outra revisão; atualização interrompida')
     return data,offset
 
@@ -97,6 +100,15 @@ def update_initial_choice(game,catalog):
     if struct.unpack_from('<i',data,offset)[0]==value:return
     struct.pack_into('<i',data,offset,value)
     path=game/UI_PATH;temp=path.with_suffix('.big.scoreboard-new');temp.write_bytes(data);os.replace(temp,path)
+
+
+def update_movie_initial(game,catalog):
+    from .movie_options import selected_index as movie_index
+    game=Path(game);record=json.loads((game/CATALOG).read_bytes())
+    if record.get('movie_signature')!=catalog.signature:raise ValueError('Lista de vídeos desatualizada')
+    data,_=verified_ui(game,record);offset=record['movie_initial_offset'];value=movie_index(game,catalog)
+    if struct.unpack_from('<i',data,offset)[0]==value:return
+    struct.pack_into('<i',data,offset,value);path=game/UI_PATH;temp=path.with_suffix('.big.movie-new');temp.write_bytes(data);os.replace(temp,path)
 
 
 def _request(game,pid,created):
@@ -144,6 +156,8 @@ class ScoreboardOptions:
         self.app=app;self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='Server16Scoreboard')
         self.root=None;self.stamp=None;self.bound=False;self.closed=False;self.owner_pid=0
         self._pending=0;self._lock=threading.Lock()
+        self.enter_stamp=None;self.open_stamp=None;self.last_page=None;self.movie_stamp=None
+        self.stadium=None;self.stadium_context=None
 
     @property
     def busy(self):
@@ -165,20 +179,27 @@ class ScoreboardOptions:
         self.root=game;self.stamp=None;self.bound=False
         self._submit(self._prepare,game)
 
-    def _prepare(self,game):
+    def _prepare(self,game,refresh=None):
         try:
+            from . import movie_options
+            movies=movie_options.discover(game)
             catalog=discover(game);manifest=game/CATALOG;rebuild=True
             if manifest.is_file():
                 record=json.loads(manifest.read_bytes())
                 if (game/UI_PATH).is_file():verified_ui(game,record)
-                rebuild=record.get('signature')!=catalog.signature or record.get('crowd_row')!=65001 or not (game/UI_PATH).is_file()
+                rebuild=(record.get('signature')!=catalog.signature or record.get('movie_signature')!=movies.signature
+                    or record.get('native_options_revision')!=2 or record.get('stadium_revision')!=self.stadium or not (game/UI_PATH).is_file())
             if rebuild:
                 from .scoreboard_options_ui import build
                 template=game/'ModCarrerMode/source/native_mods/scoreboard_settings/gamesettings.original.big'
                 if not template.is_file():raise FileNotFoundError('Modelo da tela de placares não instalado')
-                build(game,template,game/UI_PATH,manifest)
+                build(game,template,game/UI_PATH,manifest,stadium=self.stadium)
             update_initial_choice(game,catalog)
+            update_movie_initial(game,movies)
             if self.root==game:self.bound=True
+            if rebuild and refresh:
+                from .stadium_options import publish_refresh
+                publish_refresh(self.app,refresh)
         except Exception as error:self.app.log('Scoreboard selector initialization failed',error)
 
     def poll(self,page):
@@ -187,6 +208,15 @@ class ScoreboardOptions:
         if not pid:return
         if pid!=self.owner_pid:
             self.owner_pid=pid;self._submit(self._prepare,self.root)
+        from .stadium_options import poll_native_options
+        poll_native_options(self,page,pid)
+        from . import movie_options
+        movie_path=self.root/movie_options.REQUEST
+        try:
+            info=movie_path.stat();stamp=(pid,info.st_mtime_ns,info.st_size)
+            if stamp!=self.movie_stamp:
+                self.movie_stamp=stamp;self._submit(self._apply_movie,self.root,pid)
+        except FileNotFoundError:pass
         path=self.root/REQUEST
         try:
             info=path.stat();stamp=(pid,info.st_mtime_ns,info.st_size)
@@ -210,6 +240,20 @@ class ScoreboardOptions:
             self.app.apply_scoreboard_runtime()
             self.app.log('Scoreboard chosen in native game options: '+catalog.labels[index])
         except Exception as error:self.app.log('Failed to apply native scoreboard choice',error)
+
+    def _apply_movie(self,game,pid):
+        if self.closed or self.root!=game or self.app.memory.process_id!=pid:return
+        try:
+            from . import movie_options
+            if not self.app.module_enabled('Movies'):raise RuntimeError('Ative o módulo Movies no Server16')
+            if movie_options.adopt_pending(self.app):
+                update_movie_initial(game,movie_options.discover(game));self.app.apply_movie_runtime()
+                self.app.log('Pre-match movie chosen in native game options')
+        except Exception as error:self.app.log('Failed to apply native movie choice',error)
+
+    def stadium_applied(self,name,slot):
+        from .stadium_options import applied_stadium
+        applied_stadium(self,name,slot)
 
     def close(self):
         self.closed=True;self.executor.shutdown(wait=False,cancel_futures=True)

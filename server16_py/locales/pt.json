@@ -273,5 +273,11 @@
   "module.cloth_physics_note": "Física de roupas: aplica no jogo aberto e nas próximas partidas.",
   "button.clear_logs": "Limpar logs",
   "message.logs_cleared": "Logs limpos: {count} arquivos, {size} MB liberados.",
-  "message.logs_busy": "{count} arquivo(s) em uso; os demais logs foram limpos."
+  "message.logs_busy": "{count} arquivo(s) em uso; os demais logs foram limpos.",
+  "button.empty_cache_logs": "Esvaziar cache e logs",
+  "storage.title": "Limpeza de cache e logs",
+  "storage.confirm": "Esvaziar os arquivos tempor\u00e1rios dos mods e os logs antigos?\n\nAs duas \u00faltimas evid\u00eancias de diagn\u00f3stico ser\u00e3o mantidas. Saves, hist\u00f3ricos, configura\u00e7\u00f5es e imagens originais ser\u00e3o preservados. A pr\u00f3xima abertura dos recursos pode demorar um pouco mais.",
+  "storage.queued": "Limpeza solicitada.\n\nCom o FIFA aberto, os recursos 3D ser\u00e3o limpos ap\u00f3s o fechamento. O pedido permanece agendado mesmo se voc\u00ea fechar o Server16.",
+  "storage.done": "Limpeza conclu\u00edda: {size} MB liberados em {count} arquivos de cache.\n\nForam preservados os dados das carreiras e as duas \u00faltimas evid\u00eancias de diagn\u00f3stico.",
+  "storage.busy": "{count} arquivo(s) permaneceram em uso ou sem acesso. A limpeza ser\u00e1 tentada novamente; eles n\u00e3o foram contados como espa\u00e7o liberado."
 }

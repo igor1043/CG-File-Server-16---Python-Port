@@ -27,7 +27,7 @@ static WNDPROC g_original;
 static WNDPROC g_render_original;
 static bool g_keyboard[256] = {};
 static WORD g_buttons;
-static DWORD g_start_pending, g_repeat_at;
+static DWORD g_repeat_at;
 static int g_direction;
 static DWORD g_release_until;
 static BYTE g_held_keys[256];
@@ -70,10 +70,10 @@ extern "C" BOOL selector_shortcut_enabled(void) {
     const auto channel=std::atomic_load(&g_channel);
     return alive(channel.get()) && channel->enabled && channel->ready==7 && game_foreground(g_window);
 }
-// Modes 2 (match) and 3 (career) share Select+Start and panel navigation.
-// The career panel is rendered and dispatched separately by Python.
+// Every panel uses Select+Start. Python dispatches the panel for its context.
 extern "C" BOOL selector_audio_mode(void) { const auto channel=std::atomic_load(&g_channel);return channel && (channel->enabled==2 || channel->enabled==3); }
-static bool audio_combo_edge(WORD buttons,WORD previous) {
+extern "C" BOOL selector_career_mode(void) { const auto channel=std::atomic_load(&g_channel);return channel && channel->enabled==3; }
+static bool selector_combo_edge(WORD buttons,WORD previous) {
     const WORD combo=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
     return (buttons&combo)==combo && (previous&combo)!=combo;
 }
@@ -123,17 +123,7 @@ static void emit(LONG kind,LONG value=0) {
     MemoryBarrier(); InterlockedExchange(&g_selector->write_index,next);
 }
 static bool handle_shortcut(bool enabled,bool shown,bool keyboard_edge,WORD buttons,WORD pressed,WORD previous,DWORD now) {
-    bool start=false;
-    if (selector_audio_mode()) {
-        g_start_pending=0;
-        start=audio_combo_edge(buttons,previous);
-    } else {
-        if ((enabled || shown) && (pressed & XINPUT_GAMEPAD_START)) g_start_pending=now;
-        if (buttons & XINPUT_GAMEPAD_BACK) g_start_pending=0;
-        start=g_start_pending && (DWORD)(now-g_start_pending)>=350;
-        if (start) g_start_pending=0;
-    }
-    if (!(enabled || shown) || !(keyboard_edge || start)) return false;
+    if (!(enabled || shown) || !(keyboard_edge || selector_combo_edge(buttons,previous))) return false;
     if (!shown) { g_selector->visible=1; emit(1); }
     else { emit(11); g_release_until=now+250; }
     return true;
@@ -250,7 +240,6 @@ void selector_tick(HWND window,float width,float height) {
         detach_channel();
         // Preserve the retry deadline: a stalled owner must not cause a
         // map/unmap and input-hook initialization on every display frame.
-        g_start_pending=0;
     }
     attach_channel();
     if (!g_selector) return;
@@ -335,11 +324,11 @@ void selector_tick(HWND window,float width,float height) {
     auto edge=[&](int key){ return keys[key] && !g_keyboard[key]; };
     const bool keyboard_edge=keyboard_shortcut_edge(keys,g_keyboard);
     DWORD now=GetTickCount();
-    if (foreground && (keyboard_edge || (pressed & XINPUT_GAMEPAD_START)) && g_log) {
-        char message[180]; sprintf_s(message,"Shortcut %s: alive=%d enabled=%d ready=%ld visible=%d",keyboard_edge?"F12":"Start",alive()?1:0,enabled?1:0,g_selector->ready,shown?1:0); g_log(message);
+    if (foreground && (keyboard_edge || selector_combo_edge(buttons,previous_buttons)) && g_log) {
+        char message[180]; sprintf_s(message,"Shortcut %s: alive=%d enabled=%d ready=%ld visible=%d",keyboard_edge?"F12":"Select+Start",alive()?1:0,enabled?1:0,g_selector->ready,shown?1:0); g_log(message);
     }
     if (!alive() || !foreground) {
-        g_selector->visible=0; g_start_pending=0;
+        g_selector->visible=0;
     } else {
         if (!handle_shortcut(enabled,shown,keyboard_edge,buttons,pressed,previous_buttons,now) && shown) {
             if (!selector_audio_mode()) {

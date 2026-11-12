@@ -27,6 +27,10 @@ SHARED = re.compile(r'(?:coach_[a-z_]+_\d+_[0-9a-f]{18}_r76|medical_[a-z_]+_\d+_
 DERIVED = re.compile(r'(?:board_atlas|board_image|board|fascia|image_fascia|fascia_fullres|feature_wall|custom|joinery_cabinet|acoustic_ceiling|scenery_atlas_[01]|floor|wood|niche|accent|joinery_[a-z_]+|ceiling_details_[a-z_]+|table_wood|image_panels|lettering|furniture_[a-z_]+|cushion|metal|linen|light)_[0-9a-f]{14}\.rx3$')
 HEX = re.compile(r'[0-9a-f]{24,64}$')
 GENERATED_EXTENSIONS = frozenset(('.rx3', '.ff3d', '.bin', '.json', '.tsv', '.log', '.new', '.tmp'))
+LIMITS_MIB = dict(prepared_models=384,model_materials=128,market_artwork=224,
+                 market_templates=48,market_textures=64,frontend_stadiums=1024,
+                 trophy_appearance=32,trophy_thumbnails=16,preview_art=16,
+                 extracted_assets=64,stadium_previews=16)
 
 
 class Busy(RuntimeError):
@@ -158,13 +162,26 @@ def _over_budget(units, budget, max_units=None):
     return discard
 
 
-def plan(root,check=lambda:None,*,journals_only=False):
+def identical(root,left,right,check):
+    if not safe(root,left) or not safe(root,right) or not right.is_file():return False
+    try:
+        if left.stat().st_size!=right.stat().st_size:return False
+        with left.open('rb') as a,right.open('rb') as b:
+            while True:
+                check();chunk=a.read(MIB)
+                if chunk!=b.read(MIB):return False
+                if not chunk:return True
+    except OSError:return False
+
+
+def plan(root,check=lambda:None,*,journals_only=False,purge=False):
     """Return exact allowlisted files. Never infer deletability from 'runtime'."""
     root = Path(root).absolute()
     if not game_root(root): return {}
     candidates = {};metadata={}
     def units(parent,pattern):return _units(root,parent,pattern,metadata,check)
     def walk(folder):return files(root,folder,metadata,check)
+    def budget(name):return 0 if purge else LIMITS_MIB[name]*MIB
     def add(group, paths):
         for p in paths:
             if not FORBIDDEN.search(p.name): candidates[p] = group
@@ -179,7 +196,7 @@ def plan(root,check=lambda:None,*,journals_only=False):
                             if (name == 'render_jobs' and p.suffix in GENERATED_EXTENSIONS)
                             or (name == 'packages' and re.fullmatch(r'managers_[0-9a-f]{64}(?:\.building)?\.big', p.name))))
     add('market_artwork', _over_budget(units(market/'artwork_cache',
-        re.compile(r'art_[0-9a-f]{64}\.zip$')), 256*MIB, 1))
+        re.compile(r'art_[0-9a-f]{64}\.zip$')), budget('market_artwork'), 1))
     # A template and its metadata are one eviction unit.
     templates = []
     for modified, size, members in units(market/'native_templates', re.compile(r'template_[0-9a-f]{64}\.big$')):
@@ -187,16 +204,16 @@ def plan(root,check=lambda:None,*,journals_only=False):
         if side.is_file() and safe(root, side):
             members = members+[side]; size += side.stat().st_size
         templates.append((modified, size, members))
-    add('market_templates', _over_budget(templates, 64*MIB, 1))
+    add('market_templates', _over_budget(templates, budget('market_templates'), 1))
     add('market_textures', _over_budget(units(market/'texture_cache',
-        re.compile(r'[0-9a-f]{64}\.dds$')), 128*MIB))
+        re.compile(r'[0-9a-f]{64}\.dds$')), budget('market_textures')))
     cache = root/'ModCarrerMode/cache/club_browser'
     prepared = []
     for name in ('xi/prepared', 'player/prepared', 'coach', 'coach_exports', 'mascot'):
         prepared.extend(units(cache/name, HEX))
-    add('prepared_models', _over_budget(prepared, 768*MIB))
+    add('prepared_models', _over_budget(prepared, budget('prepared_models')))
     add('model_materials', _over_budget(units(cache/'xi/materials',
-        re.compile(r'[0-9a-f]{64}\.rx3$')), 256*MIB))
+        re.compile(r'[0-9a-f]{64}\.rx3$')), budget('model_materials')))
     add('published_models', [p for _,_,members in units(
         root/'data/sceneassets/server16_club_xi', re.compile(r'\d+$')) for p in members
         if p.suffix in GENERATED_EXTENSIONS])
@@ -212,13 +229,41 @@ def plan(root,check=lambda:None,*,journals_only=False):
             source = Path(json.loads(record.read_bytes())['source'])
             if source.exists(): stadiums.append(unit)
         except (OSError, ValueError, KeyError): continue
-    add('frontend_stadiums', _over_budget(stadiums, 1536*MIB, 2))
+    add('frontend_stadiums', _over_budget(stadiums, budget('frontend_stadiums'), 1))
     add('match_stadiums', [p for _,_,members in units(
         root/'data/sceneassets/server16_match', re.compile(r'[0-9a-f]{32}$')) for p in members if p.suffix=='.rx3'])
     for name in ('goalpost_texture_previews','kitmix_previews','kitmix_imports'):
         add('import_previews', walk(root/'runtime'/name))
     for _,_,members in units(root/'runtime', re.compile(r'server16_stad_[a-z0-9_]+$')):
         add('stadium_extractions', members)
+    # Per-process scene publications are disposable only after the global
+    # FIFA/helper guard releases the installation. SQL and receipts stay out.
+    for folder in ('ModCarrerMode/runtime/club_browser','data/sceneassets/server16_trophy_room'):
+        add('ended_scene_sessions',[p for _,_,members in units(root/folder,re.compile(r'[1-9]\d*$'))
+                                    for p in members if p.suffix.lower() in GENERATED_EXTENSIONS|{'.png','.dds','.big','.txt','.pixels'}])
+    trophy=root/'data/sceneassets/server16_trophy_room'
+    add('trophy_appearance',_over_budget(units(trophy/'appearance',re.compile(r'[0-9a-f]{16}$')),budget('trophy_appearance')))
+    thumbnails=[(metadata[p].st_mtime_ns,metadata[p].st_size,[p]) for p in walk(trophy/'thumbnails')
+                if re.fullmatch(r't\d+_[0-9a-f]{12}\.png',p.name)]
+    add('trophy_thumbnails',_over_budget(thumbnails,budget('trophy_thumbnails')))
+    art=root/'ModCarrerMode/runtime/club_environment/preview/runtime/art_cache'
+    previews=[(metadata[p].st_mtime_ns,metadata[p].st_size,[p]) for p in walk(art)
+              if p.suffix.lower() in ('.png','.dds','.rx3','.big','.json')]
+    add('preview_art',_over_budget(previews,budget('preview_art')))
+    extracted=root/'ModCarrerMode/runtime/club_environment/asset_cache'
+    add('extracted_assets',_over_budget(units(extracted,re.compile(r'[0-9a-f]{20}$')),budget('extracted_assets')))
+    selector=root/'runtime/stadium_selector'
+    previews=[(metadata[p].st_mtime_ns,metadata[p].st_size,[p]) for p in walk(selector)
+              if re.fullmatch(r'[a-z_]+_[01]\.png',p.name)]
+    add('stadium_previews',_over_budget(previews,budget('stadium_previews')))
+    # _prepare_runtime formerly copied the editable source artwork into runtime.
+    # All readers use the canonical data paths; never delete those source files.
+    for relative,source in [('current_dressing_room','current_dressing_room'),('room/clubs','room/clubs')]:
+        canonical=root/'ModCarrerMode/data/club_environment'/source
+        if safe(root,canonical) and canonical.is_dir():
+            mirror=root/'ModCarrerMode/runtime/club_environment'/relative
+            add('redundant_art_mirrors',[p for p in walk(mirror)
+                if p.suffix.lower() in ('.png','.dds','.rx3','.json') and identical(root,p,canonical/p.relative_to(mirror),check)])
     # Deliberately exclude server16_stadium_apply_*/previous, SQL and save receipts.
     protected = room_protected(root)
     if protected is not None:
@@ -242,8 +287,14 @@ def busy(root):
             if name not in ('server16python.exe','server16.exe','python.exe','pythonw.exe','python3.exe'): continue
             args = ' '.join(process.info['cmdline'] or []).casefold()
             if any(token in args for token in ('--club-environment','--club-browser-worker')):
-                # Conservatively block helpers even if their root is not visible.
-                return True
+                argv=process.info['cmdline'] or []
+                # A crashed FIFA can leave an old worker behind indefinitely.
+                # Only a worker's live FIFA owner can pin the visual cache.
+                try:
+                    owner=psutil.Process(int(argv[argv.index('--pid')+1]))
+                    if owner.name().casefold() in ('fifa16.exe','fifa 16.exe'):return True
+                except (ValueError,IndexError):return True
+                except (psutil.NoSuchProcess,psutil.ZombieProcess):continue
     except (psutil.AccessDenied, OSError): return True
     return False
 
@@ -279,16 +330,24 @@ class RootLock:
             self.stream.close()
 
 
-def maintain(root, *, guard=None, dry_run=False, quarantine=True, record=True, journals_only=False):
+def maintain(root, *, guard=None, dry_run=False, quarantine=False, record=True, journals_only=False,purge=False):
     root=Path(root).absolute();result=Result();cutoff=time.time_ns()
     if not game_root(root): return result
+    checked=[0.,False]
     def check():
-        if (guard() if guard is not None else busy(root)): raise Busy('FIFA, helper or launch is active')
+        if guard is not None:active=guard()
+        else:
+            # Do not enumerate every Windows process once per cached file.
+            # The same 100 ms guard is used by the background UI service.
+            now=time.monotonic()
+            if now-checked[0]>=.1:checked[:]=[now,busy(root)]
+            active=checked[1]
+        if active:raise Busy('FIFA, helper or launch is active')
     removed=[]
     try:
         check()
         with RootLock(root):
-            check();candidates=plan(root,check,journals_only=journals_only)
+            check();candidates=plan(root,check,journals_only=journals_only,purge=purge)
             # Clear only stale match routes, before deleting their resources.
             if not dry_run and any(g=='match_stadiums' for g in candidates.values()):
                 from .stadium_match_assets import clear_match_routes
@@ -352,14 +411,30 @@ class SessionCaches:
     def bind(self,root):
         root=Path(root).absolute()
         if not game_root(root): return
-        with self.lock:self.roots.setdefault(root,dict(pending=True,was_busy=False))
+        queued=False
+        pending=root/'runtime/cache_maintenance/pending.json'
+        try:
+            if safe(root,pending):
+                value=json.loads(pending.read_bytes());queued=isinstance(value,dict) and value.get('purge') is True
+        except (OSError,ValueError,TypeError):pass
+        with self.lock:self.roots.setdefault(root,dict(pending=True,was_busy=False,purge=queued,retry_at=0.,revision=0))
         self.wake.set()
-    def request(self,root,callback=None):
+    def request(self,root,callback=None,*,purge=False):
+        root=Path(root).absolute()
         self.bind(root)
         with self.lock:
             if Path(root).absolute() in self.roots:
                 self.roots[Path(root).absolute()]['pending']=True
+                self.roots[root]['revision']+=1
+                self.roots[Path(root).absolute()]['purge']|=purge
                 if callback:self.callbacks[Path(root).absolute()]=callback
+                if purge:
+                    pending=Path(root)/'runtime/cache_maintenance/pending.json'
+                    if safe(Path(root),pending):
+                        pending.parent.mkdir(parents=True,exist_ok=True)
+                        tmp=pending.with_suffix('.new')
+                        if not safe(root,tmp):raise Busy('Unsafe pending cleanup file')
+                        tmp.write_text('{"schema":1,"purge":true}',encoding='utf8');os.replace(tmp,pending)
         self.wake.set()
     def reserve_launch(self):
         with self.lock:
@@ -374,8 +449,8 @@ class SessionCaches:
                 with self.lock:
                     if state['was_busy'] and not active:state['pending']=True
                     state['was_busy']=active
-                    ready=(not active and state['pending'] and time.monotonic()>=self.launch_hold and not self.stop.is_set())
-                    if ready:self.running=True
+                    ready=(not active and state['pending'] and time.monotonic()>=max(self.launch_hold,state['retry_at']) and not self.stop.is_set())
+                    if ready:self.running=True;revision=state['revision'];purge=state['purge']
                 if not ready:continue
                 last_check=[0.,False]
                 def guard():
@@ -383,7 +458,7 @@ class SessionCaches:
                     if time.monotonic()-last_check[0]>.1:last_check[:]=[time.monotonic(),self.checker(root)]
                     return last_check[1]
                 try:
-                    report=maintain(root,guard=guard)
+                    report=maintain(root,guard=guard,purge=purge)
                     if not report.deferred and getattr(sys,'frozen',False):
                         from .session_storage import sweep_extractions
                         extracted=sweep_extractions()
@@ -392,11 +467,17 @@ class SessionCaches:
                     if report.files or report.moved_bytes or report.failed:
                         self.log(f'Session cache maintenance: {report.files} paths; {report.released_bytes/MIB:.1f} MiB released; {report.moved_bytes/MIB:.1f} MiB moved; {len(report.failed)} skipped errors')
                     with self.lock:
-                        state['pending']=report.deferred
-                        callback=self.callbacks.pop(root,None) if not report.deferred else None
+                        changed=state['revision']!=revision
+                        state['pending']=changed or report.deferred or bool(report.failed)
+                        state['retry_at']=time.monotonic()+30 if report.failed else 0.
+                        if not changed and not report.deferred and not report.failed:
+                            state['purge']=False
+                            pending=root/'runtime/cache_maintenance/pending.json'
+                            if safe(root,pending):pending.unlink(missing_ok=True)
+                        callback=self.callbacks.pop(root,None) if not changed and not report.deferred else None
                     if callback:callback(report)
                 except Exception as error:
-                    with self.lock:state['pending']=False
+                    with self.lock:state['pending']=True;state['retry_at']=time.monotonic()+30
                     self.log('Visual cache maintenance deferred after error',error)
                 finally:
                     with self.lock:self.running=False

@@ -21,6 +21,7 @@ from .panel_navigation import move_focus
 from .match_audio_panel import MatchAudioPanel
 from .match_state import pause_page
 from .crowd_control import CrowdControl
+from .stadium_options import owns_settings
 from .prematch_panel import PrematchPanel
 from .narration_runtime import narration_runtime
 import server16_py as features
@@ -129,7 +130,7 @@ class StadiumSelector:
         self._attempted_pid = 0
         self._next_injection = 0.0
         self._status = None
-        app.log('Overlay channel initialized: stadium F12 / Start; match settings F12 / Select+Start')
+        app.log('Overlay channel initialized: career visuals, stadium and match settings F12 / Select+Start')
 
     def match_eligible(self):
         app = self.app
@@ -201,7 +202,8 @@ class StadiumSelector:
         reader=self.career_service.context_reader
         known_hub=not (app.lastpagename or '').lower().endswith('/fluxhub') or career_eligible or reader.session() is False
         frontend_eligible=app.memory.is_open() and not prematch_eligible and (frontend_page(app.lastpagename) or career_eligible) and reader.started()!=1 and known_hub
-        mode = 1 if prematch_eligible else 3 if career_eligible else 1 if frontend_eligible else 2 if self.match_eligible() else 0
+        settings_eligible=owns_settings(app)
+        mode = 1 if prematch_eligible or settings_eligible else 3 if career_eligible else 1 if frontend_eligible else 2 if self.match_eligible() else 0
         page=(app.lastpagename or '').lower()
         # Keep attendance through walkout/loading, pause and gameplay, but not
         # Career menus or post-match pages. Editing is still pre-match only.
@@ -266,7 +268,7 @@ class StadiumSelector:
             shared.read_index=(shared.read_index+1)%64
             if kind==1:
                 if shared.enabled and shared.ready==7:
-                    self.open(audio=shared.enabled==2,hub=shared.enabled==1 and not frontend_eligible,
+                    self.open(settings=settings_eligible,audio=shared.enabled==2,hub=shared.enabled==1 and not frontend_eligible and not settings_eligible,
                               career=shared.enabled==3,
                               frontend=frontend_eligible and shared.enabled in (1,3))
                 else:
@@ -305,7 +307,8 @@ class StadiumSelector:
         self._catalog_thread=threading.Thread(target=load,name='stadium-catalog',daemon=True)
         self._catalog_thread.start()
 
-    def open(self, audio=False, hub=False, career=False, frontend=False, frontend_picker=False):
+    def open(self, audio=False, hub=False, career=False, frontend=False, frontend_picker=False,settings=False):
+        self.native_settings=settings
         self.gamepad_panel=None
         self.frontend_mode=frontend
         if frontend:
@@ -384,7 +387,8 @@ class StadiumSelector:
                 self.crowd_control.shared.requested_percent>=0 and
                 not getattr(app,'_stadium_fixture_entered',False) and
                 not getattr(app,'_match_audio_ended',False) and
-                (not previous_page or prematch_page(previous_page) or 'stadiumpan' in previous_page.lower()))
+                (not previous_page or prematch_page(previous_page) or 'stadiumpan' in previous_page.lower()
+                 or previous_page.casefold()=='game/screens/settings/gamesettings'))
 
     def _preferred_stadium_names(self):
         app=self.app
@@ -501,10 +505,11 @@ class StadiumSelector:
                 self.message='Não foi possível salvar o fundo';self.app.log(self.message,exc)
                 self.render();return False
             self.render();return True
-        if not self.results or self.context!=self._context() or not prematch_page(self.app.lastpagename):
+        if not self.results or self.context!=self._context() or not (prematch_page(self.app.lastpagename) or getattr(self,'native_settings',False) and owns_settings(self.app)):
             self.message='Seleção indisponível nesta tela'; self.render(); return
         entry=self.results[self.index]
         try:
+            if getattr(self,'native_settings',False):self.app.scoreboard_options.stadium_candidate=entry
             self.app.stadium_runtime.apply_manual_stadium(entry.name,self.context)
         except Exception as exc:
             self.message='Não foi possível aplicar o estádio'

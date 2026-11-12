@@ -15,8 +15,10 @@ PANORAMA_TARGETS={
 TARGETS=PANORAMA_TARGETS|{'data/ui/layout/careermanagerhubcfg.xml',
                        'data/ui/game/screens/playnow/kickoffhub.big',
                        'data/ui/game/screens/settings/gamesettings.big',
+                       'data/ui/nav/settingsflow.nav',
                        'data/ui/game/screens/fluxhub/fluxhub.big',
                        'data/ui/game/screens/career/managerpreferences.big',
+                       'data/ui/game/screens/career/setup.big',
                        'data/ui/game/background/backgroundbootflow.big'}
 
 def plans(game,targets=None):

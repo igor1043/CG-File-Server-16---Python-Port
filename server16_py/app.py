@@ -516,7 +516,7 @@ class Server16App(tk.Tk):
         if self.check_update_button is not None:
             self.check_update_button.configure(text=self._check_update_button_text())
         if self.clean_cache_button is not None:
-            self.clean_cache_button.configure(text=self.tr("button.clean_cache"))
+            self.clean_cache_button.configure(text=self.tr("button.empty_cache_logs"))
         if self.imgbb_key_button is not None:
             self.imgbb_key_button.configure(text=self.tr("button.imgbb_key"))
         if self.language_label is not None:
@@ -1096,7 +1096,7 @@ class Server16App(tk.Tk):
         buttons.pack(fill="x", padx=12, pady=(6, 12))
         self.clean_cache_button = ttk.Button(
             buttons,
-            text=self.tr("button.clean_cache"),
+            text=self.tr("button.empty_cache_logs"),
             command=self._clean_generated_cache,
         )
         self.clean_cache_button.pack(side="left", fill="x", expand=True, padx=(0, 6))
@@ -2912,16 +2912,22 @@ class Server16App(tk.Tk):
         if self.clear_logs_button is not None:self.clear_logs_button.configure(state='normal')
 
     def _clean_generated_cache(self) -> None:
-        if not messagebox.askyesno(self.tr('message.clean_cache_title'),self.tr('message.clean_cache_confirm')):
+        if not messagebox.askyesno(self.tr('storage.title'),self.tr('storage.confirm')):
             return
+        if self.clean_cache_button is not None:self.clean_cache_button.configure(state='disabled')
+        self._session_logs.clear(lambda report:self.log(f'Obsolete session logs cleared: {report.freed} bytes; {len(report.failed)} busy paths; last two diagnostic sessions retained'))
         def complete(report):
             self.log(f'Visual cache request completed: {report.files} paths, {report.released_bytes} bytes released, {report.moved_bytes} bytes quarantined')
             size_text=f'{report.released_bytes/(1024*1024):.1f} MB'
-            text=(self.tr('message.clean_cache_done',size=size_text,count=report.files)
-                  if report.files else self.tr('message.clean_cache_empty'))
-            self._post_ui(messagebox.showinfo,self.tr('message.clean_cache_title'),text)
-        self._visual_caches.request(self.exedir,complete)
-        messagebox.showinfo(self.tr('message.clean_cache_title'),self.tr('message.cache_queued'))
+            text=self.tr('storage.done',size=size_text,count=report.files)
+            if report.failed:text+='\n\n'+self.tr('storage.busy',count=len(report.failed))
+            self._post_ui(self._finish_cache_cleanup,text)
+        self._visual_caches.request(self.exedir,complete,purge=True)
+        messagebox.showinfo(self.tr('storage.title'),self.tr('storage.queued'))
+
+    def _finish_cache_cleanup(self,text):
+        if self.clean_cache_button is not None:self.clean_cache_button.configure(state='normal')
+        messagebox.showinfo(self.tr('storage.title'),text)
 
     def _check_fifa_location(self) -> bool:
         if self.fifaEXE == "default":

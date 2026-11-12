@@ -2,11 +2,14 @@
 #include "../server16_py/d3d_overlay/mod_xinput_gate.cpp"
 #include "../server16_py/d3d_overlay/ranking_input_gate.cpp"
 #include <cassert>
+#include <initializer_list>
 static BOOL capturing=FALSE, shortcuts=FALSE;
 static BOOL audio_mode=FALSE;
+static BOOL career_mode=FALSE;
 extern "C" BOOL mod_screen_captures_input(void) { return capturing; }
 extern "C" BOOL selector_shortcut_enabled(void) { return shortcuts; }
 extern "C" BOOL selector_audio_mode(void) { return audio_mode; }
+extern "C" BOOL selector_career_mode(void) { return career_mode; }
 static XINPUT_STATE fake_pad;
 static BYTE fake_keys[256];
 static DIMOUSESTATE2 fake_mouse;
@@ -30,6 +33,7 @@ static HRESULT WINAPI read_keys(void *,DWORD size,void *state) {
     memcpy(state,fake_keys,256); return DI_OK;
 }
 static void print_log(const char *message) { puts(message); }
+void ultrawide_cursor_position(POINT*) {}
 int main(int argc,char **) {
     if (argc>1) {
         LoadLibraryExW(L"xinput1_4.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -52,18 +56,28 @@ int main(int argc,char **) {
     fake_pad.Gamepad={}; filter_state(entry,0,&result);
     fake_pad.Gamepad.wButtons=XINPUT_GAMEPAD_A; filter_state(entry,0,&result);
     assert(result.Gamepad.wButtons==XINPUT_GAMEPAD_A);
-    shortcuts=TRUE; fake_pad.Gamepad.wButtons=XINPUT_GAMEPAD_START;
-    filter_state(entry,0,&result); assert(result.Gamepad.wButtons==0);
-    fake_pad.Gamepad.wButtons|=XINPUT_GAMEPAD_BACK;
-    filter_state(entry,0,&result); assert(result.Gamepad.wButtons&XINPUT_GAMEPAD_START);
-    audio_mode=TRUE;
-    filter_state(entry,0,&result); assert(result.Gamepad.wButtons==0);
-    fake_pad.Gamepad.wButtons=XINPUT_GAMEPAD_START;
-    filter_state(entry,0,&result); assert(result.Gamepad.wButtons==XINPUT_GAMEPAD_START);
-    fake_pad.Gamepad.wButtons=XINPUT_GAMEPAD_BACK;
-    filter_state(entry,0,&result); assert(result.Gamepad.wButtons==XINPUT_GAMEPAD_BACK);
+    shortcuts=TRUE;
+    for (int mode=0;mode<3;++mode) {
+        audio_mode=mode!=0;career_mode=mode==2;
+        for (WORD solo : {WORD(XINPUT_GAMEPAD_START),WORD(XINPUT_GAMEPAD_BACK)}) {
+            fake_pad.Gamepad.wButtons=solo;
+            filter_state(entry,0,&result);assert(result.Gamepad.wButtons==solo);
+            fake_pad.Gamepad.wButtons=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
+            filter_state(entry,0,&result);assert(result.Gamepad.wButtons==0);
+            filter_state(entry,0,&result);assert(result.Gamepad.wButtons==0);
+            fake_pad.Gamepad.wButtons=solo;
+            filter_state(entry,0,&result);assert(result.Gamepad.wButtons==0); // Wait for both releases.
+            fake_pad.Gamepad.wButtons=0;
+            filter_state(entry,0,&result);assert(result.Gamepad.wButtons==0);
+            fake_pad.Gamepad.wButtons=solo;
+            filter_state(entry,0,&result);assert(result.Gamepad.wButtons==solo);
+        }
+    }
+    career_mode=FALSE;
     audio_mode=FALSE;
     shortcuts=FALSE;
+    fake_pad.Gamepad.wButtons=XINPUT_GAMEPAD_START|XINPUT_GAMEPAD_BACK;
+    filter_state(entry,0,&result);assert(result.Gamepad.wButtons==fake_pad.Gamepad.wButtons);
     // A compatible pre-existing FIFA Mods Dev hook must be chained, not
     // treated as an unknown Windows function prologue (ready=5/7).
     auto detour=(unsigned char *)VirtualAlloc(nullptr,64,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE);

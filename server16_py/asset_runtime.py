@@ -15,6 +15,7 @@ class AssetRuntime:
     def __init__(self, app: "Server16App") -> None:
         self.app = app
         self._scoreboard_lock=threading.RLock()
+        self._movie_lock=threading.RLock()
 
     def _notify_loading(self, action: str, *args, **kwargs) -> None:
         """Notifications observe asset copies and cannot interrupt their original flow."""
@@ -154,6 +155,13 @@ class AssetRuntime:
         self.update_audio_overview()
 
     def apply_movie_runtime(self) -> None:
+        with self._movie_lock:
+            if self.app.module_enabled('Movies'):
+                from .movie_options import adopt_pending
+                adopt_pending(self.app)
+            self._apply_movie_runtime()
+
+    def _apply_movie_runtime(self) -> None:
         app = self.app
         app._set_display("movie", "default")
         if not app.module_enabled("Movies"):
@@ -169,6 +177,10 @@ class AssetRuntime:
             ],
             fallback=("0", "movies"),
         )
+        from .movie_options import load_choice
+        choice=load_choice(app.exedir)
+        if choice is not None:movie=choice
+        stadium_movie=app.stadmovie and choice is None
         if movie:
             movie_dir = presentation_package(app.exedir, app.Movies, 'movies', movie)
             if movie_dir.exists():
@@ -189,12 +201,12 @@ class AssetRuntime:
             else:
                 app.log(f"Movie directory not found, falling back to default movie: {movie_dir}")
                 movie = ""
-        elif app.stadmovie:
+        elif stadium_movie:
             app._set_display("movie", app.display_value("stadium_movie_title"))
             app._set_display("audio_current", app.display_value("stadium_movie_current", fallback="{name} Stadium Movie", name=app.curstad))
             app._set_display("audio_last_action", app.display_value("stadium_movie"))
             app.log("Applied stadium movie")
-        if not movie and not app.stadmovie:
+        if not movie and not stadium_movie:
             self._notify_loading("show", "movie", "Carregando vídeo pré-jogo", "Padrão", "Restaurando vídeo e vinheta padrão", 0)
             try:
                 video = app.exedir / "FSW" / "Nav" / "bootflowoutro.vp8"

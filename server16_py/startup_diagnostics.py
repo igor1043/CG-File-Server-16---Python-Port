@@ -18,9 +18,8 @@ from .memory_access import MODULEENTRY32W
 
 
 def log_paths(root):
-    root = Path(root)
-    paths = list((root/'ModCarrerMode/logs').glob('*.log'))
-    return sorted(set(paths + [root/'runtime/server16.log', root/'ReShade.log']))
+    from .session_logs import log_files,managed_roots
+    return sorted({p for base in managed_roots(root) for p in log_files(base)})
 
 
 def log_marker(path):
@@ -213,7 +212,7 @@ class StartupSession:
         self.stopped = threading.Event(); self.lock = threading.RLock()
         self.started = time.monotonic(); self.page = ''; self.errors = 0
         self.page_at = self.started
-        self.events = 0; self.state = {'pid': pid, 'server_version': version,
+        self.events = 0; self.event_bytes=0; self.state = {'pid': pid, 'server_version': version,
             'executable': str(executable), 'reference_release': reference.get('release'),
             'reference_files': len(reference.get('files', [])), 'audit_available': bool(reference.get('files')),
             'last_page': '', 'status': 'watching'}
@@ -223,13 +222,15 @@ class StartupSession:
         try:
             with self.lock:
                 # Bound disk usage without dropping terminal evidence.
-                if self.events >= 10000 and event_type not in ('process_exit', 'server_closed', 'diagnostic_error'):
+                if (self.events >= 10000 or self.event_bytes>=2*1024*1024) and event_type not in ('process_exit', 'server_closed', 'diagnostic_error'):
                     return
                 row = {'time': datetime.now().astimezone().isoformat(timespec='milliseconds'),
                        'elapsed_s': round(time.monotonic()-self.started, 3), 'pid': self.pid,
                        'event': event_type, **data}
+                encoded=json.dumps(row, ensure_ascii=False)+'\n'
                 with (self.folder/'timeline.jsonl').open('a', encoding='utf8') as stream:
-                    stream.write(json.dumps(row, ensure_ascii=False)+'\n')
+                    stream.write(encoded)
+                self.event_bytes+=len(encoded.encode('utf8'))
                 self.events += 1
         except OSError:
             pass
@@ -277,12 +278,17 @@ class StartupSession:
     def finish(self):
         self.state['page_read_pending'] = self.errors
         self.state['last_page_elapsed_s'] = round(time.monotonic()-self.page_at, 3)
-        collected = []
+        collected = [];remaining=2*1024*1024;names=set()
         for path in log_paths(self.root):
             try:
-                contents, window = session_log(path, self.log_markers.get(str(path), {}))
+                if remaining<=0:break
+                contents, window = session_log(path, self.log_markers.get(str(path), {}),limit=min(128*1024,remaining))
+                remaining-=len(contents)
                 category = 'server' if path.name == 'server16.log' else 'graphics' if path.name == 'ReShade.log' else 'mods'
-                destination = self.folder/'logs'/category/path.name
+                name=path.name
+                if (category,name) in names:name=hashlib.sha256(str(path).encode()).hexdigest()[:10]+'_'+name
+                names.add((category,name))
+                destination = self.folder/'logs'/category/name
                 destination.parent.mkdir(parents=True,exist_ok=True)
                 destination.write_bytes(contents)
                 collected.append({'source':str(path),'file':destination.relative_to(self.folder).as_posix(),
@@ -295,16 +301,16 @@ class StartupSession:
             try:
                 if path.stat().st_mtime < self.started_wall-2:
                     continue
-                entry = {'path':str(path), **file_evidence(path), **crash_summary(path)}
+                entry = {'path':str(path), **file_evidence(path,with_hash=False), **crash_summary(path)}
                 if entry.get('pid',self.pid) != self.pid:
                     continue
                 entry['association'] = 'matching_pid' if 'pid' in entry else 'same_session_time_only'
-                if path.stat().st_size <= 16777216:
+                if path.stat().st_size <= 4*1024*1024:
                     destination=self.folder/'crash'/path.name
                     destination.parent.mkdir(exist_ok=True)
                     with path.open('rb') as stream:
-                        data=stream.read(16777217)
-                    if len(data)<=16777216:
+                        data=stream.read(4*1024*1024+1)
+                    if len(data)<=4*1024*1024:
                         destination.write_bytes(data)
                         entry['included_file']=destination.relative_to(self.folder).as_posix()
                 dumps.append(entry)
@@ -423,6 +429,8 @@ class StartupDiagnostics:
                     self.log('Startup diagnostics: previous session still finalizing; active logs were preserved')
                     return
             root=Path(executable).resolve().parent
+            from .session_logs import history_snapshot,managed_roots,log_files
+            history_snapshot(root,[(base,p) for base in managed_roots(root) for p in log_files(base)])
             for path in log_paths(root):
                 if path.is_file():
                     try:
