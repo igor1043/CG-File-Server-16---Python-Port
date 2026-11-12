@@ -334,6 +334,9 @@ class Server16App(tk.Tk):
         self._last_live_score = (0, 0)
         self._last_live_update = ""
         self.assets_runtime = AssetRuntime(self)
+        from .scoreboard_options import ScoreboardOptions
+        self.scoreboard_options=ScoreboardOptions(self)
+        if getattr(self,'exedir',None):self.scoreboard_options.bind(self.exedir)
         self.stadium_runtime = StadiumRuntime(self)
         self.chants_runtime = ChantsRuntime(self)
         self.gamepad_bridge = None
@@ -2739,6 +2742,8 @@ class Server16App(tk.Tk):
             self._session_logs.bind(self.exedir)
         if getattr(self,'_visual_caches',None) is not None:
             self._visual_caches.bind(self.exedir)
+        scoreboard_options=getattr(self,'scoreboard_options',None)
+        if scoreboard_options is not None:scoreboard_options.bind(self.exedir)
         self.TVLogo = self.exedir / "TVLogoGBD"
         self.TVdata = self.exedir / "data" / "ui" / "game" / "overlays"
         self.Scoredata = self.exedir / "data" / "ui"
@@ -3771,6 +3776,8 @@ class Server16App(tk.Tk):
             self._handle_page_transition(page_name)
             if self._page_can_have_match_context(page_name):
                 self.refresh_live_context(page_name)
+            scoreboard_options=getattr(self,'scoreboard_options',None)
+            if scoreboard_options is not None:scoreboard_options.poll(page_name)
         except Exception as exc:
             self._sync_page_banner(f"Offset pending: {exc}")
             self._set_process_status(self.status_text("reading_page"), self.gold)
@@ -4438,7 +4445,8 @@ class Server16App(tk.Tk):
         # Do not interrupt a BIG/BH or stadium write to force the UI closed.
         if (getattr(self, '_stadium_task_running', False) or getattr(self, '_bh_regen_running', False)
                 or (getattr(self,'_native_asset_cleanup',None) is not None and self._native_asset_cleanup.future is not None)
-                or (getattr(self, 'competition_icons', None) is not None and self.competition_icons.busy)):
+                or (getattr(self, 'competition_icons', None) is not None and self.competition_icons.busy)
+                or (getattr(self,'scoreboard_options',None) is not None and self.scoreboard_options.busy)):
             if not getattr(self, '_close_pending', False):
                 self._close_pending = True
                 self.log("Shutdown: waiting for the current file operation")
@@ -4448,6 +4456,8 @@ class Server16App(tk.Tk):
         def step(label, action):
             return cleanup_step(label, action, self.log)
         step('start log', lambda:self.log("Shutdown: starting cleanup"))
+        scoreboard_options=getattr(self,'scoreboard_options',None)
+        if scoreboard_options is not None:step('scoreboard options',scoreboard_options.close)
         maintenance=getattr(self,'_session_logs',None)
         if maintenance is not None:step('log maintenance',maintenance.close)
         caches=getattr(self,'_visual_caches',None)

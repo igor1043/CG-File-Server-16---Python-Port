@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 from typing import TYPE_CHECKING
 
 from .file_tools import copy, copy_if_exists, copy_tvlogo, extra_setup
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 class AssetRuntime:
     def __init__(self, app: "Server16App") -> None:
         self.app = app
+        self._scoreboard_lock=threading.RLock()
 
     def _notify_loading(self, action: str, *args, **kwargs) -> None:
         """Notifications observe asset copies and cannot interrupt their original flow."""
@@ -75,6 +77,13 @@ class AssetRuntime:
             app._set_display("audio_last_action", status_label.cget("text") if status_label is not None else "-")
 
     def apply_scoreboard_runtime(self) -> None:
+        with self._scoreboard_lock:
+            if self.app.module_enabled('ScoreBoard'):
+                from .scoreboard_options import adopt_pending
+                adopt_pending(self.app)
+            self._apply_scoreboard_runtime()
+
+    def _apply_scoreboard_runtime(self) -> None:
         app = self.app
         app._set_display("tvlogo", "default")
         app._set_display("scoreboard", "default")
@@ -119,6 +128,8 @@ class AssetRuntime:
                     ],
                     fallback=("0", "Scoreboard"),
                 )
+                from .scoreboard_options import resolve
+                scoreboard=resolve(app.exedir,scoreboard)
                 self._notify_loading("show", "scoreboard", "Carregando placar", scoreboard or "Padrão", "Aplicando atribuição do placar", 40)
                 if scoreboard:
                     scoreboard_dir = presentation_package(app.exedir, app.ScoreBoard, 'scoreboard', scoreboard)

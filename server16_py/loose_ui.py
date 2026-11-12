@@ -13,6 +13,8 @@ PANORAMA_TARGETS={
  'data/ui/nav/careermode/mainmenuhubflow.nav',
 }
 TARGETS=PANORAMA_TARGETS|{'data/ui/layout/careermanagerhubcfg.xml',
+                       'data/ui/game/screens/playnow/kickoffhub.big',
+                       'data/ui/game/screens/settings/gamesettings.big',
                        'data/ui/game/screens/fluxhub/fluxhub.big',
                        'data/ui/game/screens/career/managerpreferences.big',
                        'data/ui/game/background/backgroundbootflow.big'}

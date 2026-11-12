@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import mmap
 import os
+from .attendance_options import NativeAttendance
 
 MAPPING_NAME = 'Local\\CGFS16_Crowd_v1'
 
@@ -29,6 +30,7 @@ class CrowdControl:
         self.shared.command += 1
         self.shared.status = 0
         self.shared.current_percent = self.shared.automatic_percent = -1
+        self.native_options = NativeAttendance(self)
 
     @staticmethod
     def team_id(value):
@@ -43,6 +45,11 @@ class CrowdControl:
         app, shared = self.app, self.shared
         context = (app._kickoff_generation, self.team_id(app.HID), self.team_id(app.AID))
         live = app.memory.is_open() and not getattr(app, '_closing', False)
+        # The native options screen belongs to the same pre-match fixture.
+        # Keep its bridge ready while the percentage row is being edited.
+        settings=(str(getattr(app,'lastpagename','')).casefold()=='game/screens/settings/gamesettings'
+                  and context==self.context and shared.phase==1)
+        prematch=bool(prematch or settings)
         if context != self.context or not live or getattr(app, '_match_audio_ended', False):
             if context != self.context:
                 shared.phase=0
@@ -59,6 +66,7 @@ class CrowdControl:
         if not shared.phase and shared.requested_percent >= 0:
             self.clear()
         shared.heartbeat = ctypes.windll.kernel32.GetTickCount()
+        self.native_options.tick()
 
     def clear(self):
         if self.shared.requested_percent != -1:
@@ -67,9 +75,10 @@ class CrowdControl:
             self.shared.requested_percent = -1
             self.shared.command = command
 
-    def apply(self, value, context):
+    def apply(self, value, context, native_request=False):
         normalized=(context[0],self.team_id(context[1]),self.team_id(context[2]))
-        if (normalized != self.context or self.shared.phase != 1 or self.shared.status not in (2, 3)
+        phases=(1,2) if native_request else (1,)
+        if (normalized != self.context or self.shared.phase not in phases or self.shared.status not in (2, 3)
                 or self.shared.ack != self.shared.command):
             raise RuntimeError('Crowd bridge is not ready for this fixture')
         command=abs(self.shared.command)+1
