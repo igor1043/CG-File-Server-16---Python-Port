@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "launch_sites.h"
+#include "../common/frontend_startup_gate.h"
 #include "timing_v14.h"
 #include "goals.h"
 #include "teams.h"
@@ -737,6 +738,7 @@ static bool swap(void* before,void* after) {
 #include "native_signatures.h"
 static DWORD WINAPI install_worker(void*) {
     for (int attempt=0;attempt<600 && !stopping;++attempt) {
+        if(!fifa_frontend_startup_current(image)){Sleep(200);continue;}
         uintptr_t target=0;
         bool acceptable=get(image+0x2214520,target) && target==image+0x43f14e0;
         if (check_signatures(image) && acceptable) {
