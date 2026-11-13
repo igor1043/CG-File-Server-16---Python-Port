@@ -67,7 +67,7 @@ static bool native_draw(void *caller) {
     return false;
 }
 static bool map_pointer(HWND window,POINT *position,bool screen) {
-    if(!ready||stopping||!window||!position||width<64||height<64)return false;
+    if(!enabled||!ready||stopping||!window||!position||width<64||height<64)return false;
 #ifndef ULTRAWIDE_TEST
     // Our modal overlays poll their own physical mouse and perform their own
     // centring; only FIFA's native input is converted here.

@@ -76,17 +76,21 @@ int wmain(int argc,wchar_t **argv) {
         D3D11_VIEWPORT after={};UINT n=1;ctx->RSGetViewports(&n,&after);assert(!memcmp(&vp,&after,sizeof(vp)));
         D3D11_RECT afterRect={};n=1;ctx->RSGetScissorRects(&n,&afterRect);assert(afterRect.left==(test==3?128:0)&&afterRect.right==256);
     }
-    // On/off changes the scene, but the native mouse always targets the same
-    // centred 16:9 canvas. Check messages and polling without moving a cursor.
+    // Disabled uses the native full-window pointer unchanged. Enabled is the
+    // inverse of the centred UI draw, for both polling and window messages.
     for(bool active:{false,true}){
         ultrawide_test_attach(sc,ctx,active);
-        POINT point={32,54};assert(ultrawide_test_pointer(window,&point,false));assert(point.x==0&&point.y==54);
-        POINT origin={};assert(ClientToScreen(window,&origin));point={origin.x+224,origin.y+54};
-        assert(ultrawide_test_pointer(window,&point,true));assert(point.x==origin.x+256&&point.y==origin.y+54);
-        assert(ultrawide_test_message(window,WM_LBUTTONDOWN,0,MAKELPARAM(32,54),capture_message)==123);
-        assert(received.x==0&&received.y==54);
-        ultrawide_test_message(window,WM_MOUSEWHEEL,0,MAKELPARAM(origin.x+224,origin.y+54),capture_message);
-        assert(received.x==origin.x+256&&received.y==origin.y+54);
+        POINT origin={};assert(ClientToScreen(window,&origin));
+        for(int x:{0,32,64,128,192,224,255}){
+            int expected=active?int(lroundf(ultrawide::ui_pointer_x(float(x),256,256,108))):x;
+            POINT point={x,54};assert(ultrawide_test_pointer(window,&point,false)==active);assert(point.x==expected&&point.y==54);
+            point={origin.x+x,origin.y+54};assert(ultrawide_test_pointer(window,&point,true)==active);assert(point.x==origin.x+expected&&point.y==origin.y+54);
+            for(UINT message:{WM_MOUSEMOVE,WM_LBUTTONDOWN,WM_LBUTTONUP}){
+                assert(ultrawide_test_message(window,message,0,MAKELPARAM(x,54),capture_message)==123);assert(received.x==expected&&received.y==54);
+            }
+            ultrawide_test_message(window,WM_MOUSEWHEEL,0,MAKELPARAM(origin.x+x,origin.y+54),capture_message);
+            assert(received.x==origin.x+expected&&received.y==origin.y+54);
+        }
     }
     // A pre-centred viewport must not be squeezed again.
     ultrawide_test_attach(sc,ctx,true);ctx->OMSetRenderTargets(1,&rt,nullptr);ctx->RSSetViewports(1,&vp);ctx->RSSetScissorRects(1,&rect);ctx->Draw(3,0);
