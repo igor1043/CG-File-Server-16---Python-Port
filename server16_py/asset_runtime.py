@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import configparser
 import threading
 from typing import TYPE_CHECKING
 
@@ -80,31 +79,22 @@ class AssetRuntime:
 
     def apply_scoreboard_runtime(self) -> None:
         with self._scoreboard_lock:
-            if self.app.module_enabled('ScoreBoard'):
-                from .scoreboard_options import adopt_pending
-                adopt_pending(self.app)
             self._apply_scoreboard_runtime()
 
     def _scoreboard_package(self) -> tuple[str, Path | None]:
         """Resolve only installed packages, retaining the INI priority order."""
-        from .scoreboard_options import load_choice
         from .presentation_options_catalog import safe_name
         app = self.app
-        try:
-            choice = load_choice(app.exedir)
-        except (OSError, ValueError, configparser.Error) as exc:
-            app.log('Invalid scoreboard preference; using automatic assignments', exc)
-            choice = None
-        if choice == '':
-            return '', None
-        if choice is not None:
-            candidates = [choice]
-        else:
-            keys = [(app.TOURROUNDID, 'Scoreboard'), (app.TOURNAME, 'Scoreboard'),
-                    (app.HID, 'HomeTeamScoreBoard'), ('0', 'Scoreboard')]
-            candidates = [app.settings_ini.read(key, section) for key, section in keys if key]
+        from .competition_catalog import presentation_scope
+        scopes = presentation_scope(app.exedir, app.TOURROUNDID, app.TOURNAME)
+        direct = {str(app.TOURROUNDID), str(app.TOURNAME)}
+        keys = [(app.TOURROUNDID, 'Scoreboard'), (app.TOURNAME, 'Scoreboard'),
+                (app.HID, 'HomeTeamScoreBoard')]
+        keys.extend((key, 'Scoreboard') for key in scopes if key not in direct)
+        keys.append(('0', 'Scoreboard'))
+        candidates = [(app.settings_ini.read(key, section), key, section) for key, section in keys if key]
         seen = set()
-        for name in candidates:
+        for name, assignment_key, assignment_section in candidates:
             if not name or name in seen:
                 continue
             seen.add(name)
@@ -117,7 +107,7 @@ class AssetRuntime:
             if not (source / 'game').is_dir() or not any((source / 'game').rglob('*.big')):
                 app.log(f'Scoreboard package missing or incomplete; trying next assignment: {source}')
                 continue
-            app.log(f'Scoreboard resolved: {name} -> {source}')
+            app.log(f'Scoreboard resolved: [{assignment_section}] {assignment_key}={name}; comp={app.TOURNAME} round={app.TOURROUNDID} -> {source}')
             return name, source
         return '', None
 
@@ -161,11 +151,14 @@ class AssetRuntime:
                         self._notify_loading("update", "scoreboard", pct, f"{filename} ({done}/{total})")
                     return update
 
+                from .file_tools import prepare_asset_copy
+                prepare_asset_copy(app.exedir / "FSW" / "ScoreBoard", app.Scoredata / "game", log=app.log)
                 copy(app.exedir / "FSW" / "ScoreBoard", app.Scoredata / "game", progress_callback=copy_progress(0, 35))
                 app.log("Scoreboard native baseline copied")
                 scoreboard, scoreboard_dir = self._scoreboard_package()
                 self._notify_loading("show", "scoreboard", "Carregando placar", scoreboard or "Padrão", "Aplicando atribuição do placar", 40)
                 if scoreboard:
+                    prepare_asset_copy(scoreboard_dir, app.Scoredata, log=app.log)
                     copy(scoreboard_dir, app.Scoredata, progress_callback=copy_progress(40, 100))
                     app._set_display("scoreboard", scoreboard)
                     app.log(f"Applied scoreboard: {scoreboard}")

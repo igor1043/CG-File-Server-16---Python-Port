@@ -101,3 +101,46 @@ def icon_mapping(game):
             elif hint in mapping and mapping[hint] == asset:
                 mapping[hint] = asset
     return mapping
+
+
+def presentation_scope(game, round_id, competition_id):
+    """Most-specific CompData group/stage through its competition, then fallback.
+
+    A native round may be a group rather than the configured stage. Stop at the
+    competition boundary so nation/confederation IDs never become assignments.
+    Unknown IDs retain exact-match behavior; corrupt cycles are bounded.
+    """
+    objects = nodes(game)
+    result = []
+    # Retain exact identifiers first. Inferred parents never supersede an
+    # authored exact round/competition or home-team assignment.
+    for value in (round_id, competition_id):
+        raw = str(value or '').strip()
+        if raw and raw != '0' and raw not in result:
+            result.append(raw)
+    for value in (round_id, competition_id):
+        raw = str(value or '').strip()
+        if not raw or raw == '0':
+            continue
+        if raw not in result:
+            result.append(raw)
+        if not raw.isdigit():
+            continue
+        ident = int(raw)
+        seen = set()
+        for _ in range(64):
+            if ident in seen:
+                break
+            seen.add(ident)
+            node = objects.get(ident)
+            if node is None or node[0] <= 3:
+                break
+            parent = node[3]
+            ancestor = objects.get(parent)
+            if ancestor is None or ancestor[0] < 3:
+                break
+            key = str(parent)
+            if key not in result:
+                result.append(key)
+            ident = parent
+    return tuple(result)

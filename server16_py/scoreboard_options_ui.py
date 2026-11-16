@@ -1,7 +1,6 @@
-"""Extend GameSettings with native scoreboard and per-fixture attendance rows."""
+"""Extend GameSettings with video, attendance and stadium options only."""
 from pathlib import Path
 import hashlib,json,os,struct,sys
-from .scoreboard_options import discover,selected_index,selection_revision
 from . import movie_options
 
 CLASS=('game','screens','settings','GameSettings')
@@ -10,7 +9,7 @@ ROW=65000
 CROWD_ROW=65001
 MOVIE_ROW=65002
 CROWD_VALUES=(-1,*range(0,101,5))
-MARKER=b'S16ScoreboardInstalled\0'
+MARKER=b'S16MatchOptionsInstalled\0'
 
 
 def write_native_big(big,path):
@@ -41,10 +40,8 @@ def build(game,original,output,manifest,stadium=None):
     registration=next(c for c in apt.root_frames[0] if isinstance(c,tuple) and c[0]=='init' and c[1]==apt.exports['__Packages.'+FULL])
     original_code=actions.cache[registration[-1]]
     if original_code[-1].op!=0:raise ValueError('Registro nativo de opções desconhecido')
-    catalog=discover(game);initial=selected_index(game,catalog)
     movies=movie_options.discover(game);movie_initial=movie_options.selected_index(game,movies)
-    selection=selection_revision(game)
-    revision=hashlib.sha256(json.dumps([catalog.signature,movies.signature,stadium,3,selection],sort_keys=True).encode()).hexdigest()
+    revision=hashlib.sha256(json.dumps([movies.signature,stadium,4],sort_keys=True).encode()).hexdigest()
     from .stadium_options_ui import add_preview
     has_photo=add_preview(game,big,apt,stadium)
     data=apt.data;data.extend(bytes(-len(data)%8));start=len(data)
@@ -63,12 +60,9 @@ def build(game,original,output,manifest,stadium=None):
             struct.pack_into('<I',self.data,size_at,len(self.data)-body_at);self.op(79)
     a=Code(data);P=b.prop;R=b.reg;T=b.this;G=b.G;EQ=b.equal;CALL=b.call
     proto=b.path(*CLASS,'prototype');index=lambda obj,key:('index',obj,key)
-    global_choice='Server16ScoreboardChoice';global_catalog='Server16ScoreboardCatalog'
     already=a.uid();a.expr(EQ(P(proto,'S16MatchOptionsRevision'),revision));a.branch(already)
     a.set(proto,'S16MatchOptionsRevision',revision)
-    a.set(proto,'S16ScoreboardInstalled',True)
-    a.expr(proto);a.string('S16InitialScoreboard');a.op(183)
-    initial_offset=len(data);data.extend(struct.pack('<i',initial));a.op(79)
+    a.set(proto,'S16MatchOptionsInstalled',True)
     a.expr(proto);a.string('S16InitialMovie');a.op(183)
     movie_offset=len(data);data.extend(struct.pack('<i',movie_initial));a.op(79)
     originals={'InitGameSetting':'S16BaseInit','GetCurrentSettingValue':'S16BaseCurrent',
@@ -77,10 +71,7 @@ def build(game,original,output,manifest,stadium=None):
         'OnExitScreen':'S16BaseExit','ResetGameSettings':'S16BaseReset',
         'GetHelpContext':'S16BaseHelp','HighlightCallback':'S16BaseHighlight','UnhighlightCallback':'S16BaseUnhighlight'}
     for method,backup in originals.items():a.when(P(proto,backup),lambda a:None,lambda a,m=method,k=backup:a.set(proto,k,P(proto,m)))
-    a.function('S16ScoreboardLabels',0,lambda a:a.ret(('array',catalog.labels)))
-    a.function('S16ScoreboardValues',0,lambda a:a.ret(('array',tuple(range(len(catalog.values))))))
-    a.function('S16ScoreboardDescription',0,lambda a:a.ret('Escolha o placar e volte para aplicar pelo Server16. Automático mantém as regras por competição. Requer o módulo ScoreBoard ativo.'))
-    a.function('S16ScoreboardEnabled',0,lambda a:a.ret(True))
+    a.function('S16OptionsEnabled',0,lambda a:a.ret(True))
     a.function('S16CrowdLabels',0,lambda a:a.ret(('array',('Automático',*(str(v)+'%' for v in CROWD_VALUES[1:])))))
     a.function('S16CrowdValues',0,lambda a:a.ret(('array',tuple(range(len(CROWD_VALUES))))))
     a.function('S16CrowdDescription',0,lambda a:a.ret('Ocupação do estádio nesta partida. Automático usa a regra de público do mod; a escolha manual não altera outras partidas.'))
@@ -88,35 +79,21 @@ def build(game,original,output,manifest,stadium=None):
     a.function('S16MovieValues',0,lambda a:a.ret(('array',tuple(range(len(movies.values))))))
     a.function('S16MovieDescription',0,lambda a:a.ret('Vídeo de abertura pré-jogo. Automático usa as atribuições do INI; Padrão do FIFA restaura a abertura original.'))
     def init(a):
-        changed=('bin',17,('bin',17,EQ(EQ(G(global_catalog),catalog.signature),False),EQ(G(global_choice),None)),
-                 EQ(EQ(G('Server16ScoreboardSync'),selection),False))
-        a.when(changed,lambda a:(a.set(b.GLOBAL,global_catalog,catalog.signature),
-            a.set(b.GLOBAL,global_choice,T('S16InitialScoreboard')),a.set(b.GLOBAL,'Server16ScoreboardSync',selection)))
-        a.when(EQ(T('S16ScoreboardDirty'),None),lambda a:a.set(R(1),'S16ScoreboardDirty',False))
         a.when(EQ(T('S16CrowdChoice'),None),lambda a:(a.set(R(1),'S16CrowdChoice',0),a.set(R(1),'S16CrowdDirty',False)))
         a.when(('bin',17,EQ(EQ(G('S16MovieCatalog'),movies.signature),False),EQ(G('S16MovieChoice'),None)),
                lambda a:(a.set(b.GLOBAL,'S16MovieCatalog',movies.signature),a.set(b.GLOBAL,'S16MovieChoice',T('S16InitialMovie'))))
         category=index(P(T('mcData'),'categories'),P(P(G('Settings'),'eCategory'),'MATCH'))
-        def insert(a):
-            descriptor=a.object(dict(id=ROW,title='Scoreboard',controlType='toggle',currentValue=G(global_choice),
-                labels=P(proto,'S16ScoreboardLabels'),values=P(proto,'S16ScoreboardValues'),
-                description=P(proto,'S16ScoreboardDescription'),isEnabled=P(proto,'S16ScoreboardEnabled'),
-                isVisible=P(proto,'S16ScoreboardEnabled')))
-            a.expr(P(T('mcData'),'settings'));a.expr(ROW);a.expr(descriptor);a.op(79)
-            a.do(P(category,'settings'),'push',ROW);a.set(category,'S16ScoreboardInstalled',True)
-        a.when(('bin',16,category,EQ(P(category,'S16ScoreboardInstalled'),None)),insert)
-        a.set(index(P(T('mcData'),'settings'),ROW),'currentValue',G(global_choice))
         def insert_crowd(a):
             descriptor=a.object(dict(id=CROWD_ROW,title='Ocupação do estádio',controlType='toggle',currentValue=T('S16CrowdChoice'),
                 labels=P(proto,'S16CrowdLabels'),values=P(proto,'S16CrowdValues'),description=P(proto,'S16CrowdDescription'),
-                isEnabled=P(proto,'S16ScoreboardEnabled'),isVisible=P(proto,'S16ScoreboardEnabled')))
+                isEnabled=P(proto,'S16OptionsEnabled'),isVisible=P(proto,'S16OptionsEnabled')))
             a.expr(P(T('mcData'),'settings'));a.expr(CROWD_ROW);a.expr(descriptor);a.op(79)
             a.do(P(category,'settings'),'push',CROWD_ROW);a.set(category,'S16CrowdInstalled',True)
         a.when(('bin',16,category,EQ(P(category,'S16CrowdInstalled'),None)),insert_crowd)
         def insert_movie(a):
             descriptor=a.object(dict(id=MOVIE_ROW,title='Vídeo pré-jogo',controlType='toggle',currentValue=G('S16MovieChoice'),
                 labels=P(proto,'S16MovieLabels'),values=P(proto,'S16MovieValues'),description=P(proto,'S16MovieDescription'),
-                isEnabled=P(proto,'S16ScoreboardEnabled'),isVisible=P(proto,'S16ScoreboardEnabled')))
+                isEnabled=P(proto,'S16OptionsEnabled'),isVisible=P(proto,'S16OptionsEnabled')))
             a.expr(P(T('mcData'),'settings'));a.expr(MOVIE_ROW);a.expr(descriptor);a.op(79)
             a.do(P(category,'settings'),'push',MOVIE_ROW);a.set(category,'S16MovieInstalled',True)
         a.when(('bin',16,category,EQ(P(category,'S16MovieInstalled'),None)),insert_movie)
@@ -126,14 +103,13 @@ def build(game,original,output,manifest,stadium=None):
     a.function('InitGameSetting',0,init)
     def current(a):
         a.when(EQ(R(3),MOVIE_ROW),lambda a:a.ret(G('S16MovieChoice')))
-        a.when(EQ(R(3),ROW),lambda a:a.ret(G(global_choice)))
         a.when(EQ(R(3),CROWD_ROW),lambda a:a.ret(T('S16CrowdChoice')))
         a.ret(CALL(R(1),'S16BaseCurrent',R(2),R(3)))
     a.function('GetCurrentSettingValue',2,current)
     def default(a):
         a.when(EQ(R(3),MOVIE_ROW),lambda a:a.ret(0))
         a.when(EQ(R(3),CROWD_ROW),lambda a:a.ret(0))
-        a.when(EQ(R(3),ROW),lambda a:a.ret(0));a.ret(CALL(R(1),'S16BaseDefault',R(2),R(3)))
+        a.ret(CALL(R(1),'S16BaseDefault',R(2),R(3)))
     a.function('GetDefaultSettingValue',2,default)
     def setting(a):
         def movie(a):
@@ -146,24 +122,13 @@ def build(game,original,output,manifest,stadium=None):
             a.when(valid,lambda a:(a.set(R(1),'S16CrowdChoice',R(4)),a.set(R(1),'S16CrowdDirty',True)))
             a.ret()
         a.when(EQ(R(3),CROWD_ROW),crowd)
-        def own(a):
-            valid=('bin',16,('bin',72,-1,R(4)),('bin',72,R(4),len(catalog.values)))
-            a.when(valid,lambda a:(a.set(b.GLOBAL,global_choice,R(4)),a.set(R(1),'S16ScoreboardDirty',True)))
-            a.ret()
-        a.when(EQ(R(3),ROW),own);a.ret(CALL(R(1),'S16BaseSet',R(2),R(3),R(4)))
+        a.ret(CALL(R(1),'S16BaseSet',R(2),R(3),R(4)))
     a.function('SetCurrentSettingValue',3,setting)
     def changed(a):
         a.when(EQ(R(4),MOVIE_ROW),lambda a:a.ret())
         a.when(EQ(R(4),CROWD_ROW),lambda a:a.ret())
-        a.when(EQ(R(4),ROW),lambda a:(a.do(R(1),'S16CommitScoreboardChoice'),a.ret()))
         a.ret(CALL(R(1),'S16BaseChange',R(2),R(3),R(4),R(5)))
     a.function('OnChangeCallback',4,changed)
-    def commit_scoreboard(a):
-        a.when(T('S16ScoreboardDirty'),lambda a:(
-            a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchScoreboard',
-                b.plus(b.plus('S16SCORE1|'+catalog.signature+'|',G(global_choice)),'|END')),
-            a.set(R(1),'S16ScoreboardDirty',False)))
-    a.function('S16CommitScoreboardChoice',0,commit_scoreboard)
     def commit(a):
         a.when(T('S16MovieDirty'),lambda a:(
             a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchMovie',b.plus(b.plus('S16MOVIE1|'+movies.signature+'|',G('S16MovieChoice')),'|END')),
@@ -172,17 +137,16 @@ def build(game,original,output,manifest,stadium=None):
             a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchCrowd',
                 b.plus(b.plus('S16CROWD1|',index(('array',CROWD_VALUES),T('S16CrowdChoice'))),'|END')),
             a.set(R(1),'S16CrowdDirty',False)))
-        a.do(R(1),'S16CommitScoreboardChoice')
-    a.function('S16CommitScoreboard',0,commit)
+    a.function('S16CommitMatchOptions',0,commit)
     def event(a):
         a.when(('bin',16,CALL(R(1),'S16IsStadiumSetting'),EQ(R(2),P(G('INPUTCODE'),'OPTION_LEFT'))),lambda a:(
-            a.do(R(1),'S16CommitScoreboard'),a.do(b.ION,'SendSystemEvent','GameSettings','Server16OpenStadium','S16STADIUM1|OPEN|END'),a.ret(True)))
+            a.do(R(1),'S16CommitMatchOptions'),a.do(b.ION,'SendSystemEvent','GameSettings','Server16OpenStadium','S16STADIUM1|OPEN|END'),a.ret(True)))
         for key in ('BACK','ADVANCE'):
-            a.when(EQ(R(2),P(G('INPUTCODE'),key)),lambda a:a.do(R(1),'S16CommitScoreboard'))
+            a.when(EQ(R(2),P(G('INPUTCODE'),key)),lambda a:a.do(R(1),'S16CommitMatchOptions'))
         a.ret(CALL(R(1),'S16BaseInput',R(2),R(3),R(4)))
     a.function('LocalEventHandler',3,event)
-    a.function('OnExitScreen',0,lambda a:(a.do(R(1),'S16CommitScoreboard'),a.do(R(1),'S16BaseExit')))
-    a.function('ResetGameSettings',0,lambda a:(a.set(b.GLOBAL,global_choice,0),a.set(b.GLOBAL,'S16MovieChoice',0),a.set(R(1),'S16MovieDirty',True),a.set(R(1),'S16CrowdChoice',0),a.do(R(1),'S16BaseReset'),a.set(R(1),'S16ScoreboardDirty',True),a.set(R(1),'S16CrowdDirty',True)))
+    a.function('OnExitScreen',0,lambda a:(a.do(R(1),'S16CommitMatchOptions'),a.do(R(1),'S16BaseExit')))
+    a.function('ResetGameSettings',0,lambda a:(a.set(b.GLOBAL,'S16MovieChoice',0),a.set(R(1),'S16MovieDirty',True),a.set(R(1),'S16CrowdChoice',0),a.do(R(1),'S16BaseReset'),a.set(R(1),'S16CrowdDirty',True)))
     from .stadium_options_ui import extend
     extend(a,b,proto,stadium,has_photo)
     a.label(already);a.op(0);a.finish()
@@ -203,14 +167,12 @@ def build(game,original,output,manifest,stadium=None):
     if decoded.errors or check.exports!=apt.exports:raise ValueError('Validação da tela falhou')
     if any(bytes(rebuilt.entries[name].data)!=bytes(entry.data) for name,entry in big.entries.items()):
         raise ValueError('A tela perdeu um recurso original')
-    offset=rebuilt.entries[apt.entry.name].offset+initial_offset
     movie_absolute=rebuilt.entries[apt.entry.name].offset+movie_offset
     blob=temporary.read_bytes();stable=bytearray(blob)
-    for at in (offset,movie_absolute):stable[at:at+4]=bytes(4)
-    record=dict(schema=1,signature=catalog.signature,packages=catalog.packages,labels=catalog.labels,
-        initial_value_offset=offset,movie_initial_offset=movie_absolute,mutable_value_offsets=[offset,movie_absolute],
+    for at in (movie_absolute,):stable[at:at+4]=bytes(4)
+    record=dict(schema=1,movie_initial_offset=movie_absolute,mutable_value_offsets=[movie_absolute],
         ui_stable_sha256=hashlib.sha256(stable).hexdigest(),original_rows_preserved=True,crowd_row=CROWD_ROW,
-        movie_signature=movies.signature,stadium_revision=stadium,native_options_revision=3,selection_revision=selection)
+        movie_signature=movies.signature,stadium_revision=stadium,native_options_revision=4,scoreboard_selectable=False)
     manifest=Path(manifest);manifest.parent.mkdir(parents=True,exist_ok=True)
     manifest_temp=manifest.with_suffix('.json.scoreboard-new');manifest_temp.write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf8')
     from .file_tools import replace_asset_file

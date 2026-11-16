@@ -120,43 +120,30 @@ class PresentationAccessTests(unittest.TestCase):
         app.apply_scoreboard_runtime.assert_called_once()
         app.apply_movie_runtime.assert_called_once()
 
-    def test_native_scoreboard_choice_and_server_edit_both_replace_the_active_package(self):
-        from server16_py import scoreboard_options as options
+    def test_server_ini_edit_replaces_readonly_active_scoreboard(self):
         from server16_py.settings_editor import SettingsSectionFrame
-        app, runtime = self.app()
-        self.put('ScoreBoardGBD/Manual TV/game/score.big', b'manual game choice')
-        app.memory = SimpleNamespace(process_id=42)
-        app.apply_scoreboard_runtime = runtime.apply_scoreboard_runtime
-        app.apply_all_runtime = runtime.apply_scoreboard_runtime
-        app.refresh_modules = Mock()
-        service = options.ScoreboardOptions(app)
-        service.root = self.root
-        self.addCleanup(service.close)
-        catalog = options.discover(self.root)
-        index = catalog.values.index('Manual TV')
-        service._apply(self.root, 42, catalog, index)
-        target = app.Scoredata / 'game/score.big'
-        self.assertEqual(target.read_bytes(), b'manual game choice')
+        app,runtime=self.app()
+        runtime.apply_scoreboard_runtime()
+        target=app.Scoredata/'game/score.big';self.assertEqual(target.read_bytes(),b'new scoreboard')
         target.chmod(stat.S_IREAD)
-        editor = SimpleNamespace(app=app, spec=SimpleNamespace(section='Scoreboard'),
-            status_var=SimpleNamespace(get=lambda: '', set=Mock()), tr=lambda key: key)
+        self.put('ScoreBoardGBD/Other/game/score.big',b'server assignment')
+        original=app.settings_ini.read
+        app.settings_ini.read=lambda key,section:'Other' if section=='Scoreboard' and key==app.TOURNAME else original(key,section)
+        app.apply_all_runtime=runtime.apply_scoreboard_runtime;app.refresh_modules=Mock()
+        editor=SimpleNamespace(app=app,spec=SimpleNamespace(section='Scoreboard'),status_var=SimpleNamespace(get=lambda:'',set=Mock()),tr=lambda key:key)
         SettingsSectionFrame._apply_runtime(editor)
-        self.assertIsNone(options.load_choice(self.root))
-        self.assertEqual(target.read_bytes(), b'new scoreboard')
-        service._apply(self.root, 42, catalog, index)
-        self.assertEqual(target.read_bytes(), b'manual game choice')
+        self.assertEqual(target.read_bytes(),b'server assignment')
+        self.assertFalse((self.root/'ModCarrerMode/config/scoreboard.ini').exists())
 
-    def test_unrelated_server_edit_preserves_native_scoreboard_choice(self):
-        from server16_py import scoreboard_options as options
+    def test_unrelated_server_edit_does_not_write_legacy_preference(self):
         from server16_py.settings_editor import SettingsSectionFrame
-        app, runtime = self.app()
-        options.save_choice(self.root, 'Default TV')
-        app.refresh_modules=Mock()
-        app.apply_all_runtime=Mock(return_value=True)
-        editor=SimpleNamespace(app=app, spec=SimpleNamespace(section='Movies'),
-            status_var=SimpleNamespace(get=lambda:'',set=Mock()),tr=lambda key:key)
+        app,runtime=self.app()
+        before=b'[Scoreboard]\nMode=native\n'
+        self.put('ModCarrerMode/config/scoreboard.ini',before)
+        app.refresh_modules=Mock();app.apply_all_runtime=Mock(return_value=True)
+        editor=SimpleNamespace(app=app,spec=SimpleNamespace(section='Movies'),status_var=SimpleNamespace(get=lambda:'',set=Mock()),tr=lambda key:key)
         SettingsSectionFrame._apply_runtime(editor)
-        self.assertEqual(options.load_choice(self.root), 'Default TV')
+        self.assertEqual((self.root/'ModCarrerMode/config/scoreboard.ini').read_bytes(),before)
 
     def test_explicit_server_stadium_edit_supersedes_picker_but_other_edits_do_not(self):
         from server16_py.settings_editor import SettingsSectionFrame

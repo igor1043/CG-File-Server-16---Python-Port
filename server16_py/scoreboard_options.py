@@ -1,143 +1,22 @@
-"""Manual pre-match scoreboard choice, independent of competition assignments."""
-from __future__ import annotations
+"""Native match options for video, attendance and stadium; scoreboard is INI-only.
+
+The historical class/module name is retained for existing stadium integrations.
+Old scoreboard.ini preferences and native scoreboard request files are ignored.
+"""
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-import configparser
-import hashlib
-import json
-import os
 from pathlib import Path
-import re
-import struct
-import threading
-import uuid
-from .presentation_options_catalog import packages,available
+import hashlib,json,struct,threading
 from .file_tools import replace_asset_file
 
 PAGE='game/screens/settings/GameSettings'
 UI_PATH='data/ui/game/screens/settings/gamesettings.big'
-CATALOG='ModCarrerMode/data/scoreboard_selector/catalog.json'
-PREFERENCE='ModCarrerMode/config/scoreboard.ini'
-REQUEST='ModCarrerMode/runtime/scoreboard_selector/request.tsv'
-ACK='ModCarrerMode/runtime/scoreboard_selector/ack.json'
-MAX_OPTIONS=1024
-
-
-def valid_name(name):
-    return isinstance(name,str) and bool(name) and name not in ('.','..') and not any(c in name for c in '/\\:\r\n\0')
-
-
-@dataclass(frozen=True)
-class Catalog:
-    packages:tuple[str,...]
-
-    @property
-    def signature(self):return hashlib.sha256(json.dumps(self.packages,ensure_ascii=True).encode()).hexdigest()
-    @property
-    def labels(self):return ('Automático · Server16','Padrão do FIFA',*self.packages)
-    @property
-    def values(self):return (None,'',*self.packages)
-
-
-def discover(game):
-    names=packages(game,'ScoreBoardGBD','scoreboard',{'scoreboard','hometeamscoreboard','scoreboardcatalog'})
-    if len(names)>MAX_OPTIONS-2:raise ValueError('Há mais placares que o seletor suporta')
-    return Catalog(names)
-
-
-def load_choice(game):
-    path=Path(game)/PREFERENCE
-    if not path.is_file():return None
-    if path.stat().st_size>4096:raise ValueError('Arquivo de escolha de placar inválido')
-    ini=configparser.ConfigParser(interpolation=None);ini.read(path,encoding='utf-8-sig')
-    mode=ini.get('Scoreboard','Mode',fallback='automatic')
-    if mode=='automatic':return None
-    if mode=='native':return ''
-    name=ini.get('Scoreboard','Package',fallback='')
-    if mode!='manual' or not valid_name(name):raise ValueError('Placar manual inválido')
-    # A removed package cannot block future matches or name another path.
-    return name if available(game,'ScoreBoardGBD','scoreboard',name) else None
-
-
-def save_choice(game,choice):
-    if choice is not None and choice!='' and not available(game,'ScoreBoardGBD','scoreboard',choice):raise ValueError('Placar não instalado')
-    mode='automatic' if choice is None else 'native' if choice=='' else 'manual'
-    # One persisted value and revision are shared by both front ends.
-    try:
-        if load_choice(game)==choice and selection_revision(game):return
-    except (OSError,ValueError,configparser.Error):pass
-    text='[Scoreboard]\nMode='+mode+'\nRevision='+uuid.uuid4().hex+'\n'
-    if mode=='manual':text+='Package='+choice+'\n'
-    path=Path(game)/PREFERENCE;path.parent.mkdir(parents=True,exist_ok=True)
-    temp=path.with_suffix('.ini.new');temp.write_text(text,encoding='utf8');replace_asset_file(temp,path)
-
-
-def selection_revision(game):
-    path=Path(game)/PREFERENCE
-    if not path.is_file() or path.stat().st_size>4096:return ''
-    ini=configparser.ConfigParser(interpolation=None);ini.read(path,encoding='utf-8-sig')
-    value=ini.get('Scoreboard','Revision',fallback='')
-    return value if re.fullmatch('[0-9a-f]{32}',value) else ''
-
-
-def _acknowledged(game,identity):
-    try:
-        path=Path(game)/ACK
-        return path.stat().st_size<=512 and json.loads(path.read_bytes()).get('request')==identity
-    except (OSError,ValueError,AttributeError):return False
-
-
-def _acknowledge(game,pid,identity):
-    ack=Path(game)/ACK;ack.parent.mkdir(parents=True,exist_ok=True);temp=ack.with_suffix('.json.new')
-    temp.write_text(json.dumps(dict(schema=1,pid=pid,request=identity)),encoding='ascii');replace_asset_file(temp,ack)
-
-
-def select_choice(app,choice,*,source='server',catalog=None):
-    """Commit the single shared selection; both UIs observe the same value."""
-    service=getattr(app,'scoreboard_options',None)
-    lock=service.choice_lock if service is not None else threading.RLock()
-    game=Path(app.exedir)
-    with lock:
-        # An older in-game request must not undo a newer explicit Server edit.
-        pending=None
-        if source=='server':
-            if service is not None:service.selection_epoch+=1
-            pid=getattr(getattr(app,'memory',None),'process_id',0)
-            if pid and (game/REQUEST).is_file():
-                try:
-                    import psutil
-                    created=round((psutil.Process(pid).create_time()+11644473600)*10_000_000)
-                    pending=(pid,_request(game,pid,created)[2])
-                except (OSError,ValueError,psutil.Error):pass
-        save_choice(game,choice)
-        if pending:_acknowledge(game,*pending)
-        if catalog is None:catalog=discover(game)
-        if (game/CATALOG).is_file():
-            try:update_initial_choice(game,catalog)
-            except (OSError,ValueError,KeyError) as error:app.log('Scoreboard selected; UI will refresh from the shared choice',error)
-        if service is not None:
-            service.notify_choice(choice)
-            if source=='server':
-                entry=getattr(service,'native_entry',None) if getattr(app,'lastpagename','')==PAGE else None
-                service._submit(service._prepare,game,entry)
-
-
-def selected_index(game,catalog):
-    choice=load_choice(game)
-    try:return catalog.values.index(choice)
-    except ValueError:return 0
-
-
-def resolve(game,assigned):
-    choice=load_choice(game)
-    return assigned if choice is None else choice
-
+CATALOG='ModCarrerMode/data/match_options/catalog.json'
 
 def verified_ui(game,record):
     """Refuse to overwrite UI bytes owned by a concurrent integration."""
     game=Path(game)
-    if record.get('schema')!=1:raise ValueError('Catálogo do seletor inválido')
-    data=bytearray((game/UI_PATH).read_bytes());offset=record['initial_value_offset']
+    if record.get('schema')!=1 or record.get('native_options_revision')!=4 or record.get('scoreboard_selectable') is not False:raise ValueError('Catálogo do seletor inválido')
+    data=bytearray((game/UI_PATH).read_bytes());offset=record['movie_initial_offset']
     if not isinstance(offset,int) or not 1<=offset<=len(data)-4 or data[offset-1]!=183:raise ValueError('Posição do seletor inválida')
     stable=bytearray(data)
     for mutable in record.get('mutable_value_offsets',[offset]):
@@ -147,60 +26,13 @@ def verified_ui(game,record):
     return data,offset
 
 
-def update_initial_choice(game,catalog):
-    """Change only our verified AVM integer; preserve every other UI byte."""
-    game=Path(game);record=json.loads((game/CATALOG).read_bytes())
-    if record.get('signature')!=catalog.signature:raise ValueError('Lista do seletor desatualizada')
-    data,offset=verified_ui(game,record)
-    value=selected_index(game,catalog)
-    if struct.unpack_from('<i',data,offset)[0]==value:return
-    struct.pack_into('<i',data,offset,value)
-    path=game/UI_PATH;temp=path.with_suffix('.big.scoreboard-new');temp.write_bytes(data);replace_asset_file(temp,path)
-
-
 def update_movie_initial(game,catalog):
     from .movie_options import selected_index as movie_index
     game=Path(game);record=json.loads((game/CATALOG).read_bytes())
     if record.get('movie_signature')!=catalog.signature:raise ValueError('Lista de vídeos desatualizada')
     data,_=verified_ui(game,record);offset=record['movie_initial_offset'];value=movie_index(game,catalog)
     if struct.unpack_from('<i',data,offset)[0]==value:return
-    struct.pack_into('<i',data,offset,value);path=game/UI_PATH;temp=path.with_suffix('.big.movie-new');temp.write_bytes(data);os.replace(temp,path)
-
-
-def _request(game,pid,created):
-    path=Path(game)/REQUEST
-    if path.stat().st_size>512:raise ValueError('Solicitação de placar excedeu o limite')
-    with path.open('rb') as stream:
-        raw=stream.read(513);info=os.fstat(stream.fileno())
-    if len(raw)>512:raise ValueError('Solicitação de placar excedeu o limite')
-    fields=dict(line.split('=',1) for line in raw.decode('ascii').splitlines() if '=' in line)
-    if fields.get('schema')!='1' or int(fields.get('pid','0'))!=pid or abs(int(fields.get('created','0'))-created)>10000:raise ValueError('Solicitação pertence a outra sessão')
-    match=re.fullmatch(r'S16SCORE1\|([0-9a-f]{64})\|(0|[1-9]\d{0,3})\|END',fields.get('wire',''))
-    if not match:raise ValueError('Solicitação de placar inválida')
-    catalog=discover(game);index=int(match[2])
-    if match[1]!=catalog.signature or not 0<=index<len(catalog.values):raise ValueError('Catálogo de placares mudou; abra novamente as opções')
-    # Selecting A -> Server B -> game A is a new event even with identical
-    # native wire bytes. Identify the publication, not just its payload.
-    identity=hashlib.sha256(raw+b'\0'+str(info.st_mtime_ns).encode()+b'\0'+str(info.st_ino).encode()).hexdigest()
-    return catalog,index,identity
-
-
-def read_request(game,pid,created):return _request(game,pid,created)[:2]
-
-
-def adopt_pending(app):
-    """Also run at presentation preparation, so a fast Start cannot beat polling."""
-    game=Path(app.exedir);pid=getattr(getattr(app,'memory',None),'process_id',0)
-    if not pid or not (game/REQUEST).is_file():return False
-    try:
-        import psutil
-        created=round((psutil.Process(pid).create_time()+11644473600)*10_000_000)
-        catalog,index,identity=_request(game,pid,created)
-    except (OSError,ValueError,psutil.Error):return False
-    if _acknowledged(game,identity):return False
-    select_choice(app,catalog.values[index],source='native',catalog=catalog)
-    _acknowledge(game,pid,identity)
-    return True
+    struct.pack_into('<i',data,offset,value);path=game/UI_PATH;temp=path.with_suffix('.big.movie-new');temp.write_bytes(data);replace_asset_file(temp,path)
 
 
 class ScoreboardOptions:
@@ -211,17 +43,6 @@ class ScoreboardOptions:
         self._pending=0;self._lock=threading.Lock()
         self.enter_stamp=None;self.open_stamp=None;self.last_page=None;self.movie_stamp=None
         self.stadium=None;self.stadium_context=None
-        self.choice_lock=getattr(getattr(app,'assets_runtime',None),'_scoreboard_lock',threading.RLock())
-        self.selection_epoch=0;self.choice_listeners=[]
-
-    def notify_choice(self,choice):
-        for listener in tuple(self.choice_listeners):
-            if hasattr(self.app,'_post_ui'):self.app._post_ui(listener,choice)
-            else:listener(choice)
-
-    def choose_from_server(self,choice):
-        select_choice(self.app,choice)
-        self._submit(self.app.apply_scoreboard_runtime)
 
     @property
     def busy(self):
@@ -247,25 +68,24 @@ class ScoreboardOptions:
         try:
             from . import movie_options
             movies=movie_options.discover(game)
-            catalog=discover(game);manifest=game/CATALOG;rebuild=True
+            manifest=game/CATALOG;rebuild=True
             if manifest.is_file():
                 record=json.loads(manifest.read_bytes())
                 if (game/UI_PATH).is_file():verified_ui(game,record)
-                rebuild=(record.get('signature')!=catalog.signature or record.get('movie_signature')!=movies.signature
-                    or record.get('native_options_revision')!=3 or record.get('selection_revision')!=selection_revision(game)
+                rebuild=(record.get('movie_signature')!=movies.signature
+                    or record.get('native_options_revision')!=4 or record.get('scoreboard_selectable') is not False
                     or record.get('stadium_revision')!=self.stadium or not (game/UI_PATH).is_file())
             if rebuild:
                 from .scoreboard_options_ui import build
                 template=game/'ModCarrerMode/source/native_mods/scoreboard_settings/gamesettings.original.big'
-                if not template.is_file():raise FileNotFoundError('Modelo da tela de placares não instalado')
+                if not template.is_file():raise FileNotFoundError('Modelo da tela de opções não instalado')
                 build(game,template,game/UI_PATH,manifest,stadium=self.stadium)
-            update_initial_choice(game,catalog)
             update_movie_initial(game,movies)
             if self.root==game:self.bound=True
             if rebuild and refresh:
                 from .stadium_options import publish_refresh
                 publish_refresh(self.app,refresh)
-        except Exception as error:self.app.log('Scoreboard selector initialization failed',error)
+        except Exception as error:self.app.log('Native match options initialization failed',error)
 
     def poll(self,page):
         if self.closed or not self.bound:return
@@ -282,32 +102,6 @@ class ScoreboardOptions:
             if stamp!=self.movie_stamp:
                 self.movie_stamp=stamp;self._submit(self._apply_movie,self.root,pid)
         except FileNotFoundError:pass
-        path=self.root/REQUEST
-        try:
-            info=path.stat();stamp=(pid,info.st_mtime_ns,info.st_size)
-            if stamp==self.stamp:return
-            self.stamp=stamp
-            import psutil
-            created=round((psutil.Process(pid).create_time()+11644473600)*10_000_000)
-            catalog,index,identity=_request(self.root,pid,created)
-            if _acknowledged(self.root,identity):return
-            self.selection_epoch+=1
-            self._submit(self._apply,self.root,pid,catalog,index,self.selection_epoch)
-        except FileNotFoundError:pass
-        except Exception as error:self.app.log('Scoreboard selector request rejected',error)
-
-    def _apply(self,game,pid,catalog,index,epoch=None):
-        if self.closed or self.root!=game or self.app.memory.process_id!=pid:return
-        try:
-            if not self.app.module_enabled('ScoreBoard'):raise RuntimeError('Ative o módulo ScoreBoard no Server16 para aplicar o placar')
-            with self.choice_lock:
-                if epoch is not None and epoch!=self.selection_epoch:return
-                select_choice(self.app,catalog.values[index],source='native',catalog=catalog)
-                # Existing baseline/TV-logo variants/progress notifications.
-                self.app.apply_scoreboard_runtime()
-            self.app.log('Scoreboard chosen in native game options: '+catalog.labels[index])
-        except Exception as error:self.app.log('Failed to apply native scoreboard choice',error)
-
     def _apply_movie(self,game,pid):
         if self.closed or self.root!=game or self.app.memory.process_id!=pid:return
         try:

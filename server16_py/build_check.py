@@ -50,7 +50,7 @@ def run(output):
             with tempfile.TemporaryDirectory(prefix='Server16-scoreboard-selftest-') as directory:
                 fixture=Path(directory);asset_root=Path(asset_root)
                 record=build(asset_root,asset_root/'ModCarrerMode/source/native_mods/scoreboard_settings/gamesettings.original.big',fixture/'gamesettings.big',fixture/'catalog.json')
-                result['scoreboard_native_ui']=record['original_rows_preserved'] and len(record['labels'])>=2
+                result['scoreboard_native_ui']=record['original_rows_preserved'] and record.get('scoreboard_selectable') is False and record['crowd_row']==65001
         except Exception as error:result['scoreboard_native_ui']=str(error)
         result['ok']=result['ok'] and result['scoreboard_native_ui'] is True
     result['ok']=result['ok'] and result['cache_protected_asset_policy_valid']

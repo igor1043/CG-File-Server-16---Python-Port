@@ -105,30 +105,26 @@ class AssetRuntimeFlowTests(unittest.TestCase):
         self.runtime.apply_scoreboard_runtime()
         self.assertEqual((self.app.Scoredata / "game/native.big").read_bytes(), b"mapped scoreboard")
 
-    def test_manual_scoreboard_then_native_and_automatic_restore_without_editing_assignments(self):
-        from server16_py.scoreboard_options import save_choice
+    def test_legacy_native_and_manual_scoreboard_preferences_are_ignored(self):
         self.app.ScoreBoard=self.root/'ScoreBoardGBD'
         self.put('FSW/ScoreBoard/overlays/score.big',b'baseline')
         self.put('ScoreBoardGBD/Assigned/game/overlays/score.big',b'competition')
-        self.put('ScoreBoardGBD/Selected/game/overlays/score.big',b'manual')
         self.assignments[('Scoreboard','round')]='Assigned';before=dict(self.assignments)
-        for choice,expected in (('Selected',b'manual'),('',b'baseline'),(None,b'competition')):
-            save_choice(self.root,choice);self.runtime.apply_scoreboard_runtime()
-            self.assertEqual((self.app.Scoredata/'game/overlays/score.big').read_bytes(),expected)
+        for mode in ('native','manual','automatic'):
+            self.put('ModCarrerMode/config/scoreboard.ini',('[Scoreboard]\nMode='+mode+'\nPackage=Other\n').encode())
+            self.runtime.apply_scoreboard_runtime()
+            self.assertEqual((self.app.Scoredata/'game/overlays/score.big').read_bytes(),b'competition')
             self.assertEqual(self.assignments,before)
 
-    def test_pending_native_choice_is_applied_before_the_next_poll_or_match_preparation(self):
-        from server16_py.scoreboard_options import discover,REQUEST,load_choice
-        self.app.ScoreBoard=self.root/'ScoreBoardGBD';self.app.memory=SimpleNamespace(process_id=42)
+    def test_stale_native_scoreboard_request_cannot_override_ini(self):
+        self.app.ScoreBoard=self.root/'ScoreBoardGBD'
         self.put('FSW/ScoreBoard/overlays/score.big',b'baseline')
-        self.put('ScoreBoardGBD/Selected/game/overlays/score.big',b'newly selected')
-        signature=discover(self.root).signature
-        self.put(REQUEST,f'schema=1\npid=42\ncreated=123456\ncaptured_tick=1\nwire=S16SCORE1|{signature}|2|END\n'.encode())
-        with patch('psutil.Process') as process:
-            process.return_value.create_time.return_value=123456/10_000_000-11644473600
-            self.runtime.apply_scoreboard_runtime()
-        self.assertEqual(load_choice(self.root),'Selected')
-        self.assertEqual((self.app.Scoredata/'game/overlays/score.big').read_bytes(),b'newly selected')
+        self.put('ScoreBoardGBD/Assigned/game/overlays/score.big',b'assigned')
+        self.assignments[('Scoreboard','round')]='Assigned'
+        self.put('ModCarrerMode/runtime/scoreboard_selector/request.tsv',b'schema=1\nwire=S16SCORE1|stale|2|END\n')
+        self.runtime.apply_scoreboard_runtime()
+        self.assertEqual((self.app.Scoredata/'game/overlays/score.big').read_bytes(),b'assigned')
+        self.assertFalse((self.root/'ModCarrerMode/config/scoreboard.ini').exists())
 
     def test_scoreboard_priority_copies_baseline_before_assigned_files(self):
         priorities = [("Scoreboard", "round"), ("Scoreboard", "tour"),

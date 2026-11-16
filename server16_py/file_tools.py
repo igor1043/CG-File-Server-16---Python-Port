@@ -453,7 +453,7 @@ def replace_asset_file(src: str | Path, dst: str | Path, *, source_owned: bool =
 def copy(src: str | Path, dst: str | Path, progress_callback=None) -> None:
     src_path = Path(src)
     dst_path = Path(dst)
-    checkdirs(dst_path)
+    _asset_directory(dst_path)
     if not src_path.exists():
         return
     if src_path.is_file():
@@ -469,7 +469,7 @@ def copy(src: str | Path, dst: str | Path, progress_callback=None) -> None:
         rel = item.relative_to(src_path)
         target = dst_path / rel
         if item.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
+            _asset_directory(target)
         else:
             if item.suffix.lower() == ".png":
                 continue
@@ -716,3 +716,32 @@ def clear_generated_cache(base_dir: str | Path) -> tuple[int, int]:
         if not target.exists():
             folders_removed += 1
     return bytes_freed, folders_removed
+
+
+def prepare_asset_copy(source: str | Path, destination: str | Path, log=None) -> None:
+    """Normalize only protected destinations belonging to this asset package.
+
+    An identical overlay payload can be skipped by the copier while retaining
+    a legacy protected DACL. Repair inheritance before the equality shortcut,
+    also on the package's existing target folders, using the current token.
+    No owner/explicit rule is changed and no privilege/UAC request is made.
+    """
+    source, destination = Path(source), Path(destination).absolute()
+    if not source.is_dir():
+        return
+    paths = set()
+    for item in source.rglob('*'):
+        if not item.is_file() or item.suffix.lower() == '.png':
+            continue
+        relative = item.relative_to(source)
+        target = destination / relative
+        assert target.is_relative_to(destination)
+        current = target
+        while current.is_relative_to(destination):
+            if current.exists():
+                paths.add(current)
+            if current == destination:
+                break
+            current = current.parent
+    for path in sorted(paths, key=lambda p: (len(p.parts), str(p))):
+        restore_asset_inheritance(path, log=log)

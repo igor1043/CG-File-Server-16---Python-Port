@@ -1,103 +1,7 @@
+"""Contract after removing the in-game scoreboard selector."""
+import json,os,sys,unittest,tempfile
 from pathlib import Path
-import hashlib,json,os,struct,sys,tempfile,time,unittest
-from types import SimpleNamespace
-from unittest.mock import Mock,patch
 from server16_py import scoreboard_options as options
-
-
-class Selection(unittest.TestCase):
-    def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
-        for name in ('A - Placar','B - Taça do Brasil'):(self.root/'ScoreBoardGBD'/name).mkdir(parents=True)
-    def request(self,index=2,pid=42,created=123456,signature=None):
-        path=self.root/options.REQUEST;path.parent.mkdir(parents=True,exist_ok=True)
-        path.write_text(f'schema=1\npid={pid}\ncreated={created}\nwire=S16SCORE1|{signature or options.discover(self.root).signature}|{index}|END\n',encoding='ascii')
-    def test_catalog_uses_the_same_installed_packages_and_safe_names(self):
-        catalog=options.discover(self.root)
-        self.assertEqual(catalog.values,(None,'','A - Placar','B - Taça do Brasil'))
-        self.assertEqual(len(catalog.signature),64)
-        for value in ('../outside','a/b','x\\y','C:outside','..','x\n',''):
-            self.assertFalse(options.valid_name(value))
-    def test_preference_does_not_change_competition_assignments_or_saved_games(self):
-        settings=self.root/'settings.ini';settings.write_bytes(b'[Scoreboard]\n100=B - Ta\xe7a\n')
-        saved=self.root/'CareerSave';saved.write_bytes(b'original save')
-        for choice,expected in ((None,'assigned'),('A - Placar','A - Placar'),('','')):
-            options.save_choice(self.root,choice);self.assertEqual(options.resolve(self.root,'assigned'),expected)
-            self.assertEqual(options.load_choice(self.root),choice)
-        self.assertEqual(settings.read_bytes(),b'[Scoreboard]\n100=B - Ta\xe7a\n');self.assertEqual(saved.read_bytes(),b'original save')
-    def test_removed_or_invalid_package_cannot_escape_the_catalog(self):
-        with self.assertRaises(ValueError):options.save_choice(self.root,'../outside')
-        options.save_choice(self.root,'A - Placar');(self.root/'ScoreBoardGBD/A - Placar').rmdir()
-        self.assertIsNone(options.load_choice(self.root))
-    def test_only_the_matching_game_session_and_catalog_can_commit(self):
-        self.request();catalog,index=options.read_request(self.root,42,123456);self.assertEqual(index,2)
-        for kwargs in (dict(pid=43),dict(created=999999),dict(index=999),dict(signature='a'*64)):
-            self.request(**kwargs)
-            with self.assertRaises(ValueError):options.read_request(self.root,42,123456)
-    def test_preference_is_recovered_in_another_service_instance(self):
-        options.save_choice(self.root,'B - Taça do Brasil')
-        self.assertEqual(options.selected_index(self.root,options.discover(self.root)),3)
-    def test_changed_catalog_cannot_overwrite_a_concurrent_ui_integration(self):
-        ui=self.root/options.UI_PATH;ui.parent.mkdir(parents=True);ui.write_bytes(b'other integration')
-        manifest=self.root/options.CATALOG;manifest.parent.mkdir(parents=True)
-        manifest.write_text(json.dumps(dict(schema=1,signature='old',initial_value_offset=2,ui_stable_sha256='old')))
-        app=SimpleNamespace(log=Mock());service=options.ScoreboardOptions(app)
-        try:
-            service.root=self.root;service._prepare(self.root)
-            self.assertEqual(ui.read_bytes(),b'other integration');self.assertFalse(service.bound)
-            app.log.assert_called_once()
-        finally:service.close()
-    def test_copy_is_queued_off_the_polling_thread_and_stale_requests_are_rejected(self):
-        app=SimpleNamespace(exedir=self.root,memory=SimpleNamespace(process_id=42),log=Mock(),module_enabled=lambda name:True,apply_scoreboard_runtime=Mock())
-        service=options.ScoreboardOptions(app)
-        try:
-            service.root=self.root;service.bound=True;service.owner_pid=42;self.request()
-            with patch.object(options,'_request',return_value=(options.discover(self.root),2,'request-identity')),patch.object(options,'update_initial_choice'),patch('psutil.Process') as process:
-                process.return_value.create_time.return_value=0
-                service.poll('other page')
-                deadline=time.monotonic()+2
-                while not app.apply_scoreboard_runtime.called and time.monotonic()<deadline:time.sleep(.01)
-                app.apply_scoreboard_runtime.assert_called_once();self.assertEqual(options.load_choice(self.root),'A - Placar')
-                service.poll('other page');app.apply_scoreboard_runtime.assert_called_once()
-        finally:service.close()
-
-    def test_shared_selection_notifies_server_and_newer_server_change_wins_over_queued_game_request(self):
-        app=SimpleNamespace(exedir=self.root,memory=SimpleNamespace(process_id=42),log=Mock(),
-            module_enabled=lambda name:True,apply_scoreboard_runtime=Mock())
-        service=options.ScoreboardOptions(app);app.scoreboard_options=service;service.root=self.root
-        listener=Mock();service.choice_listeners.append(listener)
-        try:
-            catalog=options.discover(self.root)
-            service._apply(self.root,42,catalog,2)
-            self.assertEqual(options.load_choice(self.root),'A - Placar')
-            listener.assert_called_with('A - Placar')
-            old_epoch=service.selection_epoch
-            with patch.object(service,'_submit'):
-                options.select_choice(app,'B - Taça do Brasil')
-            listener.assert_called_with('B - Taça do Brasil')
-            service._apply(self.root,42,catalog,2,old_epoch)
-            self.assertEqual(options.load_choice(self.root),'B - Taça do Brasil')
-            service._apply(self.root,42,catalog,2,service.selection_epoch)
-            self.assertEqual(options.load_choice(self.root),'A - Placar')
-            listener.assert_called_with('A - Placar')
-        finally:service.close()
-
-    def test_repeated_native_value_is_a_new_publication_after_a_server_change(self):
-        self.request();first=options._request(self.root,42,123456)[2]
-        options._acknowledge(self.root,42,first)
-        self.assertTrue(options._acknowledged(self.root,first))
-        path=self.root/options.REQUEST;info=path.stat();self.request()
-        os.utime(path,ns=(info.st_atime_ns,info.st_mtime_ns+1_000_000))
-        second=options._request(self.root,42,123456)[2]
-        self.assertNotEqual(first,second);self.assertFalse(options._acknowledged(self.root,second))
-
-    def test_unchanged_choice_keeps_its_sync_revision(self):
-        options.save_choice(self.root,'A - Placar');revision=options.selection_revision(self.root)
-        options.save_choice(self.root,'A - Placar')
-        self.assertEqual(options.selection_revision(self.root),revision)
-        options.save_choice(self.root,None)
-        self.assertNotEqual(options.selection_revision(self.root),revision)
-
 
 class NativeScreen(unittest.TestCase):
     @classmethod
@@ -142,103 +46,85 @@ class NativeScreen(unittest.TestCase):
         self.view=Object(dict(mcData=Object(dict(categories=Object({10:self.match,20:self.other}),settings=Object()))),self.proto)
         self.invoke('InitGameSetting');self.calls.clear()
     def invoke(self,name,*args):return self.vm.invoke(self.proto.get(name),self.view,args)
-    def test_all_original_exports_and_rows_are_preserved_with_extra_match_rows(self):
-        self.assertTrue(self.exports_preserved);self.assertEqual(self.match.get('settings'),[11,12,self.ROW,65001,65002])
-        self.assertEqual(self.other.get('settings'),[21,22]);self.invoke('InitGameSetting')
-        self.assertEqual(self.match.get('settings'),[11,12,self.ROW,65001,65002])
-        self.assertEqual(self.invoke('S16ScoreboardValues'),[0,1,2,3]);self.assertEqual(len(self.invoke('S16ScoreboardLabels')),4)
-    def test_attendance_uses_native_toggle_and_commits_without_changing_scoreboard(self):
-        labels=self.invoke('S16CrowdLabels')
-        self.assertEqual(labels[0].encode('latin1').decode('utf8'),'Automático')
-        self.assertEqual(labels[1:],[str(v)+'%' for v in range(0,101,5)])
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,65001),0)
-        self.invoke('SetCurrentSettingValue',10,65001,14)
-        self.invoke('OnChangeCallback',1,10,65001,14)
-        self.assertEqual(self.calls,[])
-        self.invoke('InitGameSetting')
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,65001),14)
-        self.invoke('LocalEventHandler',1,0,0);self.invoke('OnExitScreen')
-        messages=[args for name,args in self.calls if name=='SendSystemEvent']
-        self.assertEqual(messages,[('GameSettings','Server16MatchCrowd','S16CROWD1|65|END')])
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),0)
-    def test_native_controller_never_receives_the_custom_setting_id(self):
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),0)
-        self.invoke('SetCurrentSettingValue',10,self.ROW,2);self.invoke('OnChangeCallback',1,10,self.ROW,2)
-        self.assertEqual(self.calls,[('SendSystemEvent',('GameSettings','Server16MatchScoreboard','S16SCORE1|'+self.record['signature']+'|2|END'))])
-        self.calls.clear()
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,11),23)
-        self.invoke('SetCurrentSettingValue',10,11,4)
-        self.assertEqual(self.calls,[('baseCurrent',(10,11)),('baseSet',(10,11,4))])
-    def test_movie_row_commits_once_without_passing_its_id_to_native_controller(self):
-        self.assertEqual(self.invoke('S16MovieValues'),[0,1])
-        self.invoke('SetCurrentSettingValue',10,65002,1);self.invoke('OnChangeCallback',1,10,65002,1)
-        self.assertEqual(self.calls,[])
-        self.invoke('LocalEventHandler',1,0,0);self.invoke('OnExitScreen')
-        messages=[args for name,args in self.calls if name=='SendSystemEvent']
-        self.assertEqual(messages,[('GameSettings','Server16MatchMovie','S16MOVIE1|'+self.record['movie_signature']+'|1|END')])
-    def test_stadium_shortcut_is_scoped_to_its_native_row(self):
-        settings=self.vm.global_.get('Settings');settings.set('eSetting',self.Object(dict(STADIUM=11)))
-        self.vm.global_.get('INPUTCODE').set('OPTION_LEFT',9)
-        self.view.set('m_nSettingEnum',12);self.assertEqual(self.invoke('LocalEventHandler',9,0,0),'native')
-        self.assertEqual([args for name,args in self.calls if name=='SendSystemEvent'],[])
-        self.calls.clear();self.view.set('m_nSettingEnum',11)
-        self.assertTrue(self.invoke('LocalEventHandler',9,0,0))
-        self.assertEqual(self.calls,[('SendSystemEvent',('GameSettings','Server16OpenStadium','S16STADIUM1|OPEN|END'))])
-    def test_commit_happens_once_on_back_and_stock_input_keeps_its_return_value(self):
-        self.invoke('SetCurrentSettingValue',10,self.ROW,3);self.assertEqual(self.calls,[])
-        self.assertEqual(self.invoke('LocalEventHandler',1,0,0),'native');self.invoke('OnExitScreen')
-        messages=[args for name,args in self.calls if name=='SendSystemEvent']
-        self.assertEqual(len(messages),1)
-        self.assertEqual(messages[0],('GameSettings','Server16MatchScoreboard','S16SCORE1|'+self.record['signature']+'|3|END'))
-    def test_native_category_refresh_does_not_discard_a_pending_choice(self):
-        self.invoke('SetCurrentSettingValue',10,self.ROW,2)
-        self.invoke('InitGameSetting');self.invoke('LocalEventHandler',1,0,0)
-        messages=[args for name,args in self.calls if name=='SendSystemEvent']
-        self.assertEqual(len(messages),1);self.assertTrue(messages[0][-1].endswith('|2|END'))
-    def test_scoreboard_choice_is_shared_immediately_and_refresh_exit_does_not_resend_it(self):
-        self.invoke('SetCurrentSettingValue',10,self.ROW,2)
-        self.invoke('OnChangeCallback',1,10,self.ROW,2)
+
+    def test_original_rows_and_exports_survive_without_scoreboard(self):
+        self.assertTrue(self.exports_preserved)
+        self.assertEqual(self.match.get('settings'),[11,12,65001,65002])
+        self.assertEqual(self.other.get('settings'),[21,22])
+        self.assertIsNone(self.view.get('mcData').get('settings').get(65000))
+        self.assertIs(self.record['scoreboard_selectable'],False)
+
+    def test_registration_and_reentry_are_idempotent(self):
+        self.invoke('InitGameSetting');self.invoke('InitGameSetting')
+        self.assertEqual(self.match.get('settings'),[11,12,65001,65002])
+
+    def test_removed_row_delegates_to_original_native_behavior(self):
+        self.assertEqual(self.invoke('GetCurrentSettingValue',10,65000),23)
+        self.invoke('OnChangeCallback',10,1,65000,2)
+        self.assertFalse(any(n=='SendSystemEvent' and 'Server16MatchScoreboard' in a for n,a in self.calls))
+
+    def test_attendance_still_emits_only_attendance_event(self):
+        self.invoke('SetCurrentSettingValue',10,65001,3)
         self.invoke('OnExitScreen')
-        messages=[args for name,args in self.calls if name=='SendSystemEvent']
-        self.assertEqual(len(messages),1)
-        self.assertEqual(messages[0],('GameSettings','Server16MatchScoreboard','S16SCORE1|'+self.record['signature']+'|2|END'))
-    def test_reset_and_invalid_toggle_values(self):
-        self.invoke('SetCurrentSettingValue',10,self.ROW,2)
-        for value in (-1,4,100000):self.invoke('SetCurrentSettingValue',10,self.ROW,value)
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),2)
-        self.invoke('ResetGameSettings');self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),0)
-    def test_registration_is_idempotent(self):
-        self.vm.run(self.code,self.vm.global_,self.vm.global_)
-        self.assertEqual(self.invoke('LocalEventHandler',3,0,0),'native')
-        self.assertEqual(self.calls,[('baseInput',(3,0,0))])
-    def test_reentering_without_an_external_change_keeps_the_game_choice(self):
-        self.invoke('SetCurrentSettingValue',10,self.ROW,3)
-        self.invoke('InitGameSetting')
-        self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),3)
+        events=[a for n,a in self.calls if n=='SendSystemEvent']
+        self.assertTrue(any('Server16MatchCrowd' in a for a in events))
+        self.assertFalse(any('Server16MatchScoreboard' in a for a in events))
 
-    def test_server_choice_refreshes_existing_native_globals_and_row(self):
-        from formats import BigFile,AptFile
-        from apt_actions import Actions
-        from server16_py.scoreboard_options_ui import build
-        source=Path(os.environ.get('SERVER16_SOURCE_ROOT',Path(__file__).resolve().parents[1]))
-        self.invoke('SetCurrentSettingValue',10,self.ROW,3)
-        options.save_choice(self.root,'A - Placar')
-        try:
-            output=self.root/'refresh.big';manifest=self.root/'refresh.json'
-            build(self.root,source/'native_mods/scoreboard_settings/gamesettings.original.big',output,manifest)
-            apt=AptFile(BigFile(output));registration=next(c for c in apt.root_frames[0] if isinstance(c,tuple) and c[0]=='init' and c[1]==apt.exports['__Packages.game.screens.settings.GameSettings'])
-            code=Actions(apt).read_all().cache[registration[-1]][self.original_actions:]
-            self.vm.run(code,self.vm.global_,self.vm.global_);self.invoke('InitGameSetting')
-            self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),2)
-            self.assertEqual(self.view.get('mcData').get('settings').get(self.ROW).get('currentValue'),2)
-        finally:options.save_choice(self.root,None)
-    def test_next_launch_initial_value_changes_only_the_owned_integer(self):
-        original=self.output.read_bytes();options.save_choice(self.root,'A - Placar')
-        options.update_initial_choice(self.root,options.discover(self.root));changed=self.output.read_bytes();at=self.record['initial_value_offset']
-        self.assertEqual(original[:at],changed[:at]);self.assertEqual(original[at+4:],changed[at+4:]);self.assertEqual(struct.unpack_from('<i',changed,at)[0],2)
-        # An unrelated UI integration cannot be silently overwritten.
-        corrupt=bytearray(changed);corrupt[-1]^=1;self.output.write_bytes(corrupt)
-        with self.assertRaises(ValueError):options.update_initial_choice(self.root,options.discover(self.root))
-        self.output.write_bytes(original);options.save_choice(self.root,None)
+    def test_movie_still_emits_only_movie_event(self):
+        self.invoke('SetCurrentSettingValue',10,65002,1)
+        self.invoke('OnExitScreen')
+        events=[a for n,a in self.calls if n=='SendSystemEvent']
+        self.assertTrue(any('Server16MatchMovie' in a for a in events))
+        self.assertFalse(any('Server16MatchScoreboard' in a for a in events))
 
-if __name__=='__main__':unittest.main()
+    def test_reset_keeps_movie_and_attendance_contract(self):
+        self.invoke('ResetGameSettings');self.invoke('OnExitScreen')
+        self.assertEqual(self.invoke('GetCurrentSettingValue',10,65001),0)
+        self.assertEqual(self.invoke('GetCurrentSettingValue',10,65002),0)
+        self.assertFalse(any(n=='SendSystemEvent' and 'Server16MatchScoreboard' in a for n,a in self.calls))
+
+    def test_ui_integrity_and_movie_initial_offset(self):
+        data,offset=options.verified_ui(self.root,self.record)
+        self.assertEqual(offset,self.record['movie_initial_offset'])
+        self.assertNotIn('initial_value_offset',self.record)
+        self.assertNotIn(b'Server16MatchScoreboard',data)
+
+
+class AssignmentPriority(unittest.TestCase):
+    def setUp(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from server16_py.asset_runtime import AssetRuntime
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name);self.rules={}
+        for name in ['League','Stage','Exact','Home','Default','Brazil']:
+            p=self.root/'ScoreBoardGBD'/name/'game/test.big';p.parent.mkdir(parents=True);p.write_bytes(name.encode())
+        self.rules[('Scoreboard','0')]='Default'
+        self.app=SimpleNamespace(exedir=self.root,ScoreBoard=self.root/'ScoreBoardGBD',TOURNAME='100',TOURROUNDID='102',HID='7',tvlogoscoreboardtype='default',settings_ini=SimpleNamespace(read=lambda k,s:self.rules.get((s,k),'')),log=lambda *a:None)
+        self.runtime=AssetRuntime(self.app)
+        patcher=patch('server16_py.competition_catalog.nodes',return_value={100:(3,'C1','League',9),101:(4,'S1','Stage',100),102:(5,'G1','Group',101),9:(2,'N','Nation',0)})
+        patcher.start();self.addCleanup(patcher.stop)
+
+    def test_group_inherits_stage_only_when_no_explicit_assignment(self):
+        self.rules[('Scoreboard','101')]='Stage'
+        self.assertEqual(self.runtime._scoreboard_package()[0],'Stage')
+
+    def test_explicit_competition_can_use_any_package_over_parent_stage(self):
+        self.rules.update({('Scoreboard','101'):'Stage',('Scoreboard','100'):'Brazil'})
+        self.assertEqual(self.runtime._scoreboard_package()[0],'Brazil')
+
+    def test_exact_round_priority_is_unchanged(self):
+        self.rules.update({('Scoreboard','102'):'Exact',('Scoreboard','100'):'League',('HomeTeamScoreBoard','7'):'Home'})
+        self.assertEqual(self.runtime._scoreboard_package()[0],'Exact')
+
+    def test_home_team_priority_is_unchanged(self):
+        self.rules.update({('Scoreboard','101'):'Stage',('HomeTeamScoreBoard','7'):'Home'})
+        self.assertEqual(self.runtime._scoreboard_package()[0],'Home')
+
+    def test_missing_package_falls_through_without_breaking_next_rule(self):
+        self.rules.update({('Scoreboard','102'):'Missing',('Scoreboard','100'):'League'})
+        self.assertEqual(self.runtime._scoreboard_package()[0],'League')
+
+    def test_unknown_ids_keep_default_and_never_use_nation(self):
+        self.app.TOURNAME='8000';self.app.TOURROUNDID='8001'
+        self.assertEqual(self.runtime._scoreboard_package()[0],'Default')
