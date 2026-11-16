@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import configparser
 import threading
 from typing import TYPE_CHECKING
 
@@ -84,6 +85,42 @@ class AssetRuntime:
                 adopt_pending(self.app)
             self._apply_scoreboard_runtime()
 
+    def _scoreboard_package(self) -> tuple[str, Path | None]:
+        """Resolve only installed packages, retaining the INI priority order."""
+        from .scoreboard_options import load_choice
+        from .presentation_options_catalog import safe_name
+        app = self.app
+        try:
+            choice = load_choice(app.exedir)
+        except (OSError, ValueError, configparser.Error) as exc:
+            app.log('Invalid scoreboard preference; using automatic assignments', exc)
+            choice = None
+        if choice == '':
+            return '', None
+        if choice is not None:
+            candidates = [choice]
+        else:
+            keys = [(app.TOURROUNDID, 'Scoreboard'), (app.TOURNAME, 'Scoreboard'),
+                    (app.HID, 'HomeTeamScoreBoard'), ('0', 'Scoreboard')]
+            candidates = [app.settings_ini.read(key, section) for key, section in keys if key]
+        seen = set()
+        for name in candidates:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            if not safe_name(name):
+                app.log(f'Invalid scoreboard package name ignored: {name!r}')
+                continue
+            package = presentation_package(app.exedir, app.ScoreBoard, 'scoreboard', name)
+            variant = package / app.tvlogoscoreboardtype
+            source = variant if app.tvlogoscoreboardtype != 'default' and variant.is_dir() else package
+            if not (source / 'game').is_dir() or not any((source / 'game').rglob('*.big')):
+                app.log(f'Scoreboard package missing or incomplete; trying next assignment: {source}')
+                continue
+            app.log(f'Scoreboard resolved: {name} -> {source}')
+            return name, source
+        return '', None
+
     def _apply_scoreboard_runtime(self) -> None:
         app = self.app
         app._set_display("tvlogo", "default")
@@ -105,9 +142,14 @@ class AssetRuntime:
             if not Path(source).exists():
                 app.log(f"TV logo source not found, falling back to default: {source}")
                 source = default_source
-            app.tvlogoscoreboardtype = copy_tvlogo(source, app.TVdata)
-            app._set_display("tvlogo", Path(source).name)
-            app.log(f"Applied TV logo source: {source}")
+            try:
+                app.tvlogoscoreboardtype = copy_tvlogo(source, app.TVdata)
+                app._set_display("tvlogo", Path(source).name)
+                app.log(f"Applied TV logo source: {source}")
+            except OSError as exc:
+                # TV logos and scoreboard packages are independent modules.
+                app._set_display('tvlogo', 'Falha no logo de TV')
+                app.log(f'TV logo could not be applied; continuing with scoreboard: {source}', exc)
         else:
             app._set_display("tvlogo", app.display_value("tvlogo_module_disable"))
         if app.module_enabled("ScoreBoard"):
@@ -121,30 +163,12 @@ class AssetRuntime:
 
                 copy(app.exedir / "FSW" / "ScoreBoard", app.Scoredata / "game", progress_callback=copy_progress(0, 35))
                 app.log("Scoreboard native baseline copied")
-                scoreboard = self._resolve_assignment_value(
-                    [
-                        (app.TOURROUNDID, "Scoreboard"),
-                        (app.TOURNAME, "Scoreboard"),
-                        (app.HID, "HomeTeamScoreBoard"),
-                    ],
-                    fallback=("0", "Scoreboard"),
-                )
-                from .scoreboard_options import resolve
-                scoreboard=resolve(app.exedir,scoreboard)
+                scoreboard, scoreboard_dir = self._scoreboard_package()
                 self._notify_loading("show", "scoreboard", "Carregando placar", scoreboard or "Padrão", "Aplicando atribuição do placar", 40)
                 if scoreboard:
-                    scoreboard_dir = presentation_package(app.exedir, app.ScoreBoard, 'scoreboard', scoreboard)
-                    variant = scoreboard_dir / app.tvlogoscoreboardtype
-                    if app.tvlogoscoreboardtype != "default" and variant.exists():
-                        copy(variant, app.Scoredata, progress_callback=copy_progress(40, 100))
-                    elif scoreboard_dir.exists():
-                        copy(scoreboard_dir, app.Scoredata, progress_callback=copy_progress(40, 100))
-                    else:
-                        app.log(f"Scoreboard directory not found, keeping default scoreboard: {scoreboard_dir}")
-                        scoreboard = ""
-                    if scoreboard:
-                        app._set_display("scoreboard", scoreboard)
-                        app.log(f"Applied scoreboard: {scoreboard}")
+                    copy(scoreboard_dir, app.Scoredata, progress_callback=copy_progress(40, 100))
+                    app._set_display("scoreboard", scoreboard)
+                    app.log(f"Applied scoreboard: {scoreboard}")
                 else:
                     app.log("No scoreboard assignment found; default scoreboard active")
                 self._notify_loading("update", "scoreboard", 100, "Placar pronto")

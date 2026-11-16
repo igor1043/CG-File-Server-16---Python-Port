@@ -9,12 +9,15 @@
 #include "mascot_placement_policy.h"
 #include "mascot_walk_clips.h"
 #include "mascot_animation_variants.h"
+#include "mascot_skin_binding.h"
 #include "mascot_pose_policy.h"
 struct MascotFrameContext { uintptr_t renderer,records;size_t count,selected;int home;unsigned int generation; };
 static LONG mascotPlacementSession=1;
 static unsigned int mascotPlacementGeneration=1;
 static wchar_t gameDirectory[MAX_PATH];
 static float targetPosition[3]={5850,0,3150},originalPosition[3]{},originalYaw=0;
+static float originalPreviousPosition[3]{},originalPreviousYaw=0;
+static unsigned char originalPlacementMode=0;
 static float mascotBindPose[31][16];
 static uintptr_t mascotAnimatedRenderer,mascotAnimatedRecords;
 static size_t mascotAnimatedIndex;
@@ -23,7 +26,9 @@ static bool mascotAnimationBound;
 template<class T>static bool get(uintptr_t p,T& v){if(!p)return false;memcpy(&v,(void*)p,sizeof(v));return true;}
 static void log_event(const char*,...){}
 #include "mascot_walk_runtime.h"
+#include "mascot_gaze.h"
 #include "mascot_replay_history.h"
+#include "test_gaze.h"
 
 static int check_pose_library(const float* frames,const float* times,unsigned int count,float duration) {
     for(unsigned int i=0;i+1<count;++i)for(unsigned int n=0;n<8;++n) {
@@ -37,10 +42,26 @@ static int check_pose_library(const float* frames,const float* times,unsigned in
         if(fabsf(fminf(feet[0][1],feet[1][1])-mascotFootMarkers.floor)>.01f)return 2;
         mascot_blend_local_pose(pose,0,1.0f/30);mascot_orient_pose(pose,.5f);
         if(!mascot_pose_upright(pose))return 3;
+        if(fabsf(mascot_wrap_heading(mascot_body_heading(pose)-.5f))>.001f)return 63;
     }
     return 0;
 }
 int wmain(int argc,wchar_t** argv) {
+    // Test the actual palette transformation, not just the navigation yaw.
+    for(float heading:{0.0f,3.14159265f,1.57079633f,-1.57079633f}) {
+        float palette[31][16]{};
+        for(auto& bone:palette)bone[0]=bone[5]=bone[10]=bone[15]=1;
+        mascot_orient_pose(palette,heading);
+        const float forwardX=palette[0][8],forwardZ=palette[0][10];
+        if(forwardX*sinf(heading)+forwardZ*cosf(heading)<.99999f)return 60;
+    }
+    for(float x:{-5850.0f,5850.0f})for(float z:{-3150.0f,0.0f,3150.0f}) {
+        float palette[31][16]{};
+        for(auto& bone:palette)bone[0]=bone[5]=bone[10]=bone[15]=1;
+        mascot_orient_pose(palette,mascot_pitch_heading(x,z));
+        if(palette[0][8]*(-x)+palette[0][10]*(-z)<.99999f*sqrtf(x*x+z*z))return 61;
+    }
+    printf("PASS visual forward follows both route directions and faces the pitch at both goals\n");
     if(argc<2)return 1;
     std::vector<int> clubs;
     for(int i=2;i<argc;++i) {
@@ -50,10 +71,110 @@ int wmain(int argc,wchar_t** argv) {
     }
     if(clubs.empty())clubs={1035,1043,383,568,569};
     wcsncpy_s(gameDirectory,argv[1],_TRUNCATE);
+    {
+        for(const wchar_t* name:{L"truncated",L"missing",L"out_of_bounds",L"wrong_count",L"singular",L"nonfinite",L"wrong_affine",L"duplicate"}) {
+            wchar_t path[MAX_PATH];_snwprintf_s(path,MAX_PATH,_TRUNCATE,L"%ls\\bind_%ls.rx3",gameDirectory,name);
+            float rejected[31][16];memset(rejected,0x5a,sizeof(rejected));float original[31][16];memcpy(original,rejected,sizeof(original));
+            if(mascot_read_model_inverse(path,rejected) || memcmp(rejected,original,sizeof(original))!=0)return 48;
+        }
+        wchar_t path[MAX_PATH];_snwprintf_s(path,MAX_PATH,_TRUNCATE,L"%ls\\bind_valid.rx3",gameDirectory);
+        float accepted[31][16];if(!mascot_read_model_inverse(path,accepted))return 49;
+        printf("PASS RX3 bind parser: valid asset accepted; truncated/missing/out-of-bounds/duplicate/wrong-count/singular/nonfinite/non-affine rejected without changing output\n");
+    }
     for(int club:clubs) {
         wchar_t path[MAX_PATH];_snwprintf_s(path,MAX_PATH,_TRUNCATE,L"%ls\\data\\sceneassets\\mascot\\%d\\bind.bin",gameDirectory,club);
         FILE* f=nullptr;if(_wfopen_s(&f,path,L"rb")||!f)return 2;
         const size_t got=fread(mascotBindPose,1,sizeof(mascotBindPose),f);fclose(f);if(got!=sizeof(mascotBindPose))return 3;
+        // Use the actual RX3 inverse bind together with a captured renderer
+        // inverse, not a fixture that assumes those two skeletons are equal.
+        _snwprintf_s(path,MAX_PATH,_TRUNCATE,L"%ls\\data\\sceneassets\\mascot\\%d\\model_animated.rx3",gameDirectory,club);
+        float modelInverse[31][16];if(!mascot_read_model_inverse(path,modelInverse))return 40;
+        _snwprintf_s(path,MAX_PATH,_TRUNCATE,L"%ls\\renderer_inverse.bin",gameDirectory);
+        if(_wfopen_s(&f,path,L"rb")||!f)return 41;
+        float rendererInverse[31][16];const size_t sharedRead=fread(rendererInverse,1,sizeof(rendererInverse),f);fclose(f);
+        if(sharedRead!=sizeof(rendererInverse))return 42;
+        MascotSkinBinding skinBinding;
+        if(!mascot_skin_prepare(modelInverse,rendererInverse,skinBinding))return 43;
+        memcpy(mascotBindPose,skinBinding.modelBind,sizeof(mascotBindPose));
+        float gazeBefore=0,gazeAfter=0;
+        for(const auto& clip:mascotSupportClips) {
+            const int result=check_pitch_gaze(clip,false,skinBinding,rendererInverse,gazeBefore,gazeAfter);
+            if(result){printf("FAIL gaze club=%d clip=%d code=%d\n",club,clip.nativeClip,result);return result;}
+        }
+        for(const auto& clip:mascotGoalClips) {
+            const int result=check_pitch_gaze(clip,true,skinBinding,rendererInverse,gazeBefore,gazeAfter);
+            if(result){printf("FAIL gaze club=%d clip=%d code=%d\n",club,clip.nativeClip,result);return result;}
+        }
+        const MascotStandingClip gazeIdle={&mascotIdleFrames[0][0],mascotIdleTimes,nullptr,mascotIdleFrameCount,mascotIdleDuration,266,"idle"};
+        const int idleGazeResult=check_pitch_gaze(gazeIdle,false,skinBinding,rendererInverse,gazeBefore,gazeAfter);
+        if(idleGazeResult)return idleGazeResult;
+        {
+            mascotWalkRuntime={};mascotWalkRuntime.position[0]=-5850;
+            float neutral[31][16],pose[31][16];
+            mascot_retarget_baked_pose(mascotIdleFrames[0],neutral);
+            mascot_orient_pose(neutral,mascot_pitch_heading(-5850,0));
+            for(unsigned int tick=0;tick<15;++tick) {
+                memcpy(pose,neutral,sizeof(pose));mascot_focus_pitch(pose,1.f/60,true,false);
+                if(fabsf(mascotWalkRuntime.gazeBlend-(float)(tick+1)/15)>.00001f)return 80;
+            }
+            if(mascotWalkRuntime.gazeBlend<.9999f)return 81;
+        }
+        printf("PASS club=%d pitch gaze: max yaw before=%.2f after=%.2f degrees; both halves, GPU palette, pause and fade; root/feet/arms unchanged\n",club,gazeBefore*57.2957795f,gazeAfter*57.2957795f);
+        float maxUncorrectedError=0;
+        static MascotReplayHistory assetReplay;
+        for(const auto& clip:mascotGoalClips)for(unsigned int frameIndex=0;frameIndex<clip.count;++frameIndex) {
+            float sampled[31*7],modelPose[31][16],palette[31][16];
+            mascot_sample_baked_clip(clip.frames,clip.times,clip.count,clip.duration,clip.times[frameIndex],sampled);
+            mascot_retarget_baked_pose(sampled,modelPose);
+            mascot_orient_pose(modelPose,.71f);
+            for(unsigned int bone=0;bone<31;++bone)modelPose[bone][13]+=12;
+            if(!mascot_skin_palette(skinBinding,modelPose,palette))return 44;
+            // Exercise the real replay encoder on every mascot bind, after
+            // actor yaw and lift. Replaying a pose must retain its asset-space
+            // orientation; shared human bind proportions are not assumed.
+            assetReplay.reset(club,1);
+            const float recordedPosition[3]={5850,0,3150};
+            assetReplay.record(10,1000,recordedPosition,modelPose,3,clip.nativeClip);
+            float replayPosition[3],replayPose[31][16],replayPalette[31][16];
+            int replayKind=0,replayClip=-1;bool replayClamped=false;
+            if(!assetReplay.sample(10,replayPosition,replayPose,replayKind,replayClip,replayClamped) ||
+               replayClamped || replayKind!=3 || replayClip!=clip.nativeClip ||
+               memcmp(replayPosition,recordedPosition,sizeof(replayPosition)) ||
+               !mascot_skin_palette(skinBinding,replayPose,replayPalette))return 50;
+            for(unsigned int bone=0;bone<31;++bone) {
+                float gpu[16],expected[16],wrong[16];
+                mascot_skin_multiply(palette[bone],rendererInverse[bone],gpu);
+                mascot_skin_multiply(modelPose[bone],modelInverse[bone],expected);
+                mascot_skin_multiply(modelPose[bone],rendererInverse[bone],wrong);
+                for(unsigned int element=0;element<16;++element) {
+                    if(fabsf(gpu[element]-expected[element])>.002f)return 45;
+                    if(fabsf(replayPose[bone][element]-modelPose[bone][element])>.002f ||
+                       fabsf(replayPalette[bone][element]-palette[bone][element])>.002f)return 51;
+                    maxUncorrectedError=fmaxf(maxUncorrectedError,fabsf(wrong[element]-expected[element]));
+                }
+            }
+        }
+        float bindDifference=0;
+        for(unsigned int bone=0;bone<31;++bone)for(unsigned int element=0;element<16;++element)
+            bindDifference=fmaxf(bindDifference,fabsf(modelInverse[bone][element]-rendererInverse[bone][element]));
+        if(bindDifference>1 && maxUncorrectedError<1)return 46;
+        if(bindDifference<.001f && maxUncorrectedError>.002f)return 47;
+        printf("PASS club=%d actual RX3/captured renderer bind compensation: all goal clips, actor rotation and lift; uncompensated error=%.3f\n",club,maxUncorrectedError);
+        printf("PASS club=%d replay palette: all goal clips retain asset orientation, yaw and lift\n",club);
+        // Every actual walk frame must face the route after retarget and
+        // renderer inverse-bind compensation, even if its local body turns.
+        for(unsigned int frame=0;frame<mascotWalkFrameCount;++frame)for(float heading:{0.f,1.57079633f,3.14159265f,-1.57079633f}) {
+            float pose[31][16],palette[31][16],gpu[31][16];
+            mascot_retarget_baked_pose(mascotWalkFrames[frame],pose);
+            mascot_orient_pose(pose,heading,true);
+            if(!mascot_skin_palette(skinBinding,pose,palette))return 62;
+            for(unsigned bone=0;bone<31;++bone)mascot_skin_multiply(palette[bone],rendererInverse[bone],gpu[bone]);
+            float body[31][16];
+            for(unsigned bone=0;bone<31;++bone)mascot_skin_multiply(gpu[bone],skinBinding.modelBind[bone],body[bone]);
+            const float error=mascot_wrap_heading(mascot_body_heading(body)-heading);
+            if(fabsf(error)>.0001f)return 63;
+        }
+        printf("PASS club=%d all_walk_frames_face_travel=1 real_asset_bind=1 renderer_compensated=1\n",club);
         mascot_load_foot_markers(club);if(!mascotFootMarkersReady)return 4;
         if(check_pose_library(&mascotIdleFrames[0][0],mascotIdleTimes,mascotIdleFrameCount,mascotIdleDuration) ||
            check_pose_library(&mascotCheerFrames[0][0],mascotCheerTimes,mascotCheerFrameCount,mascotCheerDuration) ||
@@ -126,6 +247,58 @@ int wmain(int argc,wchar_t** argv) {
         }
     }
     {
+        alignas(16) unsigned char record[80]{};
+        MascotFrameContext frame{1,(uintptr_t)record,1,0,1043,1};
+        for(float goalX:{-5850.0f,5850.0f})for(float z:{-3150.0f,3150.0f}) {
+            targetPosition[0]=goalX;targetPosition[2]=z;mascot_walk_reset(frame,1000);
+            MascotWalkRuntime& s=mascotWalkRuntime;
+            for(unsigned int tick=0;tick<100;++tick)mascot_walk_update(frame,2,1000+tick*50,.05f);
+            const float beforeYaw=s.yaw,phase=s.clipTime;
+            if(sinf(s.yaw)*(-goalX)+cosf(s.yaw)*(-z)<=0)return 50;
+            s.walking=true;s.hasPose=true;s.position[2]=z;
+            targetPosition[0]=-goalX;
+            mascot_walk_update(frame,2,1100,0);
+            if(s.position[0]!=-goalX || s.position[2]!=z || s.walking || s.turning || s.hasPose ||
+               s.clipTime!=phase || s.idleRemaining!=30 ||
+               sinf(s.yaw)*goalX+cosf(s.yaw)*(-z)<=0)return 51;
+            const float afterYaw=s.yaw;
+            if(fabsf(mascot_wrap_heading(afterYaw-beforeYaw))<1)return 52;
+            mascot_walk_update(frame,2,1200,0);
+            if(s.yaw!=afterYaw || s.position[2]!=z || s.clipTime!=phase)return 53;
+        }
+        targetPosition[0]=5850;targetPosition[2]=3150;
+        printf("PASS both goal sides: live heading faces pitch; halftime reorients during pause without advancing clip or route\n");
+    }
+    {
+        alignas(16) unsigned char record[80]{};
+        MascotFrameContext frame{1,(uintptr_t)record,1,0,1043,1};
+        unsigned int glanceSamples=0,totalSamples=0;
+        for(float goalX:{-5850.0f,5850.0f})for(float z:{-3150.0f,3150.0f}) {
+            targetPosition[0]=goalX;targetPosition[2]=z;mascot_walk_reset(frame,1000);
+            MascotWalkRuntime& s=mascotWalkRuntime;
+            const float pitch=mascot_pitch_heading(goalX,z);
+            for(unsigned int visit=1;visit<=6;++visit)for(unsigned int tick=0;tick<300;++tick) {
+                s.waypointVisitSerial=visit;s.idleRemaining=30-(float)tick*.1f;
+                const float heading=mascot_stationary_heading(s,false);
+                const float offset=fabsf(mascot_wrap_heading(heading-pitch));
+                if(offset>.451f || fabsf(mascot_wrap_heading(mascot_stationary_heading(s,true)-pitch))>.001f)return 54;
+                if(mascot_waypoint_interaction() && offset>.001f)return 55;
+                ++totalSamples;if(offset>.01f)++glanceSamples;
+            }
+            s.idleRemaining=30;s.yaw=mascot_wrap_heading(pitch+2);s.walking=true;
+            mascot_walk_update(frame,3,1100,.016f);
+            if(s.clipTime!=0 || s.walking || s.turning)return 56;
+            const float yaw=s.yaw;
+            mascot_walk_update(frame,3,1200,0);
+            if(s.yaw!=yaw || s.clipTime!=0)return 57;
+            for(unsigned int tick=0;tick<120;++tick)mascot_walk_update(frame,3,1300+tick*16,.016f);
+            if(!mascot_facing_pitch() || s.clipTime<=0)return 58;
+        }
+        if(!glanceSamples || glanceSamples*10>=totalSamples)return 59;
+        printf("PASS pitch-facing support and goals on both halves; rare idle glances=%u/%u; goal turns before clip, pause stable\n",glanceSamples,totalSamples);
+        targetPosition[0]=5850;targetPosition[2]=3150;
+    }
+    {
         {
         static MascotReplayHistory history;
         history.bind(1043,1);
@@ -163,7 +336,7 @@ int wmain(int argc,wchar_t** argv) {
             }
             if(!(seen&(seen-1)))return 33;
         }
-        printf("PASS six native goal variants: several clips per goal, repeatable event/time selection; three support variants\n");
+        printf("PASS %u native goal variants: several clips per goal, repeatable event/time selection; %u support variants\n",mascotGoalClipCount,mascotSupportClipCount);
         alignas(16) unsigned char record[80]{};
         MascotFrameContext frame{1,(uintptr_t)record,1,0,1043,1};
         mascot_walk_reset(frame,1000);

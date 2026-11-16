@@ -7,6 +7,9 @@
 #include "mascot_goal_jump_fists_clip.h"
 #include "mascot_goal_bounce_clip.h"
 #include "mascot_goal_arms_clip.h"
+#include "mascot_support_81_clip.h"
+#include "mascot_support_83_clip.h"
+#include "mascot_goal_114_clip.h"
 
 struct MascotStandingClip {
     const float* frames;
@@ -23,13 +26,17 @@ static const MascotStandingClip mascotGoalClips[]={
     {&mascotGoalFistsFrames[0][0],mascotGoalFistsTimes,mascotGoalFistsLift,mascotGoalFistsFrameCount,mascotGoalFistsDuration,129,"wide_arm_gesture"},
     {&mascotGoalJumpFistsFrames[0][0],mascotGoalJumpFistsTimes,mascotGoalJumpFistsLift,mascotGoalJumpFistsFrameCount,mascotGoalJumpFistsDuration,117,"jump_fists"},
     {&mascotGoalBounceFrames[0][0],mascotGoalBounceTimes,mascotGoalBounceLift,mascotGoalBounceFrameCount,mascotGoalBounceDuration,118,"bounce"},
-    {&mascotGoalArmsFrames[0][0],mascotGoalArmsTimes,mascotGoalArmsLift,mascotGoalArmsFrameCount,mascotGoalArmsDuration,121,"arm_cheer"}
+    {&mascotGoalArmsFrames[0][0],mascotGoalArmsTimes,mascotGoalArmsLift,mascotGoalArmsFrameCount,mascotGoalArmsDuration,121,"arm_cheer"},
+    {&mascotGoal114Frames[0][0],mascotGoal114Times,nullptr,mascotGoal114FrameCount,mascotGoal114Duration,114,"front_clap"}
 };
 static constexpr unsigned int mascotGoalClipCount=sizeof(mascotGoalClips)/sizeof(mascotGoalClips[0]);
 static const MascotStandingClip mascotSupportClips[]={
     {&mascotCheerFrames[0][0],mascotCheerTimes,nullptr,mascotCheerFrameCount,mascotCheerDuration,109,"applause"},
     {&mascotGoalFistsFrames[0][0],mascotGoalFistsTimes,nullptr,mascotGoalFistsFrameCount,mascotGoalFistsDuration,129,"wide_arm_support"},
-    {&mascotGoalFrames[0][0],mascotGoalTimes,nullptr,mascotGoalFrameCount,mascotGoalDuration,108,"raised_arm_support"}
+    {&mascotGoalFrames[0][0],mascotGoalTimes,nullptr,mascotGoalFrameCount,mascotGoalDuration,108,"raised_arm_support"},
+    {&mascotSupport81Frames[0][0],mascotSupport81Times,nullptr,mascotSupport81FrameCount,mascotSupport81Duration,81,"raised_arm_chant_81"},
+    {&mascotSupport83Frames[0][0],mascotSupport83Times,nullptr,mascotSupport83FrameCount,mascotSupport83Duration,83,"raised_arm_chant_83"},
+    {&mascotGoalArmsFrames[0][0],mascotGoalArmsTimes,nullptr,mascotGoalArmsFrameCount,mascotGoalArmsDuration,121,"arm_cheer_support"}
 };
 static constexpr unsigned int mascotSupportClipCount=sizeof(mascotSupportClips)/sizeof(mascotSupportClips[0]);
 

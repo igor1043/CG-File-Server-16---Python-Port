@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release": "Server16 0.2.14 / FIFA Friends V12 / 2026-10-22",
+  "release": "Server16 0.2.32 / FIFA Friends V12 / 2026-11-16",
   "note": "Observed difference is not proof of fault; native/index references may vary with other installed mods. User preferences are not compared.",
   "files": [
     {
@@ -77,8 +77,8 @@
     },
     {
       "path": "ModCarrerMode/mods/mascot_single/mascot_goal_line.dll",
-      "bytes": 945152,
-      "sha256": "c6c41f1c433a154e651aebe3f061e480f84c29ec561506b23f14c55f3492b9c4",
+      "bytes": 1285632,
+      "sha256": "e502c4300e68c410a318a756aead93fcf7e5bc11e3d19460f00afea5d2e5edc5",
       "role": "release"
     },
     {
@@ -4426,7 +4426,7 @@
     "frontend_stadium_native_v11.dll": "45ac80ce7290b3deea3ca223ef7626d5a7310b699b9c1e5344c688fab51b594e",
     "goal_kick_short_pass.dll": "c41f163c77f645bcef3a2ec3fb7569f471e1075e63f43d43138697da35c1062f",
     "kickoff_modern.dll": "ae124bf1b6a82fd90eb0c929e9b26ed0eb4bee6c3d1678648d74a853f44bb004",
-    "mascot_goal_line.dll": "c6c41f1c433a154e651aebe3f061e480f84c29ec561506b23f14c55f3492b9c4",
+    "mascot_goal_line.dll": "e502c4300e68c410a318a756aead93fcf7e5bc11e3d19460f00afea5d2e5edc5",
     "mod_host.dll": "31020b61373993efef40af2531156c0863a76c29aba7eaaf0325c2c3359d151f",
     "multiball_visual.dll": "8296ac4223e32dd9f5e75a4546935e4bbc0d5985b99c1d4f44a2606c17c95e76",
     "panorama_drone_v5.dll": "9d9b1320779e72073965cc9275bdb63450df90f8b6728c76c19d760ff72844e3",

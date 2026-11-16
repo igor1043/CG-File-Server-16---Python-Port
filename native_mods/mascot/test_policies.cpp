@@ -5,6 +5,30 @@
 #include "mascot_placement_policy.h"
 #include "mascot_single_core.h"
 int main(){
+ {
+  unsigned char records[3][0x50],before[3][0x50];
+  memset(records,0x36,sizeof(records));memcpy(before,records,sizeof(records));
+  const float origin[3]={0,0,0},hidden[3]={0,-3000,0},goal[3]={-5850,0,3150};
+  auto* selected=records[1];
+  memcpy(selected+0x20,origin,sizeof(origin));memcpy(selected+0x30,hidden,sizeof(hidden));
+  // Reproduce the old write followed by the exact native reset operation.
+  memcpy(selected+0x20,goal,sizeof(goal));memcpy(selected+0x20,selected+0x30,16);
+  float actual[3];memcpy(actual,selected+0x20,sizeof(actual));
+  if(memcmp(actual,goal,sizeof(actual))==0)return 20;
+  for(const auto& target:{goal,origin,hidden}){
+   mascot_store_position(selected,target);
+   memcpy(selected+0x20,selected+0x30,16);
+   memcpy(actual,selected+0x20,sizeof(actual));if(memcmp(actual,target,sizeof(actual)))return 21;
+  }
+  const float moved[3]={5850,0,-2100};mascot_store_position(selected,moved);
+  memcpy(selected+0x20,selected+0x30,16);
+  memcpy(actual,selected+0x20,sizeof(actual));if(memcmp(actual,moved,sizeof(actual)))return 22;
+  mascot_restore_positions(selected,origin,hidden);
+  if(memcmp(selected+0x20,origin,sizeof(origin))||memcmp(selected+0x30,hidden,sizeof(hidden)))return 23;
+  if(memcmp(records[0],before[0],0x50)||memcmp(records[2],before[2],0x50))return 24;
+  for(unsigned i=0;i<0x50;++i)if(!((i>=0x20&&i<0x2c)||(i>=0x30&&i<0x3c))&&selected[i]!=before[1][i])return 25;
+  puts("PASS native placement reset: old current-only write is lost; synchronized current/stored positions survive rebuild, movement and side change; original hidden position and other actors preserved");
+ }
  const size_t none[4]={0,0,0,0},arena[4]={0,14,0,10},small[4]={1,14,10,10},stewards[4]={0,0,1,10},choreo[4]={0,0,0,1};
  if(mascot_choose_placement_type(none)!=23 || mascot_choose_placement_type(arena)!=18 ||
     mascot_choose_placement_type(small)!=1 || mascot_choose_placement_type(stewards)!=0 ||

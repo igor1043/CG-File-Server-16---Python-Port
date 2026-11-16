@@ -15,8 +15,8 @@ from .file_tools import (
     copy_glares,
     copy_if_exists,
     copy_or_clear,
+    copy_asset_file,
     extra_setup,
-    ensure_server16_stadium_access,
     restore_stadium_inj_files,
     set_inj_id,
     stadium_injection_paths,
@@ -535,7 +535,7 @@ class StadiumRuntime:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 # Pack timestamps and sizes can match while contents differ.
                 # Never use the metadata-only skip optimization for this set.
-                shutil.copy2(src, dst)
+                copy_asset_file(src, dst)
         # These must be calculated AFTER stad is resolved
         glare1 = stad / "1"
         glare3 = stad / "3"

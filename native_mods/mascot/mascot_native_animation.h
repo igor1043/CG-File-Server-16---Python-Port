@@ -4,6 +4,7 @@
 #include "mascot_match_lifecycle.h"
 #include "mascot_walk_clips.h"
 #include "mascot_animation_variants.h"
+#include "mascot_skin_binding.h"
 
 // Approved standing clips and foot-driven locomotion use private SLE slot 73.
 // CrowdAI is read only for the pause clock. Selected native goal reactions
@@ -29,6 +30,7 @@ static unsigned int mascotInitAttemptGeneration;
 static DWORD mascotInitAttemptTick;
 static float mascotBindPose[31][16];
 static float mascotLastPose[31][16];
+static MascotSkinBinding mascotSkinBinding;
 struct MascotNativeClock {
     uintptr_t provider=0, crowd=0;
     unsigned int generation=0;
@@ -40,6 +42,7 @@ struct MascotNativeClock {
 };
 static MascotNativeClock mascotNativeClock;
 #include "mascot_walk_runtime.h"
+#include "mascot_gaze.h"
 #include "mascot_replay_clock.h"
 #include "mascot_replay_history.h"
 static MascotReplayHistory mascotReplayHistory;
@@ -212,23 +215,6 @@ static bool mascot_read_confirmed_score(uintptr_t& matchKey, int& homeClub, int&
     return matchKey != 0;
 }
 
-static bool mascot_invert_affine(const float* matrix, float* output)
-{
-    for (size_t i = 0; i < 16; ++i) if (!isfinite(matrix[i]) || fabsf(matrix[i]) > 20000) return false;
-    if (fabsf(matrix[15] - 1) > 0.001f) return false;
-    const float a=matrix[0], b=matrix[4], c=matrix[8], d=matrix[1], e=matrix[5], f=matrix[9],
-                g=matrix[2], h=matrix[6], i=matrix[10];
-    const float determinant=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);
-    if (!isfinite(determinant) || fabsf(determinant) < 0.0001f) return false;
-    memset(output, 0, 16 * sizeof(float)); output[15]=1;
-    const float rows[9]={e*i-f*h,c*h-b*i,b*f-c*e,f*g-d*i,a*i-c*g,c*d-a*f,d*h-e*g,b*g-a*h,a*e-b*d};
-    for (size_t row=0;row<3;++row) for (size_t column=0;column<3;++column)
-        output[column*4+row]=rows[row*3+column]/determinant;
-    for (size_t row=0;row<3;++row)
-        output[12+row]=-(output[row]*matrix[12]+output[4+row]*matrix[13]+output[8+row]*matrix[14]);
-    return true;
-}
-
 [[maybe_unused]] static bool mascot_native_standing_pose(uintptr_t crowd,uintptr_t provider,int requested, float pose[31][16], int& behaviorOut, int& clip)
 {
     const MascotNativeClock& clock=mascotNativeClock;
@@ -263,9 +249,13 @@ static void mascot_unbind_pose(uintptr_t renderer, uintptr_t records, size_t cou
     if (mascotAnimationBound && renderer == mascotAnimatedRenderer && records == mascotAnimatedRecords &&
         mascotAnimatedIndex < count && readable(records + mascotAnimatedIndex * 0x50, 0x50)) {
         uint16_t binding;
-        if (get(mascotAnimatedRecords + mascotAnimatedIndex * 0x50 + 0x40, binding) && binding == mascotPrivateSlot)
+        if (get(mascotAnimatedRecords + mascotAnimatedIndex * 0x50 + 0x40, binding) && binding == mascotPrivateSlot) {
+            mascot_release_native_motion((unsigned char*)(mascotAnimatedRecords+mascotAnimatedIndex*0x50),mascotNativeMotion);
             *(uint16_t*)(mascotAnimatedRecords + mascotAnimatedIndex * 0x50 + 0x40) = mascotPreviousBinding;
+        }
     }
+    // A destroyed/replaced vector is never written through a stale owner.
+    mascotNativeMotion={};
     mascotAnimationBound = false; mascotAnimationInitialized = false;
 }
 
@@ -307,8 +297,11 @@ static void mascot_animate_instance(const MascotFrameContext& frame)
         }
         uintptr_t inverse;
         if(!get(renderer+0x4f440,inverse) || !readable(inverse,sizeof(mascotBindPose))) return;
-        float inverseMatrices[31][16];memcpy(inverseMatrices,(void*)inverse,sizeof(inverseMatrices));
-        for(size_t bone=0;bone<31;++bone) if(!mascot_invert_affine(inverseMatrices[bone],mascotBindPose[bone])) return;
+        float inverseMatrices[31][16],modelInverse[31][16];memcpy(inverseMatrices,(void*)inverse,sizeof(inverseMatrices));
+        if(!mascot_read_model_inverse(variant,modelInverse) || !mascot_skin_prepare(modelInverse,inverseMatrices,mascotSkinBinding)) {
+            log_event("animation_fallback invalid_model_bind club=%d",home);return;
+        }
+        memcpy(mascotBindPose,mascotSkinBinding.modelBind,sizeof(mascotBindPose));
         mascot_load_foot_markers(home);
         memcpy(mascotLastPose,mascotBindPose,sizeof(mascotLastPose));
         uint16_t previousBinding=3;
@@ -319,7 +312,7 @@ static void mascot_animate_instance(const MascotFrameContext& frame)
         mascotAnimatedStadium=stadium;mascotAnimatedLight=light;mascotAnimatedCold=cold;
         mascotAnimatedGeneration=frame.generation;
         mascotAnimationInitialized=true;mascotAnimationBound=false;
-        log_event("animation_ready club=%d instance=%zu slot=73 idle=approved_baked goal_variants=6 support_variants=3 contact_walk=1 foot_markers=%u no_sit_pose=1",home,selected+1,(unsigned int)mascotFootMarkersReady);
+        log_event("animation_ready club=%d instance=%zu slot=73 idle=approved_baked goal_variants=%u support_variants=%u contact_walk=1 foot_markers=%u no_sit_pose=1 bind_source=club_rx3 renderer_bind_compensated=1",home,selected+1,mascotGoalClipCount,mascotSupportClipCount,(unsigned int)mascotFootMarkersReady);
     }
     mascot_set_animation_active(true,home);
     const LONG mode=InterlockedCompareExchange(&mascotAnimationMode,0,0);
@@ -331,12 +324,14 @@ static void mascot_animate_instance(const MascotFrameContext& frame)
         float pose[31][16],position[3];int kind=0,clip=-1;bool clamped=false;
         const bool recorded=mascotReplayHistory.sample(replayClock.time,position,pose,kind,clip,clamped);
         if(recorded) {
-            memcpy((void*)(records+selected*0x50+0x20),position,sizeof(position));
+            mascot_store_position((unsigned char*)(records+selected*0x50),position);
             const float neutral=0;
             memcpy((void*)(records+selected*0x50+0x1c),&neutral,sizeof(neutral));
             memcpy((void*)(records+selected*0x50+0x2c),&neutral,sizeof(neutral));
         } else memcpy(pose,mascotLastPose,sizeof(pose));
-        memcpy((void*)(renderer+mascotPrivateSlot*0xe00+0xe7e0),pose,sizeof(pose));
+        float palette[31][16];
+        if(!mascot_skin_palette(mascotSkinBinding,pose,palette))return;
+        memcpy((void*)(renderer+mascotPrivateSlot*0xe00+0xe7e0),palette,sizeof(palette));
         *(uint16_t*)(records+selected*0x50+0x40)=(uint16_t)mascotPrivateSlot;
         mascotAnimationBound=true;
         static double lastReportedTime=-1;static int lastKind=-1,lastClip=-1;
@@ -366,10 +361,11 @@ static void mascot_animate_instance(const MascotFrameContext& frame)
     const float dt=mascot_native_animation_dt(crowd,now,allowAdvance);
     mascot_walk_update(frame,mode,now,dt);
     MascotWalkRuntime& motion=mascotWalkRuntime;
-    const bool waypointInteraction=mascot_waypoint_interaction();
+    const bool facingPitch=mascot_facing_pitch();
+    const bool waypointInteraction=mascot_waypoint_interaction() && facingPitch;
     // Goals must never fall back to the waypoint applause clip. The captured
     // crowd reaction is self-contained even when live crowd slot 0 changes.
-    const int poseKind=mode==3?3:(motion.walking?1:(waypointInteraction?2:0));
+    const int poseKind=mode==3?(facingPitch?3:0):(motion.walking?1:(waypointInteraction?2:0));
     float matrices[31][16];
     float phase=motion.clipTime;
     unsigned int variant=0;
@@ -408,12 +404,15 @@ static void mascot_animate_instance(const MascotFrameContext& frame)
         motion.visualLift=lift;
         for(unsigned int bone=0;bone<31;++bone)matrices[bone][13]+=lift;
         mascot_orient_pose(matrices,motion.yaw);
+        mascot_focus_pitch(matrices,dt,!motion.walking&&!motion.turning,poseKind==3);
     }
     for(size_t bone=0;bone<31;++bone)for(size_t element=0;element<16;++element)
         if(!isfinite(matrices[bone][element])||fabsf(matrices[bone][element])>20000)return;
     memcpy(mascotLastPose,matrices,sizeof(mascotLastPose));
     motion.hasPose=true;
-    memcpy((void*)(renderer+mascotPrivateSlot*0xe00+0xe7e0),matrices,sizeof(matrices));
+    float palette[31][16];
+    if(!mascot_skin_palette(mascotSkinBinding,matrices,palette))return;
+    memcpy((void*)(renderer+mascotPrivateSlot*0xe00+0xe7e0),palette,sizeof(palette));
     *(uint16_t*)(records+selected*0x50+0x40)=(uint16_t)mascotPrivateSlot;
     mascotAnimationBound=true;
     if(replayClock.valid)
@@ -438,7 +437,7 @@ static DWORD WINAPI mascot_animation_worker(void*)
         break;
     }
     if(!code_ready()) { log_event("animation_disabled code_guard_failed"); return 1; }
-    log_event("animation_score_watcher started home_only=1 confirm_ms=750 crowd_read_only=1 crowd_hook=0 captured_goal_variants=6 support_variants=3 replay_clock_read_only=1 waypoint_applause_separate=1 no_sit_pose=1 duration_engine_ms=15000");
+    log_event("animation_score_watcher started home_only=1 confirm_ms=750 crowd_read_only=1 crowd_hook=0 captured_goal_variants=7 support_variants=6 replay_clock_read_only=1 waypoint_applause_separate=1 no_sit_pose=1 duration_engine_ms=15000");
     for(;;) {
         const uint64_t now=GetTickCount64();
         const auto replayClock=mascot_read_replay_clock();

@@ -48,11 +48,11 @@ class Selection(unittest.TestCase):
             app.log.assert_called_once()
         finally:service.close()
     def test_copy_is_queued_off_the_polling_thread_and_stale_requests_are_rejected(self):
-        app=SimpleNamespace(memory=SimpleNamespace(process_id=42),log=Mock(),module_enabled=lambda name:True,apply_scoreboard_runtime=Mock())
+        app=SimpleNamespace(exedir=self.root,memory=SimpleNamespace(process_id=42),log=Mock(),module_enabled=lambda name:True,apply_scoreboard_runtime=Mock())
         service=options.ScoreboardOptions(app)
         try:
             service.root=self.root;service.bound=True;service.owner_pid=42;self.request()
-            with patch.object(options,'read_request',return_value=(options.discover(self.root),2)),patch.object(options,'update_initial_choice'),patch('psutil.Process') as process:
+            with patch.object(options,'_request',return_value=(options.discover(self.root),2,'request-identity')),patch.object(options,'update_initial_choice'),patch('psutil.Process') as process:
                 process.return_value.create_time.return_value=0
                 service.poll('other page')
                 deadline=time.monotonic()+2
@@ -60,6 +60,43 @@ class Selection(unittest.TestCase):
                 app.apply_scoreboard_runtime.assert_called_once();self.assertEqual(options.load_choice(self.root),'A - Placar')
                 service.poll('other page');app.apply_scoreboard_runtime.assert_called_once()
         finally:service.close()
+
+    def test_shared_selection_notifies_server_and_newer_server_change_wins_over_queued_game_request(self):
+        app=SimpleNamespace(exedir=self.root,memory=SimpleNamespace(process_id=42),log=Mock(),
+            module_enabled=lambda name:True,apply_scoreboard_runtime=Mock())
+        service=options.ScoreboardOptions(app);app.scoreboard_options=service;service.root=self.root
+        listener=Mock();service.choice_listeners.append(listener)
+        try:
+            catalog=options.discover(self.root)
+            service._apply(self.root,42,catalog,2)
+            self.assertEqual(options.load_choice(self.root),'A - Placar')
+            listener.assert_called_with('A - Placar')
+            old_epoch=service.selection_epoch
+            with patch.object(service,'_submit'):
+                options.select_choice(app,'B - Taça do Brasil')
+            listener.assert_called_with('B - Taça do Brasil')
+            service._apply(self.root,42,catalog,2,old_epoch)
+            self.assertEqual(options.load_choice(self.root),'B - Taça do Brasil')
+            service._apply(self.root,42,catalog,2,service.selection_epoch)
+            self.assertEqual(options.load_choice(self.root),'A - Placar')
+            listener.assert_called_with('A - Placar')
+        finally:service.close()
+
+    def test_repeated_native_value_is_a_new_publication_after_a_server_change(self):
+        self.request();first=options._request(self.root,42,123456)[2]
+        options._acknowledge(self.root,42,first)
+        self.assertTrue(options._acknowledged(self.root,first))
+        path=self.root/options.REQUEST;info=path.stat();self.request()
+        os.utime(path,ns=(info.st_atime_ns,info.st_mtime_ns+1_000_000))
+        second=options._request(self.root,42,123456)[2]
+        self.assertNotEqual(first,second);self.assertFalse(options._acknowledged(self.root,second))
+
+    def test_unchanged_choice_keeps_its_sync_revision(self):
+        options.save_choice(self.root,'A - Placar');revision=options.selection_revision(self.root)
+        options.save_choice(self.root,'A - Placar')
+        self.assertEqual(options.selection_revision(self.root),revision)
+        options.save_choice(self.root,None)
+        self.assertNotEqual(options.selection_revision(self.root),revision)
 
 
 class NativeScreen(unittest.TestCase):
@@ -79,7 +116,7 @@ class NativeScreen(unittest.TestCase):
         def registration(apt):return next(c for c in apt.root_frames[0] if isinstance(c,tuple) and c[0]=='init' and c[1]==apt.exports['__Packages.game.screens.settings.GameSettings'])
         old=Actions(before).read_all().cache[registration(before)[-1]]
         new=Actions(after).read_all().cache[registration(after)[-1]]
-        cls.code=new[len(old)-1:]
+        cls.code=new[len(old)-1:];cls.original_actions=len(old)-1
     @classmethod
     def tearDownClass(cls):cls.temp.cleanup()
     def setUp(self):
@@ -127,7 +164,8 @@ class NativeScreen(unittest.TestCase):
     def test_native_controller_never_receives_the_custom_setting_id(self):
         self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),0)
         self.invoke('SetCurrentSettingValue',10,self.ROW,2);self.invoke('OnChangeCallback',1,10,self.ROW,2)
-        self.assertEqual(self.calls,[])
+        self.assertEqual(self.calls,[('SendSystemEvent',('GameSettings','Server16MatchScoreboard','S16SCORE1|'+self.record['signature']+'|2|END'))])
+        self.calls.clear()
         self.assertEqual(self.invoke('GetCurrentSettingValue',10,11),23)
         self.invoke('SetCurrentSettingValue',10,11,4)
         self.assertEqual(self.calls,[('baseCurrent',(10,11)),('baseSet',(10,11,4))])
@@ -157,6 +195,13 @@ class NativeScreen(unittest.TestCase):
         self.invoke('InitGameSetting');self.invoke('LocalEventHandler',1,0,0)
         messages=[args for name,args in self.calls if name=='SendSystemEvent']
         self.assertEqual(len(messages),1);self.assertTrue(messages[0][-1].endswith('|2|END'))
+    def test_scoreboard_choice_is_shared_immediately_and_refresh_exit_does_not_resend_it(self):
+        self.invoke('SetCurrentSettingValue',10,self.ROW,2)
+        self.invoke('OnChangeCallback',1,10,self.ROW,2)
+        self.invoke('OnExitScreen')
+        messages=[args for name,args in self.calls if name=='SendSystemEvent']
+        self.assertEqual(len(messages),1)
+        self.assertEqual(messages[0],('GameSettings','Server16MatchScoreboard','S16SCORE1|'+self.record['signature']+'|2|END'))
     def test_reset_and_invalid_toggle_values(self):
         self.invoke('SetCurrentSettingValue',10,self.ROW,2)
         for value in (-1,4,100000):self.invoke('SetCurrentSettingValue',10,self.ROW,value)
@@ -166,6 +211,27 @@ class NativeScreen(unittest.TestCase):
         self.vm.run(self.code,self.vm.global_,self.vm.global_)
         self.assertEqual(self.invoke('LocalEventHandler',3,0,0),'native')
         self.assertEqual(self.calls,[('baseInput',(3,0,0))])
+    def test_reentering_without_an_external_change_keeps_the_game_choice(self):
+        self.invoke('SetCurrentSettingValue',10,self.ROW,3)
+        self.invoke('InitGameSetting')
+        self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),3)
+
+    def test_server_choice_refreshes_existing_native_globals_and_row(self):
+        from formats import BigFile,AptFile
+        from apt_actions import Actions
+        from server16_py.scoreboard_options_ui import build
+        source=Path(os.environ.get('SERVER16_SOURCE_ROOT',Path(__file__).resolve().parents[1]))
+        self.invoke('SetCurrentSettingValue',10,self.ROW,3)
+        options.save_choice(self.root,'A - Placar')
+        try:
+            output=self.root/'refresh.big';manifest=self.root/'refresh.json'
+            build(self.root,source/'native_mods/scoreboard_settings/gamesettings.original.big',output,manifest)
+            apt=AptFile(BigFile(output));registration=next(c for c in apt.root_frames[0] if isinstance(c,tuple) and c[0]=='init' and c[1]==apt.exports['__Packages.game.screens.settings.GameSettings'])
+            code=Actions(apt).read_all().cache[registration[-1]][self.original_actions:]
+            self.vm.run(code,self.vm.global_,self.vm.global_);self.invoke('InitGameSetting')
+            self.assertEqual(self.invoke('GetCurrentSettingValue',10,self.ROW),2)
+            self.assertEqual(self.view.get('mcData').get('settings').get(self.ROW).get('currentValue'),2)
+        finally:options.save_choice(self.root,None)
     def test_next_launch_initial_value_changes_only_the_owned_integer(self):
         original=self.output.read_bytes();options.save_choice(self.root,'A - Placar')
         options.update_initial_choice(self.root,options.discover(self.root));changed=self.output.read_bytes();at=self.record['initial_value_offset']

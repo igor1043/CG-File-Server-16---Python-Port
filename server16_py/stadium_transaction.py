@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 from pathlib import Path
+from .file_tools import replace_asset_file, make_asset_writable, restore_asset_inheritance
 
 
 class StadiumAssetTransaction:
@@ -45,11 +45,15 @@ class StadiumAssetTransaction:
                     raise RuntimeError(f'Stadium destination is not a file: {dst}')
                 if dst.is_file():
                     previous.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(dst, previous)
+                    replace_asset_file(dst, previous, source_owned=True)
                 self.changes.append(rel)
                 if src.is_file():
                     dst.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(src, dst)
+                    make_asset_writable(src)
+                    replace_asset_file(src, dst)
+                    # A same-volume move can retain inheritance from staging.
+                    # Recalculate it for the actual destination, without UAC.
+                    restore_asset_inheritance(dst, log=self.logger, refresh=True)
             validate()
         except Exception:
             self.rollback()
@@ -64,7 +68,7 @@ class StadiumAssetTransaction:
             dst, previous = self.game / rel, self.backup / rel
             try:
                 if previous.is_file():
-                    os.replace(previous, dst)
+                    replace_asset_file(previous, dst, source_owned=True)
                 else:
                     dst.unlink(missing_ok=True)
             except OSError as exc:

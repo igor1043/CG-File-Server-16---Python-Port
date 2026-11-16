@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include "mascot_record_position.h"
 
 static constexpr float mascotGoalLineBackX = 5850.0f;
 static constexpr float mascotGoalLineZ = 3150.0f;

@@ -125,6 +125,19 @@ class SettingsSectionFrame(tk.Frame):
             font=("Bahnschrift", 9),
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         ttk.Button(header, text=self.tr("button.refresh"), command=self.reload_entries).grid(row=0, column=1, rowspan=2, sticky="e")
+        if self.spec.section.casefold()=='scoreboard':
+            from . import scoreboard_options
+            self.active_scoreboard_catalog=scoreboard_options.discover(self.app.exedir)
+            self.active_scoreboard_var=tk.StringVar()
+            tk.Label(header,text='Placar em uso',bg=self.app.bg,fg=self.app.fg,
+                font=('Bahnschrift',10)).grid(row=2,column=0,sticky='w',pady=(8,0))
+            self.active_scoreboard_combo=ttk.Combobox(header,textvariable=self.active_scoreboard_var,
+                values=self.active_scoreboard_catalog.labels,state='readonly',width=48)
+            self.active_scoreboard_combo.grid(row=2,column=1,sticky='e',pady=(8,0))
+            self.active_scoreboard_combo.bind('<<ComboboxSelected>>',self._choose_active_scoreboard)
+            self._scoreboard_listener=self._reflect_active_scoreboard
+            self.app.scoreboard_options.choice_listeners.append(self._scoreboard_listener)
+            self._reflect_active_scoreboard(scoreboard_options.load_choice(self.app.exedir))
 
         left_card = tk.Frame(self, bg=self.app.card, highlightthickness=1, highlightbackground="#243654")
         left_card.grid(row=1, column=0, sticky="nsew", padx=(12, 6), pady=(0, 12))
@@ -471,6 +484,10 @@ class SettingsSectionFrame(tk.Frame):
         return combo
 
     def _on_destroy(self, _event=None) -> None:
+        listener=getattr(self,'_scoreboard_listener',None)
+        service=getattr(self.app,'scoreboard_options',None)
+        if service is not None and listener in service.choice_listeners:
+            service.choice_listeners.remove(listener)
         self._stop_preview()
         if self._refresh_job is not None:
             try:
@@ -513,6 +530,9 @@ class SettingsSectionFrame(tk.Frame):
         self.load_entry(key)
 
     def reload_entries(self, preserve: bool = True) -> None:
+        if hasattr(self,'active_scoreboard_var'):
+            from .scoreboard_options import load_choice
+            self._reflect_active_scoreboard(load_choice(self.app.exedir))
         current_selection = self.selected_key if preserve else None
         # Use reload_if_needed instead of force-reload to avoid re-reading the
         # file right after a save (which already updated _last_mtime_ns).
@@ -739,7 +759,7 @@ class SettingsSectionFrame(tk.Frame):
         self.selected_key = key
         self.status_var.set(self.tr("dialog.editor.saved", section=self.spec.section, key=key))
         self.reload_entries()
-        self._apply_runtime()
+        self._apply_runtime(scoreboard_choice=value if self.spec.section.casefold() in {'scoreboard','hometeamscoreboard'} else None)
 
     def delete_entry(self) -> None:
         key = self.key_var.get().strip() or self.selected_key
@@ -754,11 +774,37 @@ class SettingsSectionFrame(tk.Frame):
         self.reload_entries(preserve=False)
         self._apply_runtime()
 
-    def _apply_runtime(self) -> None:
+    def _reflect_active_scoreboard(self,choice):
+        from .scoreboard_options import discover
         try:
+            if not self.winfo_exists():return
+            self.active_scoreboard_catalog=discover(self.app.exedir)
+            self.active_scoreboard_combo.configure(values=self.active_scoreboard_catalog.labels)
+            index=self.active_scoreboard_catalog.values.index(choice)
+            self.active_scoreboard_var.set(self.active_scoreboard_catalog.labels[index])
+        except (ValueError,tk.TclError):pass
+
+    def _choose_active_scoreboard(self,_event=None):
+        try:
+            index=self.active_scoreboard_combo.current()
+            if index>=0:self.app.scoreboard_options.choose_from_server(self.active_scoreboard_catalog.values[index])
+        except Exception as exc:self.app.log('Failed to select the shared scoreboard',exc)
+
+    def _apply_runtime(self,scoreboard_choice=None) -> None:
+        try:
+            if self.spec.section.casefold() in {'scoreboard', 'hometeamscoreboard'}:
+                from .scoreboard_options import select_choice
+                select_choice(self.app,scoreboard_choice)
+            elif self.spec.section.casefold() in {'stadium', 'comp'}:
+                # This is an explicit assignment edit, rather than a late
+                # automatic context update. Allow it to supersede the picker.
+                self.app._manual_stadium_override = None
+                self.app._last_stadium_applied_signature = None
             self.app.refresh_modules()
-            self.app.apply_all_runtime()
-            self.status_var.set(self.status_var.get() + self.tr("dialog.editor.runtime_updated"))
+            if self.app.apply_all_runtime() is not False:
+                self.status_var.set(self.status_var.get() + self.tr("dialog.editor.runtime_updated"))
+            else:
+                self.status_var.set(self.status_var.get() + ' · Verifique a falha registrada no Server16')
         except Exception as exc:
             self.app.log("Failed to apply runtime after settings edit", exc)
 

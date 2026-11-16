@@ -9,9 +9,11 @@ import shutil
 import subprocess
 import sys
 import stat
+import time
 import unicodedata
 import zipfile
 from pathlib import Path, PureWindowsPath
+from .asset_access import restore_asset_inheritance
 
 try:
     import rarfile as _rarmod
@@ -296,104 +298,56 @@ def checkdirs(path: str | Path) -> None:
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
-_WINDOWS_USER_SID: str | None = None
-_WINDOWS_USER_SID_LOADED = False
-
-
-def _current_windows_user_sid() -> str | None:
-    """Return the SID used by this Server16 process, including under UAC."""
-    global _WINDOWS_USER_SID, _WINDOWS_USER_SID_LOADED
-    if _WINDOWS_USER_SID_LOADED:
-        return _WINDOWS_USER_SID
-    _WINDOWS_USER_SID_LOADED = True
-    if os.name != "nt":
-        return None
-    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-    whoami = system_root / "System32" / "whoami.exe"
-    try:
-        result = subprocess.run(
-            [str(whoami), "/user", "/fo", "csv", "/nh"],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    match = re.search(r"\bS-1-\d+(?:-\d+)+\b", result.stdout)
-    if match:
-        _WINDOWS_USER_SID = match.group(0)
-    return _WINDOWS_USER_SID
-
-
 def ensure_server16_asset_access(path: str | Path, log=None) -> bool:
-    """Restore inherited ACLs and current-user modify access on one managed tree.
+    """Check a managed directory without changing ownership or Windows ACLs.
 
-    This is intentionally additive: it never takes ownership or removes ACL
-    entries. Callers must pass only Server16-managed
-    FIFA asset destinations (for example ``sceneassets\\goalnet``).
+    Compatibility entry point for callers outside the normal copy flow. Write
+    permission and permission to change an ACL are different Windows rights.
+    An ordinary asset copy must never require the latter.
     """
-    if os.name != "nt":
-        return True
     asset_root = Path(path)
     if not asset_root.is_dir():
         return True
-
-    def report(message: str) -> None:
+    try:
+        with tempfile.TemporaryFile(prefix='.server16-access-', dir=asset_root) as probe:
+            probe.write(b'Server16')
+            probe.flush()
+    except OSError as exc:
         if callable(log):
-            try:
-                log(message)
-            except Exception:
-                pass
-
-    sid = _current_windows_user_sid()
-    if not sid:
-        report(f"Asset permissions: could not resolve the Windows user SID for {asset_root}")
+            log(f'Asset destination is not writable by the current user: {asset_root}', exc)
         return False
-
-    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-    icacls = system_root / "System32" / "icacls.exe"
-    commands = (
-        [str(icacls), str(asset_root), "/inheritance:e", "/T", "/C", "/Q"],
-        [str(icacls), str(asset_root), "/grant", f"*{sid}:(OI)(CI)(M)", "/C", "/Q"],
-    )
-    for command in commands:
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=45,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            report(
-                f"Asset permissions: could not update {asset_root}: {exc}. "
-                "If Windows denied the ACL change, run Server16 as administrator once."
-            )
-            return False
-        if result.returncode != 0:
-            details = (result.stderr or result.stdout or "icacls returned an error").strip()
-            report(
-                f"Asset permissions: could not update {asset_root}: {details[:500]}. "
-                "If Windows denied the ACL change, run Server16 as administrator once."
-            )
-            return False
-    report(f"Asset permissions: inherited access and user modify access ensured for {asset_root}")
     return True
 
 
 def ensure_server16_stadium_access(sceneassets_dir: str | Path, log=None) -> None:
-    """Repair only the stadium asset trees that Server16 copies and owns."""
+    """Restore parent inheritance only on known stadium destinations.
+
+    Legacy glare files can have a protected ACL even when the installation is
+    writable. Include fx and both injection slots; never reset a whole tree.
+    """
     root = Path(sceneassets_dir)
-    for name in ("stadium", "crowdplacement", "crowdchair"):
-        ensure_server16_asset_access(root / name, log=log)
+    for name in ('stadium', 'crowdplacement', 'crowdchair', 'fx'):
+        target = root / name
+        if target.is_dir():
+            restore_asset_inheritance(target, log=log)
+            ensure_server16_asset_access(target, log=log)
+    for slot in ('176', '261'):
+        for relative in sorted(stadium_injection_paths(slot)):
+            target = root / relative
+            if target.is_file():
+                restore_asset_inheritance(target, log=log)
+
+
+def _asset_directory(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        existing = path
+        while not existing.exists() and existing != existing.parent:
+            existing = existing.parent
+        if not restore_asset_inheritance(existing):
+            raise
+        path.mkdir(parents=True, exist_ok=True)
 
 
 def _files_match(src: Path, dst: Path) -> bool:
@@ -402,17 +356,98 @@ def _files_match(src: Path, dst: Path) -> bool:
             return False
         src_stat = src.stat()
         dst_stat = dst.stat()
-        return src_stat.st_size == dst_stat.st_size and src_stat.st_mtime_ns == dst_stat.st_mtime_ns
+        if src_stat.st_size != dst_stat.st_size or src_stat.st_mtime_ns != dst_stat.st_mtime_ns:
+            return False
+        # ZIPs can give different BIG/RX3/VP8 payloads identical sizes and
+        # timestamps. Metadata alone cannot decide that a swap is unnecessary.
+        with src.open('rb') as left, dst.open('rb') as right:
+            while True:
+                chunk = left.read(1024 * 1024)
+                if chunk != right.read(1024 * 1024):
+                    return False
+                if not chunk:
+                    return True
     except Exception:
         return False
 
 
 def _copy_file_if_needed(src: Path, dst: Path) -> bool:
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    _asset_directory(dst.parent)
     if _files_match(src, dst):
+        make_asset_writable(dst)
         return False
-    shutil.copy2(src, dst)
+    copy_asset_file(src, dst)
     return True
+
+
+def copy_asset_file(src: str | Path, dst: str | Path) -> None:
+    """Publish a full copy, including when package timestamps are identical."""
+    src, dst = Path(src), Path(dst)
+    _asset_directory(dst.parent)
+    # New files inherit the destination directory's permissions. Never import
+    # source ACLs or leave half of a BIG/RX3 published after a failed copy.
+    try:
+        handle, temporary = tempfile.mkstemp(prefix='.server16-', suffix='.tmp', dir=dst.parent)
+    except PermissionError:
+        if not restore_asset_inheritance(dst.parent):
+            raise
+        handle, temporary = tempfile.mkstemp(prefix='.server16-', suffix='.tmp', dir=dst.parent)
+    os.close(handle)
+    staged = Path(temporary)
+    try:
+        shutil.copy2(src, staged)
+        make_asset_writable(staged)
+        replace_asset_file(staged, dst)
+    finally:
+        if staged.exists():
+            make_asset_writable(staged)
+            staged.unlink()
+
+
+def make_asset_writable(path: str | Path) -> None:
+    """Clear only a file's DOS read-only bit, without altering its Windows ACL."""
+    path = Path(path)
+    info = path.stat()
+    if os.name == 'nt' and getattr(info, 'st_file_attributes', 0) & 1:
+        try:
+            path.chmod(info.st_mode | stat.S_IWRITE)
+        except PermissionError:
+            if not restore_asset_inheritance(path):
+                raise
+            path.chmod(info.st_mode | stat.S_IWRITE)
+
+
+def replace_asset_file(src: str | Path, dst: str | Path, *, source_owned: bool = False) -> None:
+    """Replace one managed asset, allowing bounded transient sharing conflicts."""
+    src, dst = Path(src), Path(dst)
+    repaired = False
+    for attempt in range(4):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            if dst.is_file() and os.name == 'nt' and dst.stat().st_file_attributes & 1:
+                make_asset_writable(dst)
+                continue
+            if getattr(exc, 'winerror', None) == 5 and not repaired:
+                repaired = True
+                changed = restore_asset_inheritance(dst)
+                if source_owned:
+                    changed = restore_asset_inheritance(src) or changed
+                if not changed:
+                    changed = restore_asset_inheritance(dst.parent)
+                if changed:
+                    continue
+            # A scanner or a game file handle can briefly hold a sharing lock.
+            # An actual ACL/security-policy denial is not retried or elevated.
+            if getattr(exc, 'winerror', None) in (32, 33) and attempt < 3:
+                time.sleep((.05, .15, .3)[attempt])
+                continue
+            raise PermissionError(
+                f'Não foi possível substituir o arquivo {dst}. '
+                f'Verifique a permissão de gravação da pasta e se o arquivo está em uso. ({exc})'
+            ) from exc
+    raise PermissionError(f'Não foi possível substituir o arquivo {dst}; o destino permaneceu bloqueado')
 
 
 def copy(src: str | Path, dst: str | Path, progress_callback=None) -> None:
@@ -482,7 +517,12 @@ def copy_or_clear(src: str | Path, dst: str | Path) -> None:
     if src_path.is_file():
         _copy_file_if_needed(src_path, dst_path)
     elif dst_path.is_file():
-        dst_path.unlink(missing_ok=True)
+        try:
+            dst_path.unlink(missing_ok=True)
+        except PermissionError:
+            if not restore_asset_inheritance(dst_path):
+                raise
+            dst_path.unlink(missing_ok=True)
 
 
 _STADIUM_INJECTION_FILES = (
@@ -528,6 +568,7 @@ def restore_native_assets(app) -> int:
     """
     exedir = Path(app.exedir)
     fsw = exedir / "FSW"
+    ensure_server16_stadium_access(exedir / 'data/sceneassets', log=getattr(app, 'log', None))
     from .stadium_match_assets import clear_match_routes
     clear_match_routes(exedir)
     restored = 0
@@ -542,15 +583,7 @@ def restore_native_assets(app) -> int:
     )
     for source, target in tree_pairs:
         if source.exists():
-            if source == fsw / "stadium":
-                ensure_server16_stadium_access(exedir / "data" / "sceneassets", log=getattr(app, "log", None))
-            elif target == exedir / "data" / "sceneassets" / "goalnet":
-                ensure_server16_asset_access(target, log=getattr(app, "log", None))
             copy(source, target)
-            if source == fsw / "stadium":
-                ensure_server16_stadium_access(exedir / "data" / "sceneassets", log=getattr(app, "log", None))
-            elif target == exedir / "data" / "sceneassets" / "goalnet":
-                ensure_server16_asset_access(target, log=getattr(app, "log", None))
             restored += sum(1 for item in source.rglob("*") if item.is_file()) if source.is_dir() else 1
 
     # Navigation and intro files belong to the original bootstrap/movie flow.
@@ -579,7 +612,7 @@ def copy_tvlogo(src: str | Path, dst: str | Path) -> str:
     dst_path = Path(dst)
     dst_path.mkdir(parents=True, exist_ok=True)
     if src_path.is_file():
-        shutil.copyfile(src_path, dst_path / src_path.name)
+        _copy_file_if_needed(src_path, dst_path / src_path.name)
         return "default"
     files = sorted(item for item in src_path.iterdir() if item.is_file())
     if not files:
@@ -616,8 +649,6 @@ def extra_setup(source_dir: str | Path, dest_dir: str | Path, source_index: str,
     src_root = Path(source_dir)
     dest_root = Path(dest_dir)
     dest_root.mkdir(parents=True, exist_ok=True)
-    if asset_prefix.lower() == "netcolor":
-        ensure_server16_asset_access(dest_root, log=log)
     if not src_root.exists():
         return
     token = f"_{source_index}"

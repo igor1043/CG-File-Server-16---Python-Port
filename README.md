@@ -2,7 +2,7 @@
 
 Painel para preparar a partida e personalizar o FIFA 16, integrado ao [FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
 
-**Versão: 0.2.30** · Windows / FIFA 16 compatível
+**Versão: 0.2.32** · Windows / FIFA 16 compatível
 
 ## Revisão atual
 
@@ -68,3 +68,15 @@ Use o Server com o **FIFA Friends V12 e seus módulos compatíveis**. Estádios,
 ## Mais informações
 
 - [Todas as melhorias do FIFA Friends V12](https://github.com/igor1043/fifa-mods/tree/fifa-friends-v12).
+
+## Placar e mascotes — revisão 0.2.32
+
+O placar possui uma única escolha compartilhada pelo jogo e pelo Server16. **Automático · Server16** segue as atribuições de competição do INI; **Padrão do FIFA** mantém o placar nativo; um pacote escolhido manualmente passa a ser usado pelos dois seletores. A escolha feita no jogo é enviada imediatamente, e pedidos antigos não desfazem uma escolha mais recente.
+
+Se a instalação estiver com `ModCarrerMode/config/scoreboard.ini` em `Mode=native`, o placar genérico é intencional. Para retomar os placares das competições, selecione **Automático · Server16**. O preset `server16_py/assets/presets/scoreboard-automatic.ini` permite restaurar esse modo, copiando seu conteúdo para o arquivo de preferência com FIFA e Server fechados. As escolhas pessoais continuam locais.
+
+A preparação inclui a herança dos arquivos de iluminação `fx/glares` dos slots 176 e 261, usando as permissões do usuário atual, sem solicitar elevação. Falhas de estádio, logo de TV e placar são registradas separadamente. Uma restrição de acesso imposta pelo Windows continua sendo respeitada.
+
+Os mascotes passam a controlar a orientação de seu próprio ator durante o deslocamento: caminham voltados para o destino e olham para o campo ao parar. A atualização inclui foco da cabeça e variantes adicionais de reação, preservando jogadores e demais atores. Modelos e texturas existentes dos clubes permanecem no pacote de assets.
+
+Validação: 109 testes Python; cinco suítes nativas; locomoção e animações conferidas em 87 pacotes de mascotes; autoteste do executável e comparação dos fontes com os módulos embarcados.

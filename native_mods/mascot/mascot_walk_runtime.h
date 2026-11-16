@@ -1,4 +1,5 @@
 #pragma once
+#include "mascot_record_position.h"
 #include <limits.h>
 #include "mascot_locomotion_math.h"
 
@@ -16,10 +17,11 @@ struct MascotWalkRuntime {
     float clipTime=0, transitionPose[31*7]{}, currentPose[31*7]{};
     float blendElapsed=0, groundLift=0;
     bool hasGroundLift=false;
-    float visualLift=0, liftBlendSource=0;
+    float visualLift=0, liftBlendSource=0, gazeBlend=0;
     float lastLocal[31][16]{}, blendSource[31][16]{};
 };
 static MascotWalkRuntime mascotWalkRuntime;
+static MascotNativeMotionOwnership mascotNativeMotion;
 static constexpr float mascotWalkPlaybackRate=1.0f;
 static constexpr float mascotWaypointDwellSeconds=30.0f;
 static constexpr float mascotWaypointInteractionSeconds=15.0f;
@@ -175,10 +177,23 @@ static void mascot_blend_local_pose(float pose[31][16],int kind,float dt) {
     }
     memcpy(s.lastLocal,pose,sizeof(s.lastLocal));
 }
-static void mascot_orient_pose(float pose[31][16],float yaw) {
+static float mascot_body_heading(const float pose[31][16]) {
+    // RightUpLeg (3) -> LeftUpLeg (7) is the body's left axis. Its cross
+    // with world-up gives the visible forward axis, independent of the
+    // head bone's differently authored axes and the current clip's yaw.
+    const float leftX=pose[7][12]-pose[3][12],leftZ=pose[7][14]-pose[3][14];
+    if(!isfinite(leftX)||!isfinite(leftZ)||leftX*leftX+leftZ*leftZ<.001f)return 0;
+    return atan2f(-leftZ,leftX);
+}
+static void mascot_orient_pose(float pose[31][16],float yaw,bool alignBody=true) {
     // Apply actor heading once, in the private palette. Native actor yaw is
     // zero, so draw preparation cannot overwrite or double this rotation.
-    const float cosine=cosf(yaw),sine=sinf(yaw);
+    // The converted model faces +Z, as verified by its skinned mesh. The
+    // previous fixed half-turn reversed it. While travelling, compensate
+    // the blended pose's body yaw too, so a clip cannot turn it sideways.
+    const float localHeading=alignBody?mascot_body_heading(pose):mascot_body_heading(mascotBindPose);
+    const float modelYaw=mascot_wrap_heading(yaw-localHeading);
+    const float cosine=cosf(modelYaw),sine=sinf(modelYaw);
     for(unsigned int bone=0;bone<31;++bone)for(unsigned int column=0;column<4;++column) {
         const unsigned int k=column*4;const float x=pose[bone][k],z=pose[bone][k+2];
         pose[bone][k]=cosine*x+sine*z;pose[bone][k+2]=-sine*x+cosine*z;
@@ -201,6 +216,25 @@ static unsigned int mascot_local_destination(const MascotWalkRuntime& s,unsigned
     }
     return best;
 }
+static float mascot_pitch_heading(float x,float z) {
+    return atan2f(-x,-z);
+}
+static bool mascot_facing_pitch() {
+    const MascotWalkRuntime& s=mascotWalkRuntime;
+    return fabsf(mascot_wrap_heading(mascot_pitch_heading(s.position[0],s.position[2])-s.yaw))<.08f;
+}
+static float mascot_stationary_heading(const MascotWalkRuntime& s,bool cheer) {
+    const float pitch=mascot_pitch_heading(s.position[0],s.position[2]);
+    // One short glance on every third stop, only after support has finished.
+    // Stay inside the pitch-facing half-plane on either side of the stadium.
+    if(!cheer && s.waypointVisitSerial%3==0 && s.idleRemaining<6 && s.idleRemaining>3) {
+        const float elapsed=6-s.idleRemaining;
+        const float envelope=sinf(elapsed*(3.14159265f/3));
+        const float side=((s.waypointVisitSerial/3)&1)?1.0f:-1.0f;
+        return mascot_wrap_heading(pitch+side*.45f*envelope*envelope);
+    }
+    return pitch;
+}
 static void mascot_walk_reset(const MascotFrameContext& frame,uint64_t now) {
     MascotWalkRuntime& s=mascotWalkRuntime;s={};s.ready=true;s.home=frame.home;s.generation=frame.generation;s.session=InterlockedCompareExchange(&mascotPlacementSession,0,0);s.lastTick=now;s.yaw=originalYaw;
     memcpy(s.position,targetPosition,sizeof(s.position));s.waypoint=mascot_nearest_waypoint(s.position[2]);uint32_t seed=(uint32_t)now^(uint32_t)(now>>32)^(uint32_t)frame.home^(uint32_t)s.session;
@@ -216,9 +250,12 @@ static void mascot_walk_restore_live(uintptr_t renderer,uintptr_t records,size_t
     if(renderer==mascotAnimatedRenderer && records==mascotAnimatedRecords &&
        mascotAnimationBound && mascotAnimatedIndex<count &&
        get(records+mascotAnimatedIndex*0x50+0x40,binding) && binding==mascotPrivateSlot) {
-        memcpy((void*)(records+mascotAnimatedIndex*0x50+0x20),originalPosition,sizeof(originalPosition));
+        mascot_release_native_motion((unsigned char*)(records+mascotAnimatedIndex*0x50),mascotNativeMotion);
+        mascot_restore_positions((unsigned char*)(records+mascotAnimatedIndex*0x50),originalPosition,originalPreviousPosition);
+        mascot_restore_position_mode((unsigned char*)(records+mascotAnimatedIndex*0x50),originalPlacementMode);
         memcpy((void*)(records+mascotAnimatedIndex*0x50+0x2c),&originalYaw,sizeof(originalYaw));
         memcpy((void*)(records+mascotAnimatedIndex*0x50+0x1c),&originalYaw,sizeof(originalYaw));
+        memcpy((void*)(records+mascotAnimatedIndex*0x50+0x3c),&originalPreviousYaw,sizeof(originalPreviousYaw));
     }
     s.ready=false;s.walking=false;s.hasPose=false;
 }
@@ -227,13 +264,23 @@ static void mascot_walk_update(const MascotFrameContext& frame,LONG mode,uint64_
     const LONG session=InterlockedCompareExchange(&mascotPlacementSession,0,0);
     if(!s.ready||s.home!=frame.home||s.generation!=frame.generation||s.session!=session)
         mascot_walk_reset(frame,now);
+    if(s.position[0]*targetPosition[0]<0) {
+        // Halftime changes the goal independently of animation time. Do not
+        // carry a first-half pose/heading to the opposite end during pause.
+        s.position[0]=targetPosition[0];
+        s.yaw=mascot_pitch_heading(s.position[0],s.position[2]);
+        s.walking=false;s.turning=false;s.hasPose=false;
+        s.idleRemaining=mascotWaypointDwellSeconds;
+        s.waypoint=mascot_nearest_waypoint(s.position[2]);s.nextWaypoint=s.waypoint;
+        log_event("goal_side_orientation club=%d goal_x=%.2f z=%.2f yaw=%.3f facing=pitch",frame.home,s.position[0],s.position[2],s.yaw);
+    }
     s.lastTick=now;
     const float dt=isfinite(engineDt)?fmaxf(0,fminf(.05f,engineDt)):0;
     const bool cheer=mode==3;
     if(dt>0) {
         if(cheer) {
             if(!s.cheering){s.cheering=true;s.walking=false;s.turning=false;s.clipTime=0;}
-            s.clipTime+=dt;
+            if(mascot_facing_pitch())s.clipTime+=dt;
         } else {
             if(s.cheering){s.cheering=false;s.walking=false;s.turning=false;s.idleRemaining=mascotWaypointDwellSeconds;s.clipTime=0;}
             else s.clipTime+=dt;
@@ -249,7 +296,7 @@ static void mascot_walk_update(const MascotFrameContext& frame,LONG mode,uint64_
             }
         }
         const bool route=(s.walking||s.turning)&&!cheer;
-        const float heading=route?atan2f(0,mascotGoalLineDestinations[s.nextWaypoint]-s.position[2]):atan2f(-targetPosition[0],-s.position[2]);
+        const float heading=route?atan2f(0,mascotGoalLineDestinations[s.nextWaypoint]-s.position[2]):mascot_stationary_heading(s,cheer);
         s.yaw=mascot_turn_heading(s.yaw,heading,dt);
         if(s.turning && fabsf(mascot_wrap_heading(heading-s.yaw))<.04f) {
             s.turning=false;s.walking=true;
@@ -286,11 +333,9 @@ static void mascot_walk_update(const MascotFrameContext& frame,LONG mode,uint64_
     s.position[0]=targetPosition[0];s.position[1]=originalPosition[1];
     if(frame.records&&frame.selected<frame.count) {
         const uintptr_t rec=frame.records+frame.selected*0x50;
-        memcpy((void*)(rec+0x20),s.position,sizeof(s.position));
+        mascot_store_position((unsigned char*)rec,s.position);
         // Heading is already applied to the private palette. Keep both native
         // record angles neutral to avoid a second actor rotation.
-        const float paletteHeading=0;
-        memcpy((void*)(rec+0x1c),&paletteHeading,sizeof(paletteHeading));
-        memcpy((void*)(rec+0x2c),&paletteHeading,sizeof(paletteHeading));
+        mascot_control_native_motion((unsigned char*)rec,mascotNativeMotion);
     }
 }

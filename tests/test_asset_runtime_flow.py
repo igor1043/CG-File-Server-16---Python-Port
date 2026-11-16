@@ -84,6 +84,17 @@ class AssetRuntimeFlowTests(unittest.TestCase):
         self.assertEqual(self.app.Movdata.read_bytes(), b"video-Isuzu UTE A-League")
         self.assertEqual(self.assignments, before)
 
+    def test_manual_movie_and_native_default_override_stadium_movie_without_changing_assignments(self):
+        from server16_py.movie_options import save_choice
+        self.app.Movies=self.root/'MoviesGBD';self.app.stadmovie=True
+        self.put('MoviesGBD/Selected/bootflowoutro.vp8',b'chosen video');self.put('MoviesGBD/Selected/bumper.big',b'chosen bumper')
+        self.put('FSW/Nav/bootflowoutro.vp8',b'native video');self.put('FSW/Nav/bumper.big',b'native bumper')
+        original=dict(self.assignments)
+        for choice,expected in (('Selected',b'chosen video'),('',b'native video')):
+            save_choice(self.root,choice);self.runtime.apply_movie_runtime()
+            self.assertEqual(self.app.Movdata.read_bytes(),expected);self.assertTrue(self.app.stadmovie)
+            self.assertEqual(self.assignments,original)
+
     def test_new_scoreboard_name_resolves_existing_assets_after_native_baseline(self):
         self.assignments[("Scoreboard", "tour")] = "New official name"
         self.put("FSW/ScoreBoard/game/native.big", b"native")
@@ -93,6 +104,31 @@ class AssetRuntimeFlowTests(unittest.TestCase):
         self.app.tvlogoscoreboardtype = "default"
         self.runtime.apply_scoreboard_runtime()
         self.assertEqual((self.app.Scoredata / "game/native.big").read_bytes(), b"mapped scoreboard")
+
+    def test_manual_scoreboard_then_native_and_automatic_restore_without_editing_assignments(self):
+        from server16_py.scoreboard_options import save_choice
+        self.app.ScoreBoard=self.root/'ScoreBoardGBD'
+        self.put('FSW/ScoreBoard/overlays/score.big',b'baseline')
+        self.put('ScoreBoardGBD/Assigned/game/overlays/score.big',b'competition')
+        self.put('ScoreBoardGBD/Selected/game/overlays/score.big',b'manual')
+        self.assignments[('Scoreboard','round')]='Assigned';before=dict(self.assignments)
+        for choice,expected in (('Selected',b'manual'),('',b'baseline'),(None,b'competition')):
+            save_choice(self.root,choice);self.runtime.apply_scoreboard_runtime()
+            self.assertEqual((self.app.Scoredata/'game/overlays/score.big').read_bytes(),expected)
+            self.assertEqual(self.assignments,before)
+
+    def test_pending_native_choice_is_applied_before_the_next_poll_or_match_preparation(self):
+        from server16_py.scoreboard_options import discover,REQUEST,load_choice
+        self.app.ScoreBoard=self.root/'ScoreBoardGBD';self.app.memory=SimpleNamespace(process_id=42)
+        self.put('FSW/ScoreBoard/overlays/score.big',b'baseline')
+        self.put('ScoreBoardGBD/Selected/game/overlays/score.big',b'newly selected')
+        signature=discover(self.root).signature
+        self.put(REQUEST,f'schema=1\npid=42\ncreated=123456\ncaptured_tick=1\nwire=S16SCORE1|{signature}|2|END\n'.encode())
+        with patch('psutil.Process') as process:
+            process.return_value.create_time.return_value=123456/10_000_000-11644473600
+            self.runtime.apply_scoreboard_runtime()
+        self.assertEqual(load_choice(self.root),'Selected')
+        self.assertEqual((self.app.Scoredata/'game/overlays/score.big').read_bytes(),b'newly selected')
 
     def test_scoreboard_priority_copies_baseline_before_assigned_files(self):
         priorities = [("Scoreboard", "round"), ("Scoreboard", "tour"),

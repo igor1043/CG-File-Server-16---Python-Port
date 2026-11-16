@@ -10,7 +10,9 @@ from pathlib import Path
 import re
 import struct
 import threading
+import uuid
 from .presentation_options_catalog import packages,available
+from .file_tools import replace_asset_file
 
 PAGE='game/screens/settings/GameSettings'
 UI_PATH='data/ui/game/screens/settings/gamesettings.big'
@@ -60,10 +62,64 @@ def load_choice(game):
 def save_choice(game,choice):
     if choice is not None and choice!='' and not available(game,'ScoreBoardGBD','scoreboard',choice):raise ValueError('Placar não instalado')
     mode='automatic' if choice is None else 'native' if choice=='' else 'manual'
-    text='[Scoreboard]\nMode='+mode+'\n'
+    # One persisted value and revision are shared by both front ends.
+    try:
+        if load_choice(game)==choice and selection_revision(game):return
+    except (OSError,ValueError,configparser.Error):pass
+    text='[Scoreboard]\nMode='+mode+'\nRevision='+uuid.uuid4().hex+'\n'
     if mode=='manual':text+='Package='+choice+'\n'
     path=Path(game)/PREFERENCE;path.parent.mkdir(parents=True,exist_ok=True)
-    temp=path.with_suffix('.ini.new');temp.write_text(text,encoding='utf8');os.replace(temp,path)
+    temp=path.with_suffix('.ini.new');temp.write_text(text,encoding='utf8');replace_asset_file(temp,path)
+
+
+def selection_revision(game):
+    path=Path(game)/PREFERENCE
+    if not path.is_file() or path.stat().st_size>4096:return ''
+    ini=configparser.ConfigParser(interpolation=None);ini.read(path,encoding='utf-8-sig')
+    value=ini.get('Scoreboard','Revision',fallback='')
+    return value if re.fullmatch('[0-9a-f]{32}',value) else ''
+
+
+def _acknowledged(game,identity):
+    try:
+        path=Path(game)/ACK
+        return path.stat().st_size<=512 and json.loads(path.read_bytes()).get('request')==identity
+    except (OSError,ValueError,AttributeError):return False
+
+
+def _acknowledge(game,pid,identity):
+    ack=Path(game)/ACK;ack.parent.mkdir(parents=True,exist_ok=True);temp=ack.with_suffix('.json.new')
+    temp.write_text(json.dumps(dict(schema=1,pid=pid,request=identity)),encoding='ascii');replace_asset_file(temp,ack)
+
+
+def select_choice(app,choice,*,source='server',catalog=None):
+    """Commit the single shared selection; both UIs observe the same value."""
+    service=getattr(app,'scoreboard_options',None)
+    lock=service.choice_lock if service is not None else threading.RLock()
+    game=Path(app.exedir)
+    with lock:
+        # An older in-game request must not undo a newer explicit Server edit.
+        pending=None
+        if source=='server':
+            if service is not None:service.selection_epoch+=1
+            pid=getattr(getattr(app,'memory',None),'process_id',0)
+            if pid and (game/REQUEST).is_file():
+                try:
+                    import psutil
+                    created=round((psutil.Process(pid).create_time()+11644473600)*10_000_000)
+                    pending=(pid,_request(game,pid,created)[2])
+                except (OSError,ValueError,psutil.Error):pass
+        save_choice(game,choice)
+        if pending:_acknowledge(game,*pending)
+        if catalog is None:catalog=discover(game)
+        if (game/CATALOG).is_file():
+            try:update_initial_choice(game,catalog)
+            except (OSError,ValueError,KeyError) as error:app.log('Scoreboard selected; UI will refresh from the shared choice',error)
+        if service is not None:
+            service.notify_choice(choice)
+            if source=='server':
+                entry=getattr(service,'native_entry',None) if getattr(app,'lastpagename','')==PAGE else None
+                service._submit(service._prepare,game,entry)
 
 
 def selected_index(game,catalog):
@@ -99,7 +155,7 @@ def update_initial_choice(game,catalog):
     value=selected_index(game,catalog)
     if struct.unpack_from('<i',data,offset)[0]==value:return
     struct.pack_into('<i',data,offset,value)
-    path=game/UI_PATH;temp=path.with_suffix('.big.scoreboard-new');temp.write_bytes(data);os.replace(temp,path)
+    path=game/UI_PATH;temp=path.with_suffix('.big.scoreboard-new');temp.write_bytes(data);replace_asset_file(temp,path)
 
 
 def update_movie_initial(game,catalog):
@@ -114,7 +170,8 @@ def update_movie_initial(game,catalog):
 def _request(game,pid,created):
     path=Path(game)/REQUEST
     if path.stat().st_size>512:raise ValueError('Solicitação de placar excedeu o limite')
-    with path.open('rb') as stream:raw=stream.read(513)
+    with path.open('rb') as stream:
+        raw=stream.read(513);info=os.fstat(stream.fileno())
     if len(raw)>512:raise ValueError('Solicitação de placar excedeu o limite')
     fields=dict(line.split('=',1) for line in raw.decode('ascii').splitlines() if '=' in line)
     if fields.get('schema')!='1' or int(fields.get('pid','0'))!=pid or abs(int(fields.get('created','0'))-created)>10000:raise ValueError('Solicitação pertence a outra sessão')
@@ -122,7 +179,10 @@ def _request(game,pid,created):
     if not match:raise ValueError('Solicitação de placar inválida')
     catalog=discover(game);index=int(match[2])
     if match[1]!=catalog.signature or not 0<=index<len(catalog.values):raise ValueError('Catálogo de placares mudou; abra novamente as opções')
-    return catalog,index,hashlib.sha256(raw).hexdigest()
+    # Selecting A -> Server B -> game A is a new event even with identical
+    # native wire bytes. Identify the publication, not just its payload.
+    identity=hashlib.sha256(raw+b'\0'+str(info.st_mtime_ns).encode()+b'\0'+str(info.st_ino).encode()).hexdigest()
+    return catalog,index,identity
 
 
 def read_request(game,pid,created):return _request(game,pid,created)[:2]
@@ -137,16 +197,9 @@ def adopt_pending(app):
         created=round((psutil.Process(pid).create_time()+11644473600)*10_000_000)
         catalog,index,identity=_request(game,pid,created)
     except (OSError,ValueError,psutil.Error):return False
-    ack=game/ACK
-    try:
-        if ack.stat().st_size<=512 and json.loads(ack.read_bytes()).get('request')==identity:return False
-    except (OSError,ValueError,AttributeError):pass
-    save_choice(game,catalog.values[index])
-    if (game/CATALOG).is_file():
-        try:update_initial_choice(game,catalog)
-        except (OSError,ValueError,KeyError) as error:app.log('Scoreboard selected; UI initial value requires rebuilding',error)
-    ack.parent.mkdir(parents=True,exist_ok=True);temp=ack.with_suffix('.json.new')
-    temp.write_text(json.dumps(dict(schema=1,pid=pid,request=identity)),encoding='ascii');os.replace(temp,ack)
+    if _acknowledged(game,identity):return False
+    select_choice(app,catalog.values[index],source='native',catalog=catalog)
+    _acknowledge(game,pid,identity)
     return True
 
 
@@ -158,6 +211,17 @@ class ScoreboardOptions:
         self._pending=0;self._lock=threading.Lock()
         self.enter_stamp=None;self.open_stamp=None;self.last_page=None;self.movie_stamp=None
         self.stadium=None;self.stadium_context=None
+        self.choice_lock=getattr(getattr(app,'assets_runtime',None),'_scoreboard_lock',threading.RLock())
+        self.selection_epoch=0;self.choice_listeners=[]
+
+    def notify_choice(self,choice):
+        for listener in tuple(self.choice_listeners):
+            if hasattr(self.app,'_post_ui'):self.app._post_ui(listener,choice)
+            else:listener(choice)
+
+    def choose_from_server(self,choice):
+        select_choice(self.app,choice)
+        self._submit(self.app.apply_scoreboard_runtime)
 
     @property
     def busy(self):
@@ -188,7 +252,8 @@ class ScoreboardOptions:
                 record=json.loads(manifest.read_bytes())
                 if (game/UI_PATH).is_file():verified_ui(game,record)
                 rebuild=(record.get('signature')!=catalog.signature or record.get('movie_signature')!=movies.signature
-                    or record.get('native_options_revision')!=2 or record.get('stadium_revision')!=self.stadium or not (game/UI_PATH).is_file())
+                    or record.get('native_options_revision')!=3 or record.get('selection_revision')!=selection_revision(game)
+                    or record.get('stadium_revision')!=self.stadium or not (game/UI_PATH).is_file())
             if rebuild:
                 from .scoreboard_options_ui import build
                 template=game/'ModCarrerMode/source/native_mods/scoreboard_settings/gamesettings.original.big'
@@ -224,20 +289,22 @@ class ScoreboardOptions:
             self.stamp=stamp
             import psutil
             created=round((psutil.Process(pid).create_time()+11644473600)*10_000_000)
-            catalog,index=read_request(self.root,pid,created)
-            self._submit(self._apply,self.root,pid,catalog,index)
+            catalog,index,identity=_request(self.root,pid,created)
+            if _acknowledged(self.root,identity):return
+            self.selection_epoch+=1
+            self._submit(self._apply,self.root,pid,catalog,index,self.selection_epoch)
         except FileNotFoundError:pass
         except Exception as error:self.app.log('Scoreboard selector request rejected',error)
 
-    def _apply(self,game,pid,catalog,index):
+    def _apply(self,game,pid,catalog,index,epoch=None):
         if self.closed or self.root!=game or self.app.memory.process_id!=pid:return
         try:
             if not self.app.module_enabled('ScoreBoard'):raise RuntimeError('Ative o módulo ScoreBoard no Server16 para aplicar o placar')
-            save_choice(game,catalog.values[index])
-            try:update_initial_choice(game,catalog)
-            except (OSError,ValueError,KeyError) as error:self.app.log('Scoreboard selected; UI value will be refreshed on next launch',error)
-            # Existing Server16 baseline/TV-logo variants/progress notifications.
-            self.app.apply_scoreboard_runtime()
+            with self.choice_lock:
+                if epoch is not None and epoch!=self.selection_epoch:return
+                select_choice(self.app,catalog.values[index],source='native',catalog=catalog)
+                # Existing baseline/TV-logo variants/progress notifications.
+                self.app.apply_scoreboard_runtime()
             self.app.log('Scoreboard chosen in native game options: '+catalog.labels[index])
         except Exception as error:self.app.log('Failed to apply native scoreboard choice',error)
 

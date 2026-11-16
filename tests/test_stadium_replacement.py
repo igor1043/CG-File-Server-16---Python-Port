@@ -142,7 +142,7 @@ class StadiumReplacementTests(unittest.TestCase):
             if 'prepared' in Path(src).parts and Path(dst).name=='stadium_261_3_textures.rx3':
                 raise PermissionError('simulated publish failure')
             return original(src,dst)
-        with patch('server16_py.stadium_transaction.os.replace', side_effect=fail):
+        with patch('server16_py.file_tools.os.replace', side_effect=fail):
             with self.assertRaises(PermissionError):
                 self.runtime.run_stadium_copy_job('1','manual','261','B','B,None,None,None',self.context()[:3])
         self.assertEqual(self.files(),before)
@@ -359,7 +359,7 @@ class StadiumReplacementTests(unittest.TestCase):
         old=(self.game/rel).read_bytes()
         self.put(tx.stage/rel,b'new')
         tx.commit({rel},lambda:None)
-        with patch('server16_py.stadium_transaction.os.replace', side_effect=PermissionError('locked')):
+        with patch('server16_py.file_tools.os.replace', side_effect=PermissionError('locked')):
             with self.assertRaisesRegex(RuntimeError,'backups retained'):
                 tx.rollback()
         self.assertEqual((tx.backup/rel).read_bytes(),old)
@@ -378,7 +378,7 @@ class StadiumReplacementTests(unittest.TestCase):
             if 'previous' in Path(src).parts and Path(src).name=='stadium_261_1_textures.rx3':
                 raise PermissionError('one texture locked')
             return original(src,dst)
-        with patch('server16_py.stadium_transaction.os.replace',side_effect=fail_one):
+        with patch('server16_py.file_tools.os.replace',side_effect=fail_one):
             with self.assertRaisesRegex(RuntimeError,'backups retained'): tx.rollback()
         self.assertEqual(len(tx.changes),1)
         tx.rollback()

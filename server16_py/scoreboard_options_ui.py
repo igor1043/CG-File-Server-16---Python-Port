@@ -1,7 +1,7 @@
 """Extend GameSettings with native scoreboard and per-fixture attendance rows."""
 from pathlib import Path
 import hashlib,json,os,struct,sys
-from .scoreboard_options import discover,selected_index
+from .scoreboard_options import discover,selected_index,selection_revision
 from . import movie_options
 
 CLASS=('game','screens','settings','GameSettings')
@@ -43,7 +43,8 @@ def build(game,original,output,manifest,stadium=None):
     if original_code[-1].op!=0:raise ValueError('Registro nativo de opções desconhecido')
     catalog=discover(game);initial=selected_index(game,catalog)
     movies=movie_options.discover(game);movie_initial=movie_options.selected_index(game,movies)
-    revision=hashlib.sha256(json.dumps([catalog.signature,movies.signature,stadium,2],sort_keys=True).encode()).hexdigest()
+    selection=selection_revision(game)
+    revision=hashlib.sha256(json.dumps([catalog.signature,movies.signature,stadium,3,selection],sort_keys=True).encode()).hexdigest()
     from .stadium_options_ui import add_preview
     has_photo=add_preview(game,big,apt,stadium)
     data=apt.data;data.extend(bytes(-len(data)%8));start=len(data)
@@ -87,8 +88,10 @@ def build(game,original,output,manifest,stadium=None):
     a.function('S16MovieValues',0,lambda a:a.ret(('array',tuple(range(len(movies.values))))))
     a.function('S16MovieDescription',0,lambda a:a.ret('Vídeo de abertura pré-jogo. Automático usa as atribuições do INI; Padrão do FIFA restaura a abertura original.'))
     def init(a):
-        changed=('bin',17,EQ(EQ(G(global_catalog),catalog.signature),False),EQ(G(global_choice),None))
-        a.when(changed,lambda a:(a.set(b.GLOBAL,global_catalog,catalog.signature),a.set(b.GLOBAL,global_choice,T('S16InitialScoreboard'))))
+        changed=('bin',17,('bin',17,EQ(EQ(G(global_catalog),catalog.signature),False),EQ(G(global_choice),None)),
+                 EQ(EQ(G('Server16ScoreboardSync'),selection),False))
+        a.when(changed,lambda a:(a.set(b.GLOBAL,global_catalog,catalog.signature),
+            a.set(b.GLOBAL,global_choice,T('S16InitialScoreboard')),a.set(b.GLOBAL,'Server16ScoreboardSync',selection)))
         a.when(EQ(T('S16ScoreboardDirty'),None),lambda a:a.set(R(1),'S16ScoreboardDirty',False))
         a.when(EQ(T('S16CrowdChoice'),None),lambda a:(a.set(R(1),'S16CrowdChoice',0),a.set(R(1),'S16CrowdDirty',False)))
         a.when(('bin',17,EQ(EQ(G('S16MovieCatalog'),movies.signature),False),EQ(G('S16MovieChoice'),None)),
@@ -102,6 +105,7 @@ def build(game,original,output,manifest,stadium=None):
             a.expr(P(T('mcData'),'settings'));a.expr(ROW);a.expr(descriptor);a.op(79)
             a.do(P(category,'settings'),'push',ROW);a.set(category,'S16ScoreboardInstalled',True)
         a.when(('bin',16,category,EQ(P(category,'S16ScoreboardInstalled'),None)),insert)
+        a.set(index(P(T('mcData'),'settings'),ROW),'currentValue',G(global_choice))
         def insert_crowd(a):
             descriptor=a.object(dict(id=CROWD_ROW,title='Ocupação do estádio',controlType='toggle',currentValue=T('S16CrowdChoice'),
                 labels=P(proto,'S16CrowdLabels'),values=P(proto,'S16CrowdValues'),description=P(proto,'S16CrowdDescription'),
@@ -151,9 +155,15 @@ def build(game,original,output,manifest,stadium=None):
     def changed(a):
         a.when(EQ(R(4),MOVIE_ROW),lambda a:a.ret())
         a.when(EQ(R(4),CROWD_ROW),lambda a:a.ret())
-        a.when(EQ(R(4),ROW),lambda a:a.ret())
+        a.when(EQ(R(4),ROW),lambda a:(a.do(R(1),'S16CommitScoreboardChoice'),a.ret()))
         a.ret(CALL(R(1),'S16BaseChange',R(2),R(3),R(4),R(5)))
     a.function('OnChangeCallback',4,changed)
+    def commit_scoreboard(a):
+        a.when(T('S16ScoreboardDirty'),lambda a:(
+            a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchScoreboard',
+                b.plus(b.plus('S16SCORE1|'+catalog.signature+'|',G(global_choice)),'|END')),
+            a.set(R(1),'S16ScoreboardDirty',False)))
+    a.function('S16CommitScoreboardChoice',0,commit_scoreboard)
     def commit(a):
         a.when(T('S16MovieDirty'),lambda a:(
             a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchMovie',b.plus(b.plus('S16MOVIE1|'+movies.signature+'|',G('S16MovieChoice')),'|END')),
@@ -162,10 +172,7 @@ def build(game,original,output,manifest,stadium=None):
             a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchCrowd',
                 b.plus(b.plus('S16CROWD1|',index(('array',CROWD_VALUES),T('S16CrowdChoice'))),'|END')),
             a.set(R(1),'S16CrowdDirty',False)))
-        a.when(T('S16ScoreboardDirty'),lambda a:(
-            a.do(b.ION,'SendSystemEvent','GameSettings','Server16MatchScoreboard',
-                b.plus(b.plus('S16SCORE1|'+catalog.signature+'|',G(global_choice)),'|END')),
-            a.set(R(1),'S16ScoreboardDirty',False)))
+        a.do(R(1),'S16CommitScoreboardChoice')
     a.function('S16CommitScoreboard',0,commit)
     def event(a):
         a.when(('bin',16,CALL(R(1),'S16IsStadiumSetting'),EQ(R(2),P(G('INPUTCODE'),'OPTION_LEFT'))),lambda a:(
@@ -203,8 +210,9 @@ def build(game,original,output,manifest,stadium=None):
     record=dict(schema=1,signature=catalog.signature,packages=catalog.packages,labels=catalog.labels,
         initial_value_offset=offset,movie_initial_offset=movie_absolute,mutable_value_offsets=[offset,movie_absolute],
         ui_stable_sha256=hashlib.sha256(stable).hexdigest(),original_rows_preserved=True,crowd_row=CROWD_ROW,
-        movie_signature=movies.signature,stadium_revision=stadium,native_options_revision=2)
+        movie_signature=movies.signature,stadium_revision=stadium,native_options_revision=3,selection_revision=selection)
     manifest=Path(manifest);manifest.parent.mkdir(parents=True,exist_ok=True)
     manifest_temp=manifest.with_suffix('.json.scoreboard-new');manifest_temp.write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf8')
-    os.replace(temporary,output);os.replace(manifest_temp,manifest)
+    from .file_tools import replace_asset_file
+    replace_asset_file(temporary,output);replace_asset_file(manifest_temp,manifest)
     return record

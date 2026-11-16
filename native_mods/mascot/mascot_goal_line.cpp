@@ -7,13 +7,14 @@
 #include <initializer_list>
 #include <wchar.h>
 #include "mascot_single_core.h"
-#include "scene_actor_api.h"
 #include "native_guards.h"
 #include "mascot_package_guard.h"
 #include "mascot_memory_reader.h"
 #include "mascot_pose_policy.h"
 #include "mascot_placement_policy.h"
-#include "match_presentation.h"
+#include "../common/scene_lua.h"
+#include "../common/scene_startup_probe.h"
+#include "scene_actor_api.h"
 
 static uintptr_t image;
 static char logPath[MAX_PATH];
@@ -27,11 +28,12 @@ static bool repositionMascot;
 static bool currentClubAnimated;
 static MascotPlacementChoice matchPlacement;
 static float originalPosition[3];
+static float originalPreviousPosition[3];
 static float originalYaw;
+static float originalPreviousYaw;
+static unsigned char originalPlacementMode;
 static int lastHome = -1, lastStadium = -1, lastLight = -1, lastCold = -1;
 static DWORD lastIdentityCheck, lastDirectionCheck;
-static MatchPresentationConfig presentationConfig;
-static bool lastMascotAllowed=true;
 static int lastAttackDirection;
 struct PriorPlacement { unsigned int magic, index; uintptr_t renderer, records; float original[3], target[3]; };
 static PriorPlacement priorPlacement;
@@ -39,7 +41,23 @@ static bool priorPlacementPending;
 static wchar_t gameDirectory[MAX_PATH];
 static volatile LONG packageStatus;
 static LONG lastPackageStatus = -1;
+static SceneLuaSnapshot lastMascotLua;
+static bool luaSetupComplete=false;
+static uint64_t nextLuaRetry=0;
+static LONG sceneBusy,sceneContentions;
+static SceneStartupProbe startupRecovery;
 static unsigned int mascotPlacementGeneration;
+struct MascotBuildSnapshot {
+    uintptr_t renderer=0,records=0;
+    size_t count=0,index=0;
+    unsigned int type=23,generation=0;
+    uint64_t tick=0;
+    float position[3]{};
+};
+static MascotBuildSnapshot mascotBuildSnapshot;
+static uintptr_t mascotBuildToken=0;
+static uint64_t mascotBuildNextLog=0;
+static bool mascotBuildLogPending=false;
 // Validated once by placement. Animation consumes this snapshot in the same
 // hook, rather than scanning the same vectors and Lua tables a second time.
 struct MascotFrameContext {
@@ -57,7 +75,7 @@ static void log_event(const char* format, ...)
 {
     FILE* file = nullptr;
     if (!logPath[0] || fopen_s(&file, logPath, "ab") || !file) return;
-    fprintf(file, "%lu thread=%lu ", GetTickCount(), GetCurrentThreadId());
+    fprintf(file, "%lu pid=%lu thread=%lu ", GetTickCount(), GetCurrentProcessId(), GetCurrentThreadId());
     va_list args; va_start(args, format); vfprintf(file, format, args); va_end(args);
     fputs("\r\n", file); fclose(file);
 }
@@ -151,23 +169,23 @@ static bool refresh_lua(unsigned int rnaIndex)
     ReleaseSRWLockShared(&clubPackageLock);
     char script[12288];
     const int size=snprintf(script,sizeof(script),
-        "FIFA16_MASCOT_SINGLE_INSTANCE_READY=true; FIFA16_MASCOT_PACKAGE_STATUS={%s}; FIFA16_MASCOT_ANIMATION_MODEL_READY={%s}; "
-        "if not FIFA16_MASCOT_BASE_SLEUPDATE then FIFA16_MASCOT_BASE_SLEUPDATE=SleUpdate end; "
-        "SleUpdate=function(i) FIFA16_MASCOT_BASE_SLEUPDATE(i);local s=db.sle[i]; "
+        "FIFA16_MASCOT_REFRESH_DONE=false; FIFA16_MASCOT_SINGLE_INSTANCE_READY=true; FIFA16_MASCOT_PACKAGE_STATUS={%s}; FIFA16_MASCOT_ANIMATION_MODEL_READY={%s}; "
+        "if not FIFA16_MASCOT_LUA_V30 then local baseUpdate=SleUpdate;local baseRM=GetRMSle; "
+        "SleUpdate=function(i) baseUpdate(i);local s=db.sle[i]; "
         "if s.isMascot==1 and FIFA16_MASCOT_PACKAGE_STATUS[s.teamid]~=true then s.isMascot=0;s.slename='photographer' end end; "
-        "if not FIFA16_MASCOT_BASE_RMSLE then FIFA16_MASCOT_BASE_RMSLE=GetRMSle end; "
         "GetRMSle=function(i,m)local s=db.sle[i]; "
         "if (s.sletype==5 or s.sletype==12) and FIFA16_MASCOT_PACKAGE_STATUS[s.teamid] then return '' end; "
         "if s.isMascot==1 and m==0 and FIFA16_MASCOT_ANIMATION_MODEL_READY[s.teamid] then return 'data/sceneassets/mascot/'..s.teamid..'/model_animated.rx3;' end; "
-        "return FIFA16_MASCOT_BASE_RMSLE(i,m) end;SleUpdate(%u);local s=db.sle[%u]; "
-        "FIFA16_MASCOT_CORNER_AUDIT={rnaIndex=%u,homeTeam=s.teamid,isMascot=s.isMascot,name=s.slename,model=GetRMSle(%u,0),texture=GetTexture(%u)};",
+        "return baseRM(i,m) end; FIFA16_MASCOT_LUA_V30=true end;SleUpdate(%u);local s=db.sle[%u]; "
+        "FIFA16_MASCOT_CORNER_AUDIT={rnaIndex=%u,homeTeam=s.teamid,isMascot=s.isMascot,name=s.slename,model=GetRMSle(%u,0),texture=GetTexture(%u)};FIFA16_MASCOT_REFRESH_DONE=true;",
         ready,animated,rnaIndex,rnaIndex,rnaIndex,rnaIndex,rnaIndex);
     if (size < 0 || size >= sizeof(script)) return false;
     __try {
         /* Engine-owned critical section; runs on native BatchSLE scene thread. */
         ((void (__fastcall*)(const char*, size_t, const char*))(image + 0x4ac35e0))(
             script, (size_t)size, "mascot_corner_refresh");
-        return true;
+        const auto snapshot=scene_lua_snapshot(image);
+        return snapshot.globals&&scene_lua_flag(snapshot.globals,"FIFA16_MASCOT_REFRESH_DONE");
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         log_event("lua_refresh_fault"); return false;
     }
@@ -217,6 +235,7 @@ static int lua_number(uintptr_t table, const char* key)
 
 #include "mascot_attack_side.h"
 #include "mascot_native_animation.h"
+
 // Camera consumers get a copied, versioned snapshot, never private DLL RVAs.
 // Publishing does not alter any actor/animation/resource selection.
 static SRWLOCK sceneCameraLock=SRWLOCK_INIT;
@@ -304,6 +323,7 @@ static bool assign_mascot_placement(void* object, MascotFrameContext& frame)
     uintptr_t prototype = *(uintptr_t*)(prototypes + (size_t)reservedAppearance*8);
     uintptr_t state = *(uintptr_t*)(prototype + 16);
     const unsigned int rnaIndex = *(unsigned int*)(state + 0x4c);
+    if(rnaIndex>=4096)return false;
     const bool newGeometry = renderer != lastRenderer || records != lastRecords || count != lastCount || appearanceType!=lastAppearanceType;
     if(renderer==lastRenderer && appearanceType!=lastAppearanceType && lastAppearanceType<23) {
         uintptr_t previous;size_t previousCount;
@@ -317,11 +337,11 @@ static bool assign_mascot_placement(void* object, MascotFrameContext& frame)
     for(unsigned int i=0;i<mascotPlacementTypeCount;++i)if(mascotPlacementTypes[i]!=appearanceType)
         mascot_assign_none((unsigned char*)placementRecords[i],placementCounts[i],(unsigned char)mascot_reserved_appearance(mascotPlacementTypes[i]));
     int home = lastHome, stadium = lastStadium, light = lastLight, cold = lastCold;
+    auto luaSnapshot=lastMascotLua;
     const DWORD tick = GetTickCount();
-    const bool mascotAllowed=presentationConfig.read(tick).mascots;
-    const bool optionsChanged=mascotAllowed!=lastMascotAllowed;
     if (newGeometry || tick - lastIdentityCheck >= 250) {
         lastIdentityCheck = tick;
+        luaSnapshot=scene_lua_snapshot(image);
         const uintptr_t luaTable = prototype_lua_table(rnaIndex);
         home = lua_number(luaTable,"teamid"); stadium = lua_number(luaTable,"stadiumID");
         light = lua_number(luaTable,"stadiumLightID"); cold = lua_number(luaTable,"cold");
@@ -329,12 +349,19 @@ static bool assign_mascot_placement(void* object, MascotFrameContext& frame)
     const bool newIdentity = home != lastHome || stadium != lastStadium || light != lastLight || cold != lastCold;
     const LONG packages=InterlockedCompareExchange(&packageStatus,0,0);
     const bool packagesChanged=packages!=lastPackageStatus;
-    if (newGeometry || newIdentity || packagesChanged || optionsChanged) {
+    const bool luaChanged=luaSnapshot.vm!=lastMascotLua.vm||luaSnapshot.globals!=lastMascotLua.globals;
+    const bool retryLua=!luaSetupComplete&&GetTickCount64()>=nextLuaRetry;
+    if (newGeometry || newIdentity || packagesChanged || luaChanged || retryLua) {
         ++mascotPlacementGeneration;
         if (!newGeometry && mascotWalkRuntime.ready) mascot_walk_restore_live(renderer,records,count);
         if (!newGeometry && repositionMascot && selectedSlot < count) {
             float current[3]; memcpy(current,(void*)(records+selectedSlot*0x50+0x20),sizeof(current));
-            if (same_position(current,targetPosition)) memcpy((void*)(records+selectedSlot*0x50+0x20),originalPosition,sizeof(originalPosition));
+            if (same_position(current,targetPosition))
+            {
+                auto* record=(unsigned char*)(records+selectedSlot*0x50);
+                mascot_restore_positions(record,originalPosition,originalPreviousPosition);
+                mascot_restore_position_mode(record,originalPlacementMode);
+            }
         }
         if (priorPlacementPending) {
             if (renderer == priorPlacement.renderer && records == priorPlacement.records && priorPlacement.index < count) {
@@ -350,22 +377,32 @@ static bool assign_mascot_placement(void* object, MascotFrameContext& frame)
         lastAppearanceType=appearanceType;
         lastHome=home; lastStadium=stadium; lastLight=light; lastCold=cold;
         lastPackageStatus=packages;
-        lastMascotAllowed=mascotAllowed;
+        lastMascotLua=luaSnapshot;
+        nextLuaRetry=GetTickCount64()+1000;
         selectedSlot = mascot_choose_corner((const unsigned char*)records, count);
         float p[3]; memcpy(p, (void*)(records + selectedSlot * 0x50 + 0x20), sizeof(p));
         log_event("scene renderer=%p placement_type=%u actors=%zu photographers=%zu choreo_photographers=%zu stewards=%zu choreo_stewards=%zu mascot_slots=1 number=%zu runtime_index=%zu position=%g,%g,%g",
             object,appearanceType,count,placementCounts[0],placementCounts[1],placementCounts[2],placementCounts[3],selectedSlot+1,selectedSlot,p[0],p[1],p[2]);
-        if (refresh_lua(rnaIndex)) {
+        const bool refreshed=luaSnapshot.vm&&refresh_lua(rnaIndex);
+        const uintptr_t row=prototype_lua_table(rnaIndex);
+        const int mascotFlag=lua_number(row,"isMascot");
+        const bool matchingRow=home>=0&&lua_number(row,"teamid")==home;
+        luaSetupComplete=refreshed&&matchingRow&&mascotFlag>=0&&
+            (!mascot_club_ready(home,false)||mascotFlag==1);
+        if (refreshed&&matchingRow&&mascotFlag>=0) {
             /* v2/v3 had already configured this resource as a photographer.
              * Force its native callback/path/material reload on the scene thread. */
             ((void (__fastcall*)(void*, unsigned char))(image + 0x43b4530))((void*)prototype, 1);
             log_event("reserved_resource_reload requested rna_index=%u audit=FIFA16_MASCOT_CORNER_AUDIT", rnaIndex);
         }
-        repositionMascot = mascotAllowed && lua_number(prototype_lua_table(rnaIndex),"isMascot") == 1;
+        repositionMascot = refreshed&&matchingRow&&mascotFlag==1;
         currentClubAnimated=mascot_club_ready(home,true);
         mascot_set_animation_active(repositionMascot && currentClubAnimated,home);
         memcpy(originalPosition,p,sizeof(originalPosition));
+        memcpy(originalPreviousPosition,(void*)(records+selectedSlot*0x50+0x30),sizeof(originalPreviousPosition));
         if(!get(records+selectedSlot*0x50+0x1c,originalYaw))originalYaw=0;
+        if(!get(records+selectedSlot*0x50+0x3c,originalPreviousYaw))originalPreviousYaw=0;
+        originalPlacementMode=*(unsigned char*)(records+selectedSlot*0x50+0x43);
         mascot_position_by_goal_line(p, targetPosition);
         lastAttackDirection=0;lastDirectionCheck=0;
         reload_legacy_ballboys(renderer);
@@ -396,7 +433,17 @@ static bool assign_mascot_placement(void* object, MascotFrameContext& frame)
     prepare_prototypes(prototypes,prototypeCount);
     const size_t changes = repositionMascot ? mascot_assign_one((unsigned char*)records,count,selectedSlot,reservedAppearance) :
         mascot_assign_none((unsigned char*)records,count,reservedAppearance);
-    if (repositionMascot) memcpy((void*)(records + selectedSlot * 0x50 + 0x20), targetPosition, sizeof(targetPosition));
+    if (repositionMascot) {
+        auto* record=(unsigned char*)(records+selectedSlot*0x50);
+        mascot_store_position(record,targetPosition);
+        if(mascot_use_world_position(record)){
+            static DWORD lastModeLog=0;
+            if(!lastModeLog||tick-lastModeLog>=5000){
+                lastModeLog=tick;
+                log_event("native_world_position selection_detached original_mode=%u type=%u index=%zu",(unsigned)originalPlacementMode,appearanceType,selectedSlot);
+            }
+        }
+    }
     if (changes) log_event("appearance_assignment mode=corner mascot_slots=1 normal_slots=%zu changed=%zu",
         count - 1, changes);
     frame = {renderer, records, count, selectedSlot, home, stadium, light, cold,
@@ -404,24 +451,155 @@ static bool assign_mascot_placement(void* object, MascotFrameContext& frame)
     return true;
 }
 
+// A partially built scene must not expose a reserved mascot appearance at
+// the native temporary origin. Every vector is reread and independently owned.
+static size_t hide_unplaced_reserved_appearances(uintptr_t renderer)
+{
+    size_t hidden=0;
+    for(unsigned int i=0;i<mascotPlacementTypeCount;++i){
+        const unsigned int type=mascotPlacementTypes[i];
+        const unsigned char reserved=(unsigned char)mascot_reserved_appearance(type);
+        uintptr_t prototypes=0,records=0;size_t prototypeCount=0,count=0;
+        if(!vector_bounds(renderer+0x30*(type+1),8,prototypes,prototypeCount)||
+           prototypeCount!=(size_t)reserved+1||
+           !vector_bounds(renderer+0x30*(type+0x2f),0x50,records,count))continue;
+        uintptr_t prototype=0;uint16_t actualType=0,variation=0;
+        if(!get(prototypes+(size_t)reserved*8,prototype)||
+           !get(prototype+12,actualType)||actualType!=type||
+           !get(prototype+14,variation)||variation!=reserved)continue;
+        hidden+=mascot_assign_none((unsigned char*)records,count,reserved);
+    }
+    return hidden;
+}
+
 static void __fastcall selection_hook(void* renderer)
 {
     originalSelect(renderer);
+    if(InterlockedCompareExchange(&sceneBusy,1,0)){
+        if(InterlockedIncrement(&sceneContentions)==1)log_event("scene_callback_overlap_or_reentry observed");
+        return;
+    }
     /* BEFORE 43a8bf0 resolves prototypes and builds its GPU draw list. */
     MascotFrameContext frame{};
+    mascotBuildSnapshot={};
     __try {
-        if (assign_mascot_placement(renderer, frame)) { mascot_animate_instance(frame); publish_scene_camera(frame); }
-        else { mascotWalkRuntime={};mascotNativeClock={};mascot_unbind_pose(0,0,0); mascot_set_animation_active(false,-1); }
+    __try {
+        if(startupRecovery.poll(image,GetTickCount64())){
+            // Defer all pointer writes to the normal ownership validation below.
+            luaSetupComplete=false;nextLuaRetry=0;lastIdentityCheck=0;lastDirectionCheck=0;
+            log_event("startup_reinforcement attempt=%u window_ms=6000",startupRecovery.recovery.attempts);
+        }
+        if(startupRecovery.take_timeout())log_event("startup_reinforcement timeout pending_native_binding_or_position");
+        if (assign_mascot_placement(renderer, frame)) {
+            mascot_animate_instance(frame);
+            publish_scene_camera(frame);
+            if(frame.mascotActive&&frame.selected<frame.count){
+                mascotBuildSnapshot={frame.renderer,frame.records,frame.count,frame.selected,
+                    frame.appearanceType,frame.generation,GetTickCount64(),{}};
+                memcpy(mascotBuildSnapshot.position,(void*)(frame.records+frame.selected*0x50+0x20),sizeof(mascotBuildSnapshot.position));
+            }
+            if(startupRecovery.recovery.pending){
+                float position[3]{},stored[3]{};unsigned char appearance=0;
+                uint16_t binding=0xffff;
+                const bool ownsPosition=frame.mascotActive&&frame.selected<frame.count&&
+                    readable(frame.records+frame.selected*0x50+0x20,0x1c);
+                if(ownsPosition){
+                    memcpy(position,(void*)(frame.records+frame.selected*0x50+0x20),sizeof(position));
+                    memcpy(stored,(void*)(frame.records+frame.selected*0x50+0x30),sizeof(stored));
+                }
+                const bool positioned=ownsPosition&&
+                    get(frame.records+frame.selected*0x50+0x42,appearance)&&
+                    get(frame.records+frame.selected*0x50+0x40,binding)&&binding!=0xffff&&
+                    appearance==mascot_reserved_appearance(frame.appearanceType)&&
+                    *(unsigned char*)(frame.records+frame.selected*0x50+0x43)<2&&
+                    isfinite(position[0])&&fabsf(position[0])>=5800&&fabsf(position[0])<=6000&&same_position(position,stored);
+                if(startupRecovery.confirm(positioned&&(!frame.packageAnimated||mascotAnimationBound)))
+                    log_event("startup_reinforcement confirmed native_binding_and_goal_line_position history_synced=1 current=%g,%g,%g stored=%g,%g,%g",
+                        position[0],position[1],position[2],stored[0],stored[1],stored[2]);
+            }
+        }
+        else {
+            const size_t hidden=hide_unplaced_reserved_appearances((uintptr_t)renderer);
+            if(hidden){
+                static DWORD lastHiddenLog=0;const DWORD tick=GetTickCount();
+                if(!lastHiddenLog||tick-lastHiddenLog>=5000){lastHiddenLog=tick;log_event("reserved_appearance_deferred count=%zu pending_valid_placement",hidden);}
+            }
+            mascotWalkRuntime={};mascotNativeClock={};mascot_unbind_pose(0,0,0);mascot_set_animation_active(false,-1);
+        }
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {
         // A failed scene lookup supplies no ownership proof for old pointers.
         // Forget them; never write through them during exception recovery.
         mascotWalkRuntime={};mascotNativeClock={};mascot_unbind_pose(0,0,0); mascot_set_animation_active(false,-1);
+        luaSetupComplete=false;
         static DWORD lastFaultLog; const DWORD tick=GetTickCount();
         if (!lastFaultLog || tick-lastFaultLog>=1000) {
             lastFaultLog=tick; log_event("assignment_fault; no further writes this frame");
         }
     }
+    } __finally { InterlockedExchange(&sceneBusy,0); }
+}
+
+// Entrance's already chained native builder calls this optional bridge just
+// before 43a8bf0, after presentation updates. It never loads resources or
+// chooses another actor, and revalidates the snapshot's exact current vector.
+static bool mascot_build_record(void* renderer,unsigned char*& record) {
+    const MascotBuildSnapshot& s=mascotBuildSnapshot;
+    uintptr_t records=0,prototypes=0;size_t count=0,prototypeCount=0;
+    if(!s.renderer||s.renderer!=(uintptr_t)renderer||s.generation!=mascotPlacementGeneration||
+       GetTickCount64()-s.tick>2000||s.type>=23||s.index>=s.count||!repositionMascot||
+       !vector_bounds(s.renderer+0x30*(s.type+0x2f),0x50,records,count)||records!=s.records||count!=s.count||
+       !vector_bounds(s.renderer+0x30*(s.type+1),8,prototypes,prototypeCount)||
+       prototypeCount!=(size_t)mascot_reserved_appearance(s.type)+1)return false;
+    uintptr_t prototype=0;uint16_t type=0,variation=0;
+    if(!get(prototypes+(prototypeCount-1)*8,prototype)||!get(prototype+12,type)||type!=s.type||
+       !get(prototype+14,variation)||variation!=mascot_reserved_appearance(s.type))return false;
+    record=(unsigned char*)(records+s.index*0x50);
+    return record[0x42]==mascot_reserved_appearance(s.type);
+}
+extern "C" __declspec(dllexport) uintptr_t WINAPI Fifa16MascotBeforeNativeBuild(void* renderer) {
+    if(InterlockedCompareExchange(&sceneBusy,1,0))return 0;
+    uintptr_t token=0;
+    __try {
+        __try {
+            unsigned char* record=nullptr;
+            if(mascot_build_record(renderer,record)){
+                const unsigned char incomingMode=record[0x43];
+                float incoming[3];memcpy(incoming,record+0x20,sizeof(incoming));
+                if(incomingMode>=2)originalPlacementMode=incomingMode;
+                const bool detached=mascot_use_world_position(record);
+                mascot_store_position(record,mascotBuildSnapshot.position);
+                if(mascotAnimationBound && *(uint16_t*)(record+0x40)==mascotPrivateSlot)
+                    mascot_control_native_motion(record,mascotNativeMotion);
+                const uint64_t now=GetTickCount64();
+                mascotBuildLogPending=now>=mascotBuildNextLog;
+                if(mascotBuildLogPending){
+                    mascotBuildNextLog=now+5000;
+                    log_event("native_build_position before type=%u index=%zu incoming_mode=%u mode=%u detached=%u incoming=%g,%g,%g target=%g,%g,%g binding=%u",
+                        mascotBuildSnapshot.type,mascotBuildSnapshot.index,(unsigned)incomingMode,(unsigned)record[0x43],(unsigned)detached,
+                        incoming[0],incoming[1],incoming[2],mascotBuildSnapshot.position[0],mascotBuildSnapshot.position[1],mascotBuildSnapshot.position[2],(unsigned)*(uint16_t*)(record+0x40));
+                }
+                token=++mascotBuildToken;if(!token)token=++mascotBuildToken;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER){mascotBuildSnapshot={};}
+    } __finally {InterlockedExchange(&sceneBusy,0);}
+    return token;
+}
+extern "C" __declspec(dllexport) void WINAPI Fifa16MascotAfterNativeBuild(void* renderer,uintptr_t token) {
+    if(!token||token!=mascotBuildToken||InterlockedCompareExchange(&sceneBusy,1,0))return;
+    __try {
+        __try {
+            unsigned char* record=nullptr;
+            if(mascotBuildLogPending&&mascot_build_record(renderer,record)){
+                float current[3],stored[3];memcpy(current,record+0x20,sizeof(current));memcpy(stored,record+0x30,sizeof(stored));
+                log_event("native_build_position after type=%u index=%zu mode=%u binding=%u current=%g,%g,%g stored=%g,%g,%g origin_branch=%u",
+                    mascotBuildSnapshot.type,mascotBuildSnapshot.index,(unsigned)record[0x43],(unsigned)*(uint16_t*)(record+0x40),
+                    current[0],current[1],current[2],stored[0],stored[1],stored[2],(unsigned)(record[0x43]>=2));
+            }
+            mascotBuildLogPending=false;
+            mascotBuildSnapshot={};
+        } __except(EXCEPTION_EXECUTE_HANDLER){mascotBuildLogPending=false;}
+    } __finally {InterlockedExchange(&sceneBusy,0);}
 }
 
 static void* allocate_near(uintptr_t origin)
@@ -546,14 +724,16 @@ static DWORD WINAPI worker(void*)
         HANDLE animationThread=CreateThread(nullptr,0,mascot_animation_worker,nullptr,0,nullptr);
         if (animationThread) CloseHandle(animationThread);
         else log_event("animation_score_watcher not_started thread_creation_failed");
-        log_event("installed version=26 mode=contact_driven_locomotion hook=43ac0f1 crowd_hook=0 placement_types=1,18,0,22 resource_refresh=1 startup_retry=1 legacy_ballboys=normal missing_package_guard=1 celebration_engine_ms=15000 performance_revision=2 identity_poll_ms=250 lua_scan_per_frame=0 dynamic_club_packages=1 seated_pose_guard=1 approved_clips_only=1 turn_before_walk=1 yaw_private_palette=1 idle_blend_ms=450 ground_smoothing_ms=80 restart_session_worker=1 no_consecutive_position_repeat=1 stale_scene_restore=0 waypoint_dwell_seconds=30 waypoint_policy=local_least_recent waypoint_max_travel_cm=600 waypoint_interaction_seconds=15 goal_variants=6 support_variants=3 replay_clock=GameStateInterface replay_history_frames=8192 waypoint_applause_separate=1");
+        log_event("startup_reinforcement enabled window_ms=6000 max_attempts=3 first_checkpoint_ms=500");
+        log_event("native_position_history enabled current_offset=20 stored_offset=30 ownership_restore=1");
+        log_event("native_world_position enabled mode_offset=43 origin_modes=2,3 restore_original_mode=1 native_build_bridge=1");
+        log_event("installed version=35 native_motion_gate=owned_actor gaze=head_pitch_focus fade_ms=250 head_only=1 celebration_heading=pitch body_axis_alignment=all_clips visual_forward=asset_body_axis walk_heading=travel idle_heading=pitch mode=contact_driven_locomotion hook=43ac0f1 crowd_hook=0 placement_types=1,18,0,22 resource_refresh=0 startup_retry=1 lua_scene_retry=1 wrapper_once=1 legacy_ballboys=normal missing_package_guard=1 celebration_engine_ms=15000 performance_revision=2 identity_poll_ms=250 lua_scan_per_frame=0 dynamic_club_packages=1 seated_pose_guard=1 approved_clips_only=1 turn_before_walk=1 yaw_private_palette=1 idle_blend_ms=450 ground_smoothing_ms=80 restart_session_worker=1 no_consecutive_position_repeat=1 stale_scene_restore=0 waypoint_dwell_seconds=30 waypoint_policy=local_least_recent waypoint_max_travel_cm=600 waypoint_interaction_seconds=15 goal_variants=7 support_variants=6 replay_clock=GameStateInterface replay_history_frames=8192 waypoint_applause_separate=1 bind_source=club_rx3 renderer_bind_compensated=1");
         return 0;
     }
     log_event("not_installed unsupported_or_conflicting_native_code"); return 4;
 }
 
 extern "C" __declspec(dllexport) unsigned int WINAPI Fifa16ModGetApiVersion() { return 1; }
-extern "C" __declspec(dllexport) unsigned int WINAPI Fifa16ModMatchPresentationVersion() { return 1; }
 extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModSetPriorPlacement(const void* input)
 {
     PriorPlacement value;
@@ -574,8 +754,6 @@ extern "C" __declspec(dllexport) BOOL WINAPI Fifa16ModStart(const char* modsRoot
     wchar_t* separator=wcsrchr(gameDirectory,L'\\');
     if (!separator) return FALSE;
     *separator=0;
-    if (!presentationConfig.initialize()) return FALSE;
-    log_event("match_presentation_config mascots=%u poll_ms=250",(unsigned int)presentationConfig.read(GetTickCount()).mascots);
     update_packages();
     image = (uintptr_t)GetModuleHandleW(nullptr);
     HMODULE pinned;

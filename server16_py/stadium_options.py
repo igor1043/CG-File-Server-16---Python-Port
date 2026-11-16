@@ -30,7 +30,8 @@ def publish_refresh(app,entry):
     root=Path(app.exedir)/RUNTIME;root.mkdir(parents=True,exist_ok=True)
     text='schema=1\npid='+entry['pid']+'\ncreated='+entry['created']+'\nentry_tick='+entry['captured_tick']+'\n'
     revision=hashlib.sha256((text+str(time.time_ns())).encode()).hexdigest();text+='revision='+revision+'\n'
-    path=root/'refresh.tsv';temp=path.with_suffix('.tsv.new');temp.write_text(text,encoding='ascii');os.replace(temp,path)
+    from .file_tools import replace_asset_file
+    path=root/'refresh.tsv';temp=path.with_suffix('.tsv.new');temp.write_text(text,encoding='ascii');replace_asset_file(temp,path)
 
 def poll_native_options(service,page,pid):
     app=service.app;root=service.root/RUNTIME

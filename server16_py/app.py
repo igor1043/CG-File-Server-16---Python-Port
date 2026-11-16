@@ -170,6 +170,8 @@ class Server16App(tk.Tk):
         self.derby = ""
         self.tvlogoscoreboardtype = "default"
         self._last_runtime_signature = None
+        self._last_applied_runtime_signature = None
+        self._runtime_retry_at = 0.0
         self._last_context_error = None
         self._closing = False
         self._poll_job = None
@@ -3628,7 +3630,6 @@ class Server16App(tk.Tk):
         sceneassets = self.exedir / "data" / "sceneassets"
         ensure_server16_stadium_access(sceneassets, log=self.log)
         copy(self.exedir / "FSW" / "stadium", sceneassets)
-        ensure_server16_stadium_access(sceneassets, log=self.log)
         self._stadium_assets_native=True
         copy(self.exedir / "FSW" / "TVLogo", self.TVdata)
         copy(self.exedir / "FSW" / "ScoreBoard", self.Scoredata / "game")
@@ -3892,6 +3893,8 @@ class Server16App(tk.Tk):
         self.derby = ""
         self.StadName = ""
         self._last_runtime_signature = None
+        self._last_applied_runtime_signature = None
+        self._runtime_retry_at = 0.0
         self._last_live_score = (0, 0)
         self._last_score_snapshot = (0, 0)
         self._last_chants_score_snapshot = None
@@ -4055,8 +4058,18 @@ class Server16App(tk.Tk):
                 f"Live context updated page={page_name} HID={self.HID or '-'} AID={self.AID or '-'} "
                 f"TOUR={self.TOURNAME or '-'} ROUND={self.TOURROUNDID or '-'} STAD={self.STADID or '-'}"
             )
-            if self._should_auto_apply_runtime(page_name):
-                self.apply_all_runtime()
+        # Observing the fixture on SelectTeam, waiting for cleanup, or a failed
+        # module is not a successful application. Retry the same fixture when
+        # it becomes ready, without re-rolling an already prepared stadium.
+        if (self._should_auto_apply_runtime(page_name)
+                and signature != getattr(self, '_last_applied_runtime_signature', None)
+                and self.HID not in {'', '0', '4294967295'}
+                and self.AID not in {'', '0', '4294967295'}
+                and time.monotonic() >= getattr(self, '_runtime_retry_at', 0.0)):
+            if self.apply_all_runtime() is not False:
+                self._last_applied_runtime_signature = signature
+            else:
+                self._runtime_retry_at = time.monotonic() + 2.0
 
     def _try_read_context_int(self, trace_name: str, static_ptr: int, offsets: list[int], page_name: str) -> str | None:
         try:
@@ -4065,7 +4078,16 @@ class Server16App(tk.Tk):
             return value
         except MemoryAccessError as exc:
             message = f"Context not ready for page '{page_name}' [{trace_name}]: {exc}"
-            if message != self._last_context_error:
+            errors = getattr(self, '_context_error_log_at', None)
+            if errors is None:
+                errors = self._context_error_log_at = {}
+            key = (trace_name, page_name)
+            previous = errors.get(key)
+            now = time.monotonic()
+            if previous is None or previous[0] != message or now - previous[1] >= 10:
+                if len(errors) >= 32:
+                    errors.clear()
+                errors[key] = (message, now)
                 self._last_context_error = message
                 self.log(message)
                 self._log_pointer_debug()
@@ -4264,21 +4286,31 @@ class Server16App(tk.Tk):
             except Exception as exc:
                 self.log(f"Pointer trace {name} failed", exc, exc_info=sys.exc_info())
 
-    def apply_all_runtime(self) -> None:
+    def apply_all_runtime(self) -> bool:
         self.log(f"Applying runtime HID={self.HID} AID={self.AID} TOUR={self.TOURNAME} ROUND={self.TOURROUNDID} STAD={self.STADID}")
         self._set_progress(5, "Applying runtime")
         self.entrance_props_runtime.prepare_match()
-        if self.module_enabled("Stadium"):
-            self.apply_stadium_runtime()
+        steps = []
+        if self.module_enabled('Stadium'):
+            steps.append(('stadium', self.apply_stadium_runtime))
         else:
             self._set_display("stadium", "Stadium Module Disable")
             # Clear stadium from previous match when module is disabled
             self.curstad = ""
             self.ScoreboardStadName = ""
-        self.apply_scoreboard_runtime()
-        self.apply_movie_runtime()
-        if not self._stadium_task_running:
+        steps.extend((('scoreboard', self.apply_scoreboard_runtime), ('movie', self.apply_movie_runtime)))
+        failures = []
+        for name, apply in steps:
+            try:
+                apply()
+            except Exception as exc:
+                failures.append(name)
+                self.log(f'Match asset module failed ({name}); remaining modules will continue', exc)
+        if failures:
+            self._set_progress(100, 'Falha ao aplicar: ' + ', '.join(failures))
+        elif not self._stadium_task_running:
             self._set_progress(100, "Runtime ready")
+        return not failures
 
     def apply_stadium_runtime(self) -> None:
         self.stadium_runtime.apply_stadium_runtime()
