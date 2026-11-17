@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release": "Server16 0.2.34 / FIFA Friends V12 / 2026-11-17",
+  "release": "Server16 0.2.35 / FIFA Friends V12 / 2026-11-17",
   "note": "Observed difference is not proof of fault; native/index references may vary with other installed mods. User preferences are not compared.",
   "files": [
     {
@@ -71,8 +71,8 @@
     },
     {
       "path": "ModCarrerMode/mods/kickoff_modern/kickoff_modern.dll",
-      "bytes": 189440,
-      "sha256": "fe61edde0fb5e30403d7714351b0bcdc3c5197609079c95b57efe45369775407",
+      "bytes": 187392,
+      "sha256": "ae124bf1b6a82fd90eb0c929e9b26ed0eb4bee6c3d1678648d74a853f44bb004",
       "role": "release"
     },
     {

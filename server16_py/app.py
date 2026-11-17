@@ -690,6 +690,26 @@ class Server16App(tk.Tk):
         style.configure("TLabel", background=self.bg, foreground=self.fg)
         style.configure("TButton", background=self.panel_alt, foreground=self.fg, padding=8, borderwidth=0)
         style.map("TButton", background=[("active", "#2b3442")])
+        style.configure(
+            "LaunchGame.TButton",
+            background=self.gold,
+            foreground=self.bg,
+            font=("Bahnschrift", 10, "bold"),
+            padding=(14, 8),
+            borderwidth=1,
+            bordercolor=self.gold,
+            lightcolor=self.gold,
+            darkcolor=self.gold,
+            focuscolor=self.bg,
+        )
+        style.map(
+            "LaunchGame.TButton",
+            background=[("disabled", self.panel_alt), ("pressed", "#dba457"), ("active", "#ffd694")],
+            foreground=[("disabled", self.muted), ("!disabled", self.bg)],
+            bordercolor=[("disabled", self.panel_alt), ("focus", "#fff0d8"), ("active", "#ffd694")],
+            lightcolor=[("disabled", self.panel_alt), ("pressed", "#dba457"), ("active", "#ffd694")],
+            darkcolor=[("disabled", self.panel_alt), ("pressed", "#dba457"), ("active", "#ffd694")],
+        )
         style.configure("TCheckbutton", background=self.bg, foreground=self.fg)
         style.configure(
             "Server16.TEntry",
@@ -936,7 +956,7 @@ class Server16App(tk.Tk):
         self.start_overlay_button.pack(side="left")
         self.locate_fifa_button = ttk.Button(top, text=self.tr("button.locate_fifa_exe"), command=self.select_fifa_exe)
         self.locate_fifa_button.pack(side="left", padx=6)
-        self.launch_fifa_button = ttk.Button(top, text=self.tr("button.launch_fifa"), command=self.launch_fifa)
+        self.launch_fifa_button = ttk.Button(top, text=self.tr("button.launch_fifa"), command=self.launch_fifa, style="LaunchGame.TButton")
         self.launch_fifa_button.pack(side="left", padx=6)
         self.assign_scoreboard_button = ttk.Button(top, text=self.tr("button.assign_scoreboard"), command=self.assign_scoreboard)
         self.assign_scoreboard_button.pack(side="left", padx=6)
