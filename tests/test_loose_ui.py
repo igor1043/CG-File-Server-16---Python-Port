@@ -1,7 +1,7 @@
 import struct,tempfile,unittest
 from unittest.mock import patch
 from pathlib import Path
-from server16_py.loose_ui import activate,PANORAMA_TARGETS,TARGETS
+from server16_py.loose_ui import activate,plans,bh_hash,PANORAMA_TARGETS,TARGETS
 
 class LooseUITest(unittest.TestCase):
     def test_panorama_scope_includes_both_navigation_routes(self):
@@ -25,7 +25,7 @@ class LooseUITest(unittest.TestCase):
         names=['unrelated',name,'also/unrelated'];directory=b'';records=b''
         for i,value in enumerate(names):
             directory+=struct.pack('>II',512+i*16,16)+value.encode()+b'\0'
-            records+=struct.pack('>IIIQ',512+i*16,16,i,0x12345678+i)
+            records+=struct.pack('>IIIQ',512+i*16,16,0,bh_hash(value))
         archive=b'BIG4'+struct.pack('<I',560)+struct.pack('>II',3,16+len(directory))+directory
         (game/'data_front_end.big').write_bytes(archive+bytes(560-len(archive)))
         before=b'ViV4'+struct.pack('<I',76)+struct.pack('>II',3,76)+records
@@ -39,11 +39,42 @@ class LooseUITest(unittest.TestCase):
             self.assertEqual(next((game/'ModCarrerMode/backups').glob('*/data_front_end.bh')).read_bytes(),before)
             self.assertEqual(activate(game)['changed'],0)
             self.assertEqual(activate(game,True,targets={'unrelated/missing'})['entries'],0)
-    def test_mismatched_order_has_no_writes(self):
+    def test_stale_offsets_are_repaired_using_names_and_backed_up(self):
         with tempfile.TemporaryDirectory() as temp:
             game=Path(temp);index,before=self.fixture(game);bad=bytearray(before);struct.pack_into('>I',bad,16,999);index.write_bytes(bad)
-            with self.assertRaises(ValueError):activate(game)
+            self.assertEqual(activate(game)['changed'],1)
+            self.assertEqual(index.read_bytes(),before[:48]+bytes(8)+before[56:])
+            self.assertEqual(next((game/'ModCarrerMode/backups').glob('*/data_front_end.bh')).read_bytes(),bad)
+    def test_reordered_records_preserve_all_loose_file_releases(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp);index,before=self.fixture(game);bad=bytearray(before)
+            bad[28:36]=bytes(8) # unrelated mod release, not owned by this UI
+            bad[16:]=bad[56:76]+bad[36:56]+bad[16:36];index.write_bytes(bad)
+            self.assertEqual(activate(game)['changed'],1)
+            expected=bytearray(before);expected[28:36]=bytes(8);expected[48:56]=bytes(8)
+            self.assertEqual(index.read_bytes(),expected)
+            self.assertEqual(activate(game)['changed'],0)
+    def test_foreign_names_duplicate_hashes_and_corrupt_big_do_not_write(self):
+        for kind in ('foreign','duplicate','big_bounds'):
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as temp:
+                game=Path(temp);index,before=self.fixture(game);bad=bytearray(before)
+                if kind=='foreign':struct.pack_into('>Q',bad,28,bh_hash('other/archive/file'))
+                if kind=='duplicate':bad[28:36]=bad[48:56]
+                if kind=='big_bounds':
+                    archive=game/'data_front_end.big';raw=bytearray(archive.read_bytes());struct.pack_into('>I',raw,16,999);archive.write_bytes(raw)
+                index.write_bytes(bad)
+                with self.assertRaises(ValueError):activate(game)
+                self.assertEqual(index.read_bytes(),bad)
+                self.assertFalse((game/'ModCarrerMode/backups').exists())
+    def test_pending_repair_waits_for_fifa_to_close(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game=Path(temp);index,before=self.fixture(game);bad=bytearray(before);struct.pack_into('>I',bad,16,999);index.write_bytes(bad)
+            task=type('Task',(),{'info':{'name':'fifa16.exe','exe':str(game/'fifa16.exe')}})()
+            with patch('psutil.process_iter',return_value=[task]):self.assertEqual(activate(game)['status'],'restart_required')
             self.assertEqual(index.read_bytes(),bad)
+    def test_hash_matches_fifa_sdk(self):
+        self.assertEqual(bh_hash('data/ui/artassets/clubtrophies/trophy_0.big'),12871640251724636956)
+        self.assertEqual(bh_hash('data/ui/game/screens/misc/stadiumpan.big'),14339422075042945079)
     def test_manager_preferences_loose_payload_takes_priority_without_replacing_archive(self):
         with tempfile.TemporaryDirectory() as temp:
             game=Path(temp);index,before=self.fixture(game,'data/ui/game/screens/career/managerpreferences.big')

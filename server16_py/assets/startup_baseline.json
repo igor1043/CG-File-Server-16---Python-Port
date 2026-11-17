@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "release": "Server16 0.2.33 / FIFA Friends V12 / 2026-11-16",
+  "release": "Server16 0.2.34 / FIFA Friends V12 / 2026-11-17",
   "note": "Observed difference is not proof of fault; native/index references may vary with other installed mods. User preferences are not compared.",
   "files": [
     {
@@ -65,14 +65,14 @@
     },
     {
       "path": "ModCarrerMode/mods/goal_kick_short_pass/goal_kick_short_pass.dll",
-      "bytes": 264704,
-      "sha256": "c41f163c77f645bcef3a2ec3fb7569f471e1075e63f43d43138697da35c1062f",
+      "bytes": 265728,
+      "sha256": "ef11c32b7d2dd6dd064c20a92eeca834c7425092fd1237bc0c0999afa4b7a819",
       "role": "release"
     },
     {
       "path": "ModCarrerMode/mods/kickoff_modern/kickoff_modern.dll",
-      "bytes": 187392,
-      "sha256": "ae124bf1b6a82fd90eb0c929e9b26ed0eb4bee6c3d1678648d74a853f44bb004",
+      "bytes": 189440,
+      "sha256": "fe61edde0fb5e30403d7714351b0bcdc3c5197609079c95b57efe45369775407",
       "role": "release"
     },
     {
